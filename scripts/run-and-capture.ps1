@@ -4,8 +4,12 @@ param(
     [string]$Seconds = '10,25,45',
     [string]$Keys = '',
     [string]$ExtraArgs = '',
+    # "sec:duration" - record frame times with PresentMon (tools path below) starting at that second.
+    [string]$PresentMonAt = '',
+    [string]$PresentMon = 'C:\personal\tools\presentmon\PresentMon-2.6.0-x64.exe',
     [string]$OutDir = 'out/shots',
-    [string]$GameRoot = 'C:\personal\gow2-gamedata\retail'
+    [string]$GameRoot = 'C:\personal\gow2-gamedata\retail',
+    [string]$Exe = 'out/build/release/gow2.exe'
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -52,7 +56,7 @@ function Send-Key([System.Diagnostics.Process]$proc, [string]$name, [int]$holdMs
 New-Item -ItemType Directory -Force -Path $OutDir, 'out/runs' | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $log = Join-Path $root "out/runs/capture-$stamp.log"
-$exe = Join-Path $root 'out/build/release/gow2.exe'
+$exe = if ([System.IO.Path]::IsPathRooted($Exe)) { $Exe } else { Join-Path $root $Exe }
 $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru `
     -ArgumentList (@("--game_data_root=`"$GameRoot`"", "--log_file=`"$log`"") + ($ExtraArgs -split ' ' | Where-Object { $_ }))
 $start = Get-Date
@@ -71,11 +75,23 @@ function Send-MouseMove([System.Diagnostics.Process]$proc, [int]$dx, [int]$dy) {
     Write-Output "moved mouse $dx,$dy"
 }
 
+function Start-FrameCapture([string]$csv, [int]$seconds) {
+    if (-not (Test-Path $PresentMon)) { Write-Output "PresentMon not found: $PresentMon"; return }
+    Start-Process -FilePath $PresentMon -WindowStyle Hidden -ArgumentList @(
+        '--process_name', 'gow2.exe', '--output_file', "`"$csv`"", '--timed', "$seconds",
+        '--terminate_after_timed', '--no_console_stats', '--v2_metrics') | Out-Null
+    Write-Output "frame capture -> $csv (${seconds}s)"
+}
+
 # Keys: "sec:Key", "sec:Key:holdMs" or "sec:Mouse:dx:dy".
 $events += $Keys -split ',' | Where-Object { $_ } | ForEach-Object {
     $p = $_ -split ':'
     if ($p[1] -eq 'Mouse') { [pscustomobject]@{ At = [int]$p[0]; Key = 'Mouse'; Dx = [int]$p[2]; Dy = [int]$p[3] } }
     else { [pscustomobject]@{ At = [int]$p[0]; Key = $p[1]; Hold = $(if ($p.Count -gt 2) { [int]$p[2] } else { 120 }) } }
+}
+if ($PresentMonAt) {
+    $p = $PresentMonAt -split ':'
+    $events += [pscustomobject]@{ At = [int]$p[0]; Key = 'PresentMon'; Duration = [int]$p[1] }
 }
 foreach ($e in ($events | Sort-Object At)) {
     while (((Get-Date) - $start).TotalSeconds -lt $e.At) {
@@ -83,7 +99,8 @@ foreach ($e in ($events | Sort-Object At)) {
         Start-Sleep -Milliseconds 250
     }
     if ($proc.HasExited) { Write-Output "process exited with code $($proc.ExitCode) before $($e.At)s"; break }
-    if ($e.Key -eq 'Mouse') { Send-MouseMove $proc $e.Dx $e.Dy } elseif ($e.Key) { Send-Key $proc $e.Key $e.Hold } else { Save-WindowShot $proc (Join-Path $OutDir "shot-$stamp-$($e.At)s.png") }
+    if ($e.Key -eq 'PresentMon') { Start-FrameCapture (Join-Path $root "out/perf/frames-$stamp.csv") $e.Duration }
+    elseif ($e.Key -eq 'Mouse') { Send-MouseMove $proc $e.Dx $e.Dy } elseif ($e.Key) { Send-Key $proc $e.Key $e.Hold } else { Save-WindowShot $proc (Join-Path $OutDir "shot-$stamp-$($e.At)s.png") }
 }
 if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
 Write-Output "log: $log"
