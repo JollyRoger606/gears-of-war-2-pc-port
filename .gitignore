@@ -4,3 +4,5 @@ out/
 build/
 *.xex
 *.iso
+pytest-of-*/
+__pycache__/

@@ -20,6 +20,13 @@ add_executable(gow2 WIN32 ${GOW2_SOURCES})
 
 rexglue_setup_target(gow2 GPU_PLUGINS xenos)
 
+# SDL's gamepad mapping database; the input driver looks for it in the working directory.
+add_custom_command(TARGET gow2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/gamecontrollerdb.txt
+            $<TARGET_FILE_DIR:gow2>/gamecontrollerdb.txt
+    COMMENT "Installing gamecontrollerdb.txt beside gow2.exe")
+
 # Post-codegen patchers. Each rewrites the generated sources before they are compiled, chained
 # by stamps because they edit the same files.
 #   switchtrap  jump tables codegen under-counted and unresolved branches: dispatch at runtime

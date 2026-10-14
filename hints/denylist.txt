@@ -1,0 +1,17 @@
+# Addresses tools/harvest_hints.py must never emit: hints here split an existing function
+# (codegen then reports unresolved branches across the split). One address per line.
+0x82306050
+0x829A8824
+0x829CF44C
+0x82A56A90
+0x82A972B0
+0x82A9EEC8
+0x82AA5F60
+0x82C174AC
+0x82C37D6C
+0x82CA6034
+0x82CD60B4
+0x82CD6C18
+0x82F559A8
+0x82F56A7C
+0x82306030

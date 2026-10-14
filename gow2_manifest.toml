@@ -8,7 +8,7 @@ game_root = "game"
 [entrypoint]
 file_path = "game/default.xex"
 out_directory_path = "generated/default"
-includes = []
+includes = ["hints/harvested.toml", "hints/runtime.toml"]  # tools/harvest_hints.py output, scripts/run-harvest-loop.sh output
 
 # Function entry hints: addresses automatic function discovery misses.
 [entrypoint.functions]
@@ -26,3 +26,6 @@ includes = []
 0x82B3EB88 = { parent = 0x82B3E728 }
 0x82B64C9C = { parent = 0x82B64840 }
 0x82B8D6BC = { parent = 0x82B8D260 }
+
+# Found by running the game (FATAL: call to unregistered function).
+0x82362E98 = {}   # adjustor thunk (addi r3,r3,-68; b), reached from a vtable

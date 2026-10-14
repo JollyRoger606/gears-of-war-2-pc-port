@@ -15,6 +15,16 @@ Files in this repository derived from it:
 - `tools/patch_switch_traps.py` — copied from gears-judgement-recomp.
 - `tools/check_objects_fresh.py` — copied from gears-judgement-recomp.
 - `scripts/build.ps1` — adapted from its `scripts/build.ps1`.
+- `src/gow2_app.h` — WithXex, AppHome, ResolveContentRoot, SetIfUnset,
+  PickFastestAdapter, and OnConfigurePaths adapted from its `src/gowj_app.h`.
+- `config/gamecontrollerdb.txt` — copied from its `config/gamecontrollerdb.txt`.
+- `CMakeLists.txt` — gamecontrollerdb.txt install step adapted from its `CMakeLists.txt`.
+
+## SDL_GameControllerDB
+
+- Project: [mdqinc/SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB)
+- Description: community gamepad mapping database shipped as `config/gamecontrollerdb.txt`.
+- License: zlib.
 
 ## ReXGlue SDK
 
