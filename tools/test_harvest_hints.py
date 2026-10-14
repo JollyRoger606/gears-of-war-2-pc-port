@@ -246,3 +246,78 @@ def test_codeptr_register_mismatch_ignored(tmp_path: Path) -> None:
     img = tmp_path / "image"
     build_image(img, std_blocks(bytes(0x100), bytes(text)))
     assert hh.harvest_codeptr(hh.load_blocks(img)) == []
+
+
+def test_hint_fixpoint_owner_rule(tmp_path: Path) -> None:
+    import hint_fixpoint as hf
+
+    gen = tmp_path / "gen"
+    build_generated(gen, [0x82230368, 0x82230390], [])
+    hints = tmp_path / "hints.toml"
+    hints.write_text("[functions]\n0x82230390 = {}  # codeptr\n")
+    logf = tmp_path / "codegen.stdout"
+    logf.write_text("Unresolved conditional branch to 0x82230560 from 0x82230554\n")
+    pairs = hf.parse_unresolved(logf.read_text())
+    assert pairs == [(0x82230554, 0x82230560)]
+    assert hf.find_culprits(pairs, [0x82230390]) == {}
+    funcs = hf.load_registered(gen)
+    assert funcs == [0x82230368, 0x82230390]
+    assert hf.find_owner_culprits(pairs, {0x82230390}, funcs) == {
+        0x82230390: (0x82230554, 0x82230560)}
+    deny = tmp_path / "deny.txt"
+    deny.write_text("# denylist\n")
+    argv = ["--codegen-log", str(logf), "--hints", str(hints),
+           "--deny", str(deny), "--generated", str(gen)]
+    assert hf.main(argv) == 1
+    content = deny.read_text()
+    assert "0x82230390 # owns 0x82230554->0x82230560" in content
+    assert hf.main(argv) == 0
+    assert deny.read_text().count("0x82230390") == 1
+
+
+def test_inside_span_rejected(tmp_path: Path) -> None:
+    text = bytearray(0x100)
+    struct.pack_into(">II", text, 0x1C, 0x4E800020, 0x7C0802A6)
+    img, gen = tmp_path / "image", tmp_path / "gen"
+    build_image(img, std_blocks(bytes(0x100), bytes(text)))
+    build_generated(gen, [], [TEXT + 0x40])
+    blocks = hh.load_blocks(img)
+    spans = hh.load_spans(gen)
+    assert spans == [(TEXT, TEXT + 0x40)]
+    accepted, rejects = hh.classify(blocks, {TEXT + 0x20: {"codeptr"}}, set(), set(), spans=spans)
+    assert accepted == {}
+    assert rejects["inside_span"] == 1
+    accepted, _ = hh.classify(blocks, {TEXT + 0x20: {"pdata"}}, set(), set(), spans=spans)
+    assert TEXT + 0x20 in accepted
+
+
+def test_after_last_label_accepted(tmp_path: Path) -> None:
+    text = bytearray(0x100)
+    struct.pack_into(">II", text, 0x5C, 0x4E800020, 0x7C0802A6)
+    img, gen = tmp_path / "image", tmp_path / "gen"
+    build_image(img, std_blocks(bytes(0x100), bytes(text)))
+    build_generated(gen, [], [TEXT + 0x40])
+    blocks = hh.load_blocks(img)
+    spans = hh.load_spans(gen)
+    accepted, rejects = hh.classify(blocks, {TEXT + 0x60: {"codeptr"}}, set(), set(), spans=spans)
+    assert accepted == {TEXT + 0x60: {"codeptr"}}
+    assert rejects["inside_span"] == 0
+
+
+def test_sources_excluding_codeptr_drops_codeptr_only(tmp_path: Path) -> None:
+    assert hh.parse_args([]).sources == "thunk,pdata,datascan,codeptr,reloc"
+    text = bytearray(0x9000)
+    target = TEXT + 0x8040
+    struct.pack_into(">II", text, 0x10, _lis(3, 0x8223), _addi(4, 3, 0x8040))
+    struct.pack_into(">II", text, 0x803C, 0x4E800020, 0x7C0802A6)
+    img, gen = tmp_path / "image", tmp_path / "gen"
+    build_image(img, std_blocks(bytes(0x100), bytes(text)))
+    build_generated(gen, [], [])
+    out_all = tmp_path / "all.toml"
+    assert hh.main(["--image", str(img), "--generated", str(gen), "--out", str(out_all)]) == 0
+    assert f"0x{target:08X}" in out_all.read_text()
+    out_filtered = tmp_path / "nocodeptr.toml"
+    argv = ["--image", str(img), "--generated", str(gen), "--out", str(out_filtered),
+           "--sources", "thunk,pdata,datascan,reloc"]
+    assert hh.main(argv) == 0
+    assert f"0x{target:08X}" not in out_filtered.read_text()

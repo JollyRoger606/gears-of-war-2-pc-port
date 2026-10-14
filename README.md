@@ -11,15 +11,32 @@ project instead recompiles the complete retail game from the player's own disc.
 
 ## Status
 
-Early work in progress: code generation from the retail default.xex succeeds
-and the project is being brought up to boot. Not playable yet.
+Early work in progress. The retail `default.xex` recompiles, builds and boots on a
+Radeon RX 7800 XT: the game initializes its kernel, audio, file system and Direct3D 12,
+reaches the title screen and the main menu (keyboard: `--mnk_mode=true`, Enter = Start,
+Space = A), starts Solo Campaign, plays the campaign intro cinematic and reaches the
+level loading screen. Not playable yet: gameplay past the first load is untested.
 
 - [x] codegen of retail XEX
-- [ ] first successful build
-- [ ] boots to menus
-- [ ] campaign playable
+- [x] first successful build
+- [x] boots and plays the opening cinematic
+- [x] title screen and main menu
+- [x] Solo Campaign: intro cinematic and loading screen
+- [ ] first level playable
+- [ ] full campaign playable
 - [ ] keyboard & mouse
 - [ ] multiplayer/Horde
+
+### Finding the functions codegen misses
+
+`tools/harvest_hints.py` scans the decrypted image (exported from Ghidra with
+`tools/ghidra/ExportImage.java`) against a baseline codegen without hints
+(`scripts/codegen-baseline.sh`) and emits `hints/harvested.toml`: adjustor thunks,
+`.pdata` entries, code pointers stored in `.rdata`/`.data` and addresses built in code
+with `lis`+`addi`/`ori`. Hints that split an existing function are detected from the
+codegen log by `tools/hint_fixpoint.py` and kept out through `hints/denylist.txt`.
+Anything still missing is found at runtime by `scripts/run-harvest-loop.sh`
+(boot, read the "unregistered function" FATAL, add it to `hints/runtime.toml`, rebuild).
 
 ## You need your own copy
 

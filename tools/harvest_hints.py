@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Find guest entry points codegen missed and emit them as manifest hints.
 import argparse
+import bisect
 import re
 import struct
 import sys
@@ -9,7 +10,8 @@ from pathlib import Path
 
 BASE = 0x82000000
 SOURCE_ORDER = ("reloc", "thunk", "pdata", "datascan", "codeptr")  # spec example joins reloc before pdata
-REASONS = ("denied", "not_code", "registered", "label", "zero", "mid_function")
+REASONS = ("denied", "not_code", "registered", "label", "inside_span", "zero", "mid_function")
+DEFAULT_SOURCES = "thunk,pdata,datascan,codeptr,reloc"
 BLR = 0x4E800020
 BCTR = 0x4E800420
 
@@ -38,6 +40,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--out", default="hints/harvested.toml")
     p.add_argument("--report", default=None)
     p.add_argument("--deny", default="hints/denylist.txt")
+    p.add_argument("--sources", default=DEFAULT_SOURCES,
+                   help="comma list of sources that may produce accepted hints")
     return p.parse_args(argv)
 
 
@@ -71,6 +75,30 @@ def load_labels(generated: Path) -> set[int]:
     for f in sorted(generated.glob("*_recomp.*.cpp")):
         labels.update(int(m, 16) for m in re.findall(r"^loc_([0-9A-Fa-f]{8}):", f.read_text(), re.M))
     return labels
+
+
+def load_spans(generated: Path) -> list[tuple[int, int]]:
+    func_re = re.compile(r"DEFINE_REX_FUNC\(sub_([0-9A-Fa-f]+)\)")
+    spans: list[tuple[int, int]] = []
+    for f in sorted(generated.glob("*_recomp.*.cpp")):
+        text = f.read_text()
+        matches = list(func_re.finditer(text))
+        for i, m in enumerate(matches):
+            start = int(m.group(1), 16)
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            body = text[m.end():end]
+            labels = [int(x, 16) for x in re.findall(r"^loc_([0-9A-Fa-f]{8}):", body, re.M)]
+            if labels:
+                mx = max(labels)
+                if mx > start:
+                    spans.append((start, mx))
+    spans.sort()
+    return spans
+
+
+def is_inside_span(spans: list[tuple[int, int]], starts: list[int], addr: int) -> bool:
+    i = bisect.bisect_left(starts, addr) - 1
+    return i >= 0 and addr <= spans[i][1]
 
 
 def reloc_headers_ok(data: bytes, endian: str) -> bool:
@@ -239,11 +267,18 @@ def load_denylist(path: Path) -> set[int]:
 
 def classify(blocks: list[Block], cands: dict[int, set[str]],
              registered: set[int], labels: set[int],
-             denied: set[int] | None = None) -> tuple[dict[int, set[str]], dict[str, int]]:
+             denied: set[int] | None = None,
+             spans: list[tuple[int, int]] | None = None,
+             allowed_sources: set[str] | None = None) -> tuple[dict[int, set[str]], dict[str, int]]:
     denied = denied or set()
+    spans = spans or []
+    starts = [s for s, _ in spans]
     accepted: dict[int, set[str]] = {}
     rejects = {r: 0 for r in REASONS}
     for addr, sources in cands.items():
+        eff = sources & allowed_sources if allowed_sources is not None else sources
+        if allowed_sources is not None and not eff:
+            continue
         if addr in denied:
             rejects["denied"] += 1
             continue
@@ -254,10 +289,12 @@ def classify(blocks: list[Block], cands: dict[int, set[str]],
             rejects["registered"] += 1
         elif addr in labels:
             rejects["label"] += 1
+        elif "pdata" not in eff and is_inside_span(spans, starts, addr):
+            rejects["inside_span"] += 1
         elif blk.word(addr) == 0:
             rejects["zero"] += 1
-        elif "pdata" in sources or has_code_boundary(blk, addr):
-            accepted[addr] = sources
+        elif "pdata" in eff or has_code_boundary(blk, addr):
+            accepted[addr] = eff
         else:
             rejects["mid_function"] += 1
     return accepted, rejects
@@ -303,16 +340,23 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     registered = load_registered(gen)
     labels = load_labels(gen)
+    spans = load_spans(gen)
+    allowed = {s.strip() for s in args.sources.split(",") if s.strip()}
     endian = detect_reloc_endian(next(b for b in blocks if b.name == ".reloc").data)
     by_type, reloc_ptrs, exec_ignored = harvest_reloc(blocks, endian)
     cands: dict[int, set[str]] = {}
-    add_candidates(cands, reloc_ptrs, "reloc")
-    add_candidates(cands, harvest_thunks(blocks), "thunk")
-    add_candidates(cands, harvest_pdata(blocks), "pdata")
-    add_candidates(cands, harvest_datascan(blocks), "datascan")
-    add_candidates(cands, harvest_codeptr(blocks), "codeptr")
+    if "reloc" in allowed:
+        add_candidates(cands, reloc_ptrs, "reloc")
+    if "thunk" in allowed:
+        add_candidates(cands, harvest_thunks(blocks), "thunk")
+    if "pdata" in allowed:
+        add_candidates(cands, harvest_pdata(blocks), "pdata")
+    if "datascan" in allowed:
+        add_candidates(cands, harvest_datascan(blocks), "datascan")
+    if "codeptr" in allowed:
+        add_candidates(cands, harvest_codeptr(blocks), "codeptr")
     denied = load_denylist(Path(args.deny))
-    accepted, rejects = classify(blocks, cands, registered, labels, denied)
+    accepted, rejects = classify(blocks, cands, registered, labels, denied, spans)
     counts = {s: sum(1 for v in cands.values() if s in v) for s in SOURCE_ORDER}
     write_toml(Path(args.out), accepted)
     summary = format_summary(endian, by_type, counts, len(cands), len(accepted), rejects, exec_ignored)
