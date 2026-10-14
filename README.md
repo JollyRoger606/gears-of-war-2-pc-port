@@ -58,7 +58,7 @@ high-resolution texture packs).
 ## Running
 
 ```
-gow2.exe --game_data_root="C:\path	o\your\game" --mnk_mode=true
+gow2.exe --game_data_root="C:\path\to\your\game" --mnk_mode=true
 ```
 
 `--game_data_root` is the folder that holds `default.xex` and `GearGame` (if the exe sits in or
