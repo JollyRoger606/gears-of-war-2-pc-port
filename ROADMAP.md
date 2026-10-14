@@ -10,13 +10,11 @@ Each phase keeps the previous one working.
 - [x] First level playable with the keyboard (Act 1, early).
 - [ ] The whole campaign (solo and split-screen co-op).
 - [ ] Saves and checkpoints next to the executable (portable install).
-- [ ] Keyboard and mouse that feel native, following what gears-judgement-recomp does for the same
-      engine: mouse movement written straight into the look axes (`aTurn`/`aLookUp`) with the
-      thumbstick smoothing and acceleration (`UGearPlayerInput.ViewAcceleration` natives)
-      bypassed, real key events handed to the engine's own `InputKey`, and the
-      `bUsingGamepad` flag cleared so the game shows keyboard prompts. Today the mouse is
-      turned into a right-stick deflection, which goes through the game's dead zone and
-      acceleration and feels wrong.
+- [ ] Keyboard and mouse that feel native. Mouse aiming now goes through the engine's own PC
+      mouse axes (`MouseX`/`MouseY` into `aMouseX`/`aMouseY`), with no stick emulation and no
+      aim friction or adhesion for the mouse (`src/gow2_mouse_aim.cpp`, SDK patch 0006); the
+      controller keeps the game's own aiming. Still to do: real key events through the engine's
+      `InputKey`, so keys stop going through the emulated controller.
 - [ ] Button prompts and icons that follow the device in use (keyboard keys while playing with
       the keyboard, Xbox or generic controller glyphs otherwise), including the button
       pictures inside hints, through input-aware texture variants.
@@ -46,8 +44,18 @@ port reached more platforms and added features.
 - [ ] Android ARM64 (Vulkan): packaging, touch and gamepad input, storage access to the
       user's own game files, memory limits. Plan, precedents (two ReXGlue games already run on
       Android) and the SDK changes it needs: [docs/ANDROID.md](docs/ANDROID.md).
-- [ ] Online play beyond LAN (System Link over the internet / relay), more players in
-      co-op and versus where the engine allows it.
+- [ ] Touch controls on Android in the style of mobile shooters (left virtual stick, drag to
+      look through the same native mouse path, buttons for fire, aim, cover, reload, melee and
+      weapon swap), plus controllers and keyboard with or without a mouse.
+- [ ] Cross-play between PC and Android: both run the same recompiled game, so it follows from
+      System Link working on Android.
+- [ ] Campaign co-op for more than two players. The cap of two is in the game's script
+      (`GearGameSP_Base.InitGame` sets `MaxPlayers = 2`, the co-op menu
+      `NumPublicConnections = 2`), while versus already takes 10. Extra players would join
+      as Carmine-style COG soldiers (`SuggestPawnClassFor` already falls back to
+      `GearPawn_COGGear` for a third player). Target four first, then as many as the
+      cinematics, checkpoints and bandwidth allow.
+- [ ] Online play beyond LAN (System Link over the internet / relay).
 
 ## Phase 3 - Modern enhancements
 
