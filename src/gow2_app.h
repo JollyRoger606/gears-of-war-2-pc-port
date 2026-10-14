@@ -16,6 +16,7 @@
 
 #include "gow2_coalesced.h"
 #include "gow2_crash_watch.h"
+#include "gow2_gpu_pick.h"
 #include "gow2_mouse_aim.h"
 #include "gow2_sha_table.h"
 #include "gow2_utf8_guard.h"
@@ -23,7 +24,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <dxgi.h>
 #include <shobjidl.h>
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -203,43 +203,12 @@ class Gow2App : public rex::ReXApp {
     return rex::cvar::SetFlagByName(name, value);
   }
 
-  // With d3d12_adapter=-1 the runtime picked the integrated AMD Radeon Graphics instead of the RX 7800 XT on the dev PC.
-  static void PickFastestAdapter() {
-#ifdef _WIN32
-    using CreateFactoryFn = HRESULT(WINAPI*)(REFIID, void**);
-    HMODULE dxgi = LoadLibraryA("dxgi.dll");
-    auto create = dxgi ? reinterpret_cast<CreateFactoryFn>(
-                             GetProcAddress(dxgi, "CreateDXGIFactory1"))
-                       : nullptr;
-    IDXGIFactory1* factory = nullptr;
-    if (!create || FAILED(create(__uuidof(IDXGIFactory1),
-                                 reinterpret_cast<void**>(&factory)))) {
-      return;
+  // An explicit d3d12_adapter in gow2.toml or on the command line wins over gow2_gpu.
+  static void PickRenderGpu() {
+    const rex::glue::GpuChoice gpu = rex::glue::ChooseRenderGpu();
+    if (gpu.index >= 0 && SetIfUnset("d3d12_adapter", std::to_string(gpu.index))) {
+      REXLOG_INFO("gow2 d3d12_adapter -> {} ({}; {})", gpu.index, gpu.name, gpu.reason);
     }
-    int best = -1;
-    SIZE_T best_vram = 0;
-    std::string best_name;
-    IDXGIAdapter1* adapter = nullptr;
-    for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
-      DXGI_ADAPTER_DESC1 desc{};
-      if (SUCCEEDED(adapter->GetDesc1(&desc)) &&
-          !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) &&
-          desc.DedicatedVideoMemory > best_vram) {
-        best = static_cast<int>(i);
-        best_vram = desc.DedicatedVideoMemory;
-        char name[128]{};
-        WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name) - 1,
-                            nullptr, nullptr);
-        best_name = name;
-      }
-      adapter->Release();
-    }
-    factory->Release();
-    if (best >= 0 && SetIfUnset("d3d12_adapter", std::to_string(best))) {
-      REXLOG_INFO("gow2 d3d12_adapter -> {} ({}, {} MB VRAM)", best, best_name,
-                  best_vram >> 20);
-    }
-#endif
   }
 
   // Coalesced tweaks (mouse look, key prompts) work on a cached copy of the player's own bundles.
@@ -279,7 +248,7 @@ class Gow2App : public rex::ReXApp {
     SetIfUnset("mnk_mode", "true");
     rex::glue::PrepareNativeMouseAim();
     PrepareCoalesced();
-    PickFastestAdapter();
+    PickRenderGpu();
     SetUpscaleTarget();
     config.gpu_plugin = "xenos";
     // Guest content names are raw bytes; the runtime's UTF-8 decoder throws on a bad lead byte.
