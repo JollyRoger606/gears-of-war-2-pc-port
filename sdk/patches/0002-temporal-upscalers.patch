@@ -132,10 +132,10 @@ index 0000000..30056b4
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/include/rex/graphics/d3d12/gow2_temporal.h b/include/rex/graphics/d3d12/gow2_temporal.h
 new file mode 100644
-index 0000000..0fcb600
+index 0000000..87cafcb
 --- /dev/null
 +++ b/include/rex/graphics/d3d12/gow2_temporal.h
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,118 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +#pragma once
 +// Project-local temporal-upscaling support for the D3D12 backend (Gears of War 2).
@@ -180,7 +180,10 @@ index 0000000..0fcb600
 +  uint32_t depth_resolve_dst = 0;
 +  uint32_t depth_dsts[4] = {};  // every depth resolve destination of this frame
 +  uint32_t depth_dst_count = 0;
-+  uint32_t color_resolve_dst = 0;  // scene colour (non-frontbuffer colour resolve)
++  uint32_t color_resolve_dst = 0;  // scene colour (largest non-frontbuffer colour resolve)
++  uint32_t depth_resolve_area = 0;  // width*height of the chosen resolves, this frame
++  uint32_t color_resolve_area = 0;
++  uint32_t color_resolve_w = 0, color_resolve_h = 0;
 +  uint32_t last_front = 0;
 +  uint32_t scale_x = 1, scale_y = 1;
 +  uint32_t last_upscaled_frame = 0xFFFFFFFFu;
@@ -196,7 +199,7 @@ index 0000000..0fcb600
 +  // Decided once per frame (BeginFrame): rasterise world geometry into the render region only
 +  // when the previous frame went through the upscaler, so menus and loading screens are left alone.
 +  bool shrink_this_frame = false;
-+  uint32_t guest_w = 0, guest_h = 0;  // guest scene size (colour resolve size), persists across frames
++  uint32_t guest_w = 0, guest_h = 0;  // scene colour resolve size of the last finished frame
 +};
 +
 +FrameState& State();
@@ -985,10 +988,10 @@ index 0000000..da6cd4a
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/src/graphics/d3d12/gow2_temporal.cpp b/src/graphics/d3d12/gow2_temporal.cpp
 new file mode 100644
-index 0000000..832e284
+index 0000000..0619953
 --- /dev/null
 +++ b/src/graphics/d3d12/gow2_temporal.cpp
-@@ -0,0 +1,355 @@
+@@ -0,0 +1,371 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +// Project-local temporal-upscaling support: scene camera capture and frame dumps.
 +#include <rex/graphics/d3d12/gow2_temporal.h>
@@ -1192,9 +1195,17 @@ index 0000000..832e284
 +  g_state.ended_jittered = g_state.jitter_this_frame;
 +  g_state.prev_camera = g_state.camera;
 +  g_state.camera = SceneCamera();
++  // The scene size comes from the finished frame: inside a frame, smaller colour resolves come
++  // before the scene's and would stop the jitter of the scene draws that follow them.
++  if (g_state.color_resolve_area) {
++    g_state.guest_w = g_state.color_resolve_w;
++    g_state.guest_h = g_state.color_resolve_h;
++  }
 +  g_state.depth_resolve_dst = 0;
++  g_state.depth_resolve_area = 0;
 +  g_state.depth_dst_count = 0;
 +  g_state.color_resolve_dst = 0;
++  g_state.color_resolve_area = 0;
 +  g_state.last_front = front_ptr;
 +  ++g_state.frame;
 +  g_state.shrink_this_frame = false;  // the whole guest frame is rendered at the render size now
@@ -1218,15 +1229,23 @@ index 0000000..832e284
 +}
 +
 +void NoteResolve(bool is_depth, uint32_t dst, uint32_t width, uint32_t height, uint32_t) {
++  // The scene's resolves are the first largest of the frame. Gears of War 2 resolves a 704x480 shadow
++  // map after the 1280x704 scene depth, and 640x352 and 328x184 colour buffers around the scene
++  // colour, so taking the last resolve picked the wrong targets and the scene was never jittered.
++  const uint32_t area = width * height;
 +  if (is_depth) {
-+    g_state.depth_resolve_dst = dst;
++    if (area > g_state.depth_resolve_area) {
++      g_state.depth_resolve_dst = dst;
++      g_state.depth_resolve_area = area;
++    }
 +    bool known = false;
 +    for (uint32_t i = 0; i < g_state.depth_dst_count; ++i) known |= g_state.depth_dsts[i] == dst;
 +    if (!known && g_state.depth_dst_count < 4) g_state.depth_dsts[g_state.depth_dst_count++] = dst;
-+  } else if (dst != g_state.last_front) {
++  } else if (dst != g_state.last_front && area > g_state.color_resolve_area) {
 +    g_state.color_resolve_dst = dst;
-+    g_state.guest_w = width;
-+    g_state.guest_h = height;
++    g_state.color_resolve_area = area;
++    g_state.color_resolve_w = width;
++    g_state.color_resolve_h = height;
 +  }
 +}
 +

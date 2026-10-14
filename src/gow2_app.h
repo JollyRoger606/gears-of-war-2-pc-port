@@ -256,6 +256,20 @@ class Gow2App : public rex::ReXApp {
     coalesced_hashes_ = coalesced.hashes;
   }
 
+  // The temporal upscalers scale the finished frame to the screen size and skip every frame while
+  // it is unknown. GOW2_TARGET_W/H set by the player win.
+  static void SetUpscaleTarget() {
+#ifdef _WIN32
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    const bool have = EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmPelsHeight;
+    if (!std::getenv("GOW2_TARGET_W"))
+      _putenv_s("GOW2_TARGET_W", std::to_string(have ? dm.dmPelsWidth : 1920).c_str());
+    if (!std::getenv("GOW2_TARGET_H"))
+      _putenv_s("GOW2_TARGET_H", std::to_string(have ? dm.dmPelsHeight : 1080).c_str());
+#endif
+  }
+
   // The game hash-checks the Coalesced bundles; the edited copies' hashes go into its table once the
   // XEX is in memory and before any game code runs.
   void OnPostLoadXexImage() override { rex::glue::PatchHashSec(coalesced_hashes_); }
@@ -264,6 +278,7 @@ class Gow2App : public rex::ReXApp {
     SetIfUnset("mnk_mode", "true");
     PrepareCoalesced();
     PickFastestAdapter();
+    SetUpscaleTarget();
     config.gpu_plugin = "xenos";
     // Guest content names are raw bytes; the runtime's UTF-8 decoder throws on a bad lead byte.
     rex::glue::InstallUtf8Guard();
