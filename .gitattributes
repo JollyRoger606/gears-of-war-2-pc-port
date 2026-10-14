@@ -1,0 +1,3 @@
+# git apply and bash need LF; a Windows checkout with core.autocrlf would turn these into CRLF.
+*.patch text eol=lf
+*.sh text eol=lf
