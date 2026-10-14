@@ -62,14 +62,18 @@ int PatchHashSec(const std::vector<HashSecEntry>& entries) {
   // Host pages only, and only when they are not writable already: restoring through the guest
   // heap applied its read-only page-table state to a page the runtime keeps writable (the table
   // shares it with the ContSrvr resource) and the game then failed with a disc read error.
-  size_t length = size;
+  // mprotect needs a page-aligned range (VirtualProtect rounds by itself).
+  const uintptr_t page = rex::memory::page_size();
+  uint8_t* page_base = reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(table) & ~(page - 1));
+  const size_t page_length = ((table + size - page_base) + page - 1) & ~(page - 1);
+  size_t length = page_length;
   rex::memory::PageAccess access = rex::memory::PageAccess::kNoAccess;
-  rex::memory::QueryProtect(table, length, access);
+  rex::memory::QueryProtect(page_base, length, access);
   const bool writable = access == rex::memory::PageAccess::kReadWrite ||
                         access == rex::memory::PageAccess::kExecuteReadWrite;
   rex::memory::PageAccess old_access = access;
-  if (!writable &&
-      !rex::memory::Protect(table, size, rex::memory::PageAccess::kReadWrite, &old_access)) {
+  if (!writable && !rex::memory::Protect(page_base, page_length,
+                                         rex::memory::PageAccess::kReadWrite, &old_access)) {
     REXLOG_WARN("HASHSEC: cannot make the hash table writable; edited files will fail the check");
     return 0;
   }
@@ -83,7 +87,7 @@ int PatchHashSec(const std::vector<HashSecEntry>& entries) {
     std::memcpy(table + at, entry.sha1.data(), entry.sha1.size());
     ++patched;
   }
-  if (!writable) rex::memory::Protect(table, size, old_access, nullptr);
+  if (!writable) rex::memory::Protect(page_base, page_length, old_access, nullptr);
   REXLOG_INFO("HASHSEC: {} of {} file hashes replaced with the edited copies' (page was {})", patched,
               entries.size(), writable ? "writable" : "read-only");
   return patched;
