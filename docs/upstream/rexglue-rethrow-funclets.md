@@ -60,7 +60,7 @@ orphaned tail chunk:
 We find them with a small script that scans generated bodies for gotos
 whose label is not defined in the same body:
 `tools/find_orphan_gotos.py` in
-`github.com/santiquiroz/gow2-recomp`.
+`github.com/santiquiroz/gears-of-war-2-pc-port`.
 
 ## Suggested fix
 

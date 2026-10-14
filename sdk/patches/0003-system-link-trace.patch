@@ -200,7 +200,7 @@ index ff6cb56..68c3f6e 100644
  REX_EXPORT_STUB(__imp__XNetLogonGetUserPrivileges);
  REX_EXPORT_STUB(__imp__XNetLogonInitOverrideInfo);
 diff --git a/src/kernel/xam/xam_net.cpp b/src/kernel/xam/xam_net.cpp
-index 6e9ac8a..7abc383 100644
+index 6e9ac8a..87b33e3 100644
 --- a/src/kernel/xam/xam_net.cpp
 +++ b/src/kernel/xam/xam_net.cpp
 @@ -12,6 +12,7 @@
@@ -304,6 +304,15 @@ index 6e9ac8a..7abc383 100644
    return ret;
  }
  
+@@ -420,7 +478,7 @@ struct XnAddrStatus {
+   // Host has ethernet address (no IP address)
+   static const uint32_t XNET_GET_XNADDR_ETHERNET = 0x00000002;
+   // Host has statically assigned IP address
+-  static const uint32_t XNET_GET_XNADDR_STATIC = 0x00000004;
++  static constexpr uint32_t XNET_GET_XNADDR_STATIC = 0x00000004;
+   // Host has DHCP assigned IP address
+   static const uint32_t XNET_GET_XNADDR_DHCP = 0x00000008;
+   // Host has PPPoE assigned IP address
 @@ -456,6 +514,18 @@ u32 NetDll_XNetGetTitleXnAddr_entry(u32 caller, ppc_ptr_t<XNADDR> addr_ptr) {
  
    std::memset(addr_ptr->abOnline, 0, 20);

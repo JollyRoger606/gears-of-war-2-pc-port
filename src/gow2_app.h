@@ -16,6 +16,7 @@
 
 #include "gow2_coalesced.h"
 #include "gow2_crash_watch.h"
+#include "gow2_sha_table.h"
 #include "gow2_utf8_guard.h"
 #include "gow2_xam_input_guard.h"
 
@@ -252,7 +253,12 @@ class Gow2App : public rex::ReXApp {
     setenv("GOW2_VFS_OVERRIDES", coalesced.overrides.c_str(), 1);
 #endif
     if (!coalesced.summary.empty()) REXLOG_INFO("{}", coalesced.summary);
+    coalesced_hashes_ = coalesced.hashes;
   }
+
+  // The game hash-checks the Coalesced bundles; the edited copies' hashes go into its table once the
+  // XEX is in memory and before any game code runs.
+  void OnPostLoadXexImage() override { rex::glue::PatchHashSec(coalesced_hashes_); }
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
     SetIfUnset("mnk_mode", "true");
@@ -288,7 +294,6 @@ class Gow2App : public rex::ReXApp {
   // Override virtual hooks for customization:
   // void OnPostInitLogging() override {}
   // void OnLoadXexImage(std::string& xex_image) override {}
-  // void OnPostLoadXexImage() override {}
   // void OnPostSetup() override {}
   // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
   // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
@@ -299,4 +304,5 @@ class Gow2App : public rex::ReXApp {
  private:
   std::filesystem::path game_data_root_;
   std::filesystem::path cache_root_;
+  std::vector<rex::glue::HashSecEntry> coalesced_hashes_;
 };

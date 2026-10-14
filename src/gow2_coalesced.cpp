@@ -9,6 +9,8 @@
 
 #include <rex/cvar.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -25,7 +27,7 @@ namespace rex::glue {
 
 namespace {
 
-constexpr int kVersion = 1;  // bump when the edit definitions change (invalidates cached copies)
+constexpr int kVersion = 3;  // bump when the edit definitions change (invalidates cached copies)
 
 // Bundle layout: BE u32 file count; per file a name, BE u32 section count; per section a name and
 // BE u32 key count; per key a key and a value. Strings are a BE int32 length, negative = UTF-16LE
@@ -138,11 +140,12 @@ std::vector<uint8_t> Serialize(const std::vector<IniFile>& files) {
       }
     }
   }
-  // Trailing zero padding: the game's own parser has been seen to read a byte past the end of the
-  // file image it loaded, and for some sizes that lands on a no-access guard page and kills the
-  // process at boot. The padding is never read as data (the reader is count driven).
+  // Trailing zero padding: the game's parser reads past the end of the file image it loaded. With
+  // an edited bundle shorter than the original that read failed and the game stopped at boot with
+  // a disc read error; 4 KiB of zeros fixes it (measured). The reader is count driven, so the
+  // padding is never read as data. GOW2_COALESCED_PAD overrides the amount.
   {
-    size_t n = 0;
+    size_t n = 4096;
     if (const char* pad = std::getenv("GOW2_COALESCED_PAD")) n = size_t(std::atoi(pad));
     o.resize(o.size() + n, 0);
   }
@@ -182,13 +185,13 @@ char16_t Fold(char16_t c) { return (c >= u'A' && c <= u'Z') ? char16_t(c + 32) :
 bool EqFold(const std::u16string& wide, const std::string& narrow) {
   if (wide.size() != narrow.size()) return false;
   for (size_t i = 0; i < wide.size(); ++i)
-    if (Fold(wide[i]) != char16_t((unsigned char)narrow[i])) return false;
+    if (Fold(wide[i]) != Fold(char16_t((unsigned char)narrow[i]))) return false;
   return true;
 }
 bool StartsWithFold(const std::u16string& wide, const std::string& prefix) {
   if (wide.size() < prefix.size()) return false;
   for (size_t i = 0; i < prefix.size(); ++i)
-    if (Fold(wide[i]) != char16_t((unsigned char)prefix[i])) return false;
+    if (Fold(wide[i]) != Fold(char16_t((unsigned char)prefix[i]))) return false;
   return true;
 }
 
@@ -298,7 +301,7 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   const std::filesystem::path dir = game_root / "GearGame" / "CookedXenon";
   const std::filesystem::path out_dir = cache_dir / "coalesced";
   std::filesystem::create_directories(out_dir, ec);
-  int files_done = 0, values = 0, reused = 0;
+  int files_done = 0, values = 0, reused = 0, unreadable = 0, unmatched = 0;
   for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
     const std::filesystem::path src = it->path();
     const std::string name = src.filename().string();
@@ -321,10 +324,16 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     } else {
       std::vector<uint8_t> bytes;
       std::vector<IniFile> files;
-      if (!ReadAll(src, &bytes) || !Parse(bytes, &files)) continue;  // unknown layout: leave alone
+      if (!ReadAll(src, &bytes) || !Parse(bytes, &files)) {  // unknown layout: leave alone
+        ++unreadable;
+        continue;
+      }
       const std::u16string locale = W(name.substr(10, name.size() - 14));  // Coalesced_XXX.bin -> XXX
       const int changed = Apply(&files, edits, locale);
-      if (changed == 0) continue;  // this locale file has none of the sections
+      if (changed == 0) {  // this locale file has none of the sections
+        ++unmatched;
+        continue;
+      }
       const std::vector<uint8_t> patched = Serialize(files);
       {
         std::ofstream of(dst, std::ios::binary | std::ios::trunc);
@@ -339,6 +348,11 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     ++files_done;
     if (!res.overrides.empty()) res.overrides += ";";
     res.overrides += "GearGame/CookedXenon/" + name + "=" + dst.string();
+    HashSecEntry entry;
+    entry.name = name;
+    std::transform(entry.name.begin(), entry.name.end(), entry.name.begin(),
+                   [](unsigned char c) { return char(std::tolower(c)); });
+    if (FileSha1(dst, &entry.sha1)) res.hashes.push_back(std::move(entry));
   }
   if (options.mouse_look && files_done > 0) {
     // The mouse is fed to the game as the right stick; physical pads keep the 30% dead zone the
@@ -347,7 +361,9 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     (void)rex::cvar::SetFlagByName("pad_right_stick_deadzone", "0.3");
   }
   if (files_done == 0) {
-    res.summary = "COALESCED: no bundle could be prepared; the game files are used unchanged";
+    res.summary = "COALESCED: no bundle could be prepared (" + std::to_string(unreadable) +
+                  " unreadable, " + std::to_string(unmatched) +
+                  " without the edited settings); the game files are used unchanged";
   } else {
     res.summary = "COALESCED: " + groups + "applied to " + std::to_string(files_done) + " file(s) (" +
                   std::to_string(values) + " values changed, " + std::to_string(reused) +

@@ -16,6 +16,8 @@
 #include <utility>
 #include <vector>
 
+#include "gow2_sha_table.h"
+
 namespace rex::glue {
 
 struct CoalescedOptions {
@@ -28,6 +30,9 @@ struct CoalescedOptions {
 struct CoalescedResult {
   std::string overrides;  // value for GOW2_VFS_OVERRIDES, empty when nothing was prepared
   std::string summary;    // one log line
+  // The served copies' names and SHA-1, for the game's hash table (gow2_sha_table.h). Computed
+  // here, before the runtime exists, because hashing later stalls the boot.
+  std::vector<HashSecEntry> hashes;
 };
 
 CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root,

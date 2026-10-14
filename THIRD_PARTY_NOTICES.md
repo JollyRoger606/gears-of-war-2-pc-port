@@ -39,6 +39,12 @@ Files in this repository derived from it:
 - Copyright: Copyright (c) 2026, Tom Clay; portions Copyright (c) 2022, Ben Vanik and Xenia project contributors
 - License: BSD 3-Clause (full text below).
 
+## TinySHA1
+
+- Project: [mohaps/TinySHA1](https://github.com/mohaps/TinySHA1), the copy in the ReXGlue SDK (`thirdparty/crypto/TinySHA1.hpp`, "Modified for use by Xenia"), vendored as `src/third_party/TinySHA1.hpp` to hash the edited Coalesced bundles.
+- Copyright: Copyright (c) 2012-22 SAURAV MOHAPATRA
+- License: ISC (full text in the file header).
+
 ## AMD FidelityFX SDK 1.1.4 (`amd_fidelityfx_dx12.dll`)
 
 - Project: [GPUOpen-LibrariesAndSDKs/FidelityFX-SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK), built from source by the ReXGlue SDK for the FSR 1 and CAS present effects.
