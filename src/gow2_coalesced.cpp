@@ -3,6 +3,8 @@
 
 #include "gow2_coalesced.h"
 
+#include "gow2_mouse_aim.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -27,7 +29,7 @@ namespace rex::glue {
 
 namespace {
 
-constexpr int kVersion = 3;  // bump when the edit definitions change (invalidates cached copies)
+constexpr int kVersion = 4;  // bump when the edit definitions change (invalidates cached copies)
 
 // Bundle layout: BE u32 file count; per file a name, BE u32 section count; per section a name and
 // BE u32 key count; per key a key and a value. Strings are a BE int32 length, negative = UTF-16LE
@@ -219,6 +221,11 @@ void AddMouseLook(std::vector<Edit>* e) {
                   "DeadZone=0.3|DeadZone=0.0", look});
 }
 
+void AddNativeMouse(std::vector<Edit>* e) {
+  e->push_back({Edit::kSet, "Xe-GearInput.ini", "Engine.PlayerInput", "bEnableMouseSmoothing",
+                "false"});
+}
+
 void AddPrompts(std::vector<Edit>* e, const CoalescedOptions& o) {
   for (const auto& kv : o.prompt_labels)
     e->push_back({Edit::kSet, kUI, "ControllerFont", kv.first, kv.second});
@@ -282,8 +289,13 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   std::vector<Edit> edits;
   std::string groups;
   if (options.mouse_look) {
-    AddMouseLook(&edits);
-    groups += "mouse-look ";
+    if (options.native_mouse) {
+      AddNativeMouse(&edits);
+      groups += "mouse-aim ";
+    } else {
+      AddMouseLook(&edits);
+      groups += "mouse-look ";
+    }
   }
   if (!options.prompt_labels.empty()) {
     AddPrompts(&edits, options);
@@ -354,7 +366,7 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
                    [](unsigned char c) { return char(std::tolower(c)); });
     if (FileSha1(dst, &entry.sha1)) res.hashes.push_back(std::move(entry));
   }
-  if (options.mouse_look && files_done > 0) {
+  if (options.mouse_look && !options.native_mouse && files_done > 0) {
     // The mouse is fed to the game as the right stick; physical pads keep the 30% dead zone the
     // bundle no longer applies, through the runtime. Only when the bundle edit is really in use,
     // or pads would get it twice.
@@ -435,6 +447,7 @@ std::string KeybindLabel(const char* name, const char* fallback) {
 CoalescedOptions CoalescedOptionsFromCvars() {
   CoalescedOptions o;
   o.mouse_look = rex::cvar::Query<bool>("mnk_mouse");
+  o.native_mouse = NativeMouseAimWanted();
   const std::string mode = REXCVAR_GET(gow2_prompts);
   const bool keyboard = mode == "keyboard" || (mode != "controller" && !AnyPhysicalGamepad());
   if (!keyboard) return o;

@@ -16,6 +16,7 @@
 
 #include "gow2_coalesced.h"
 #include "gow2_crash_watch.h"
+#include "gow2_mouse_aim.h"
 #include "gow2_sha_table.h"
 #include "gow2_utf8_guard.h"
 #include "gow2_xam_input_guard.h"
@@ -276,6 +277,7 @@ class Gow2App : public rex::ReXApp {
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
     SetIfUnset("mnk_mode", "true");
+    rex::glue::PrepareNativeMouseAim();
     PrepareCoalesced();
     PickFastestAdapter();
     SetUpscaleTarget();
@@ -309,7 +311,7 @@ class Gow2App : public rex::ReXApp {
   // Override virtual hooks for customization:
   // void OnPostInitLogging() override {}
   // void OnLoadXexImage(std::string& xex_image) override {}
-  // void OnPostSetup() override {}
+  void OnPostSetup() override { rex::glue::InstallNativeMouseAim(window()); }
   // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
   // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
   // std::unique_ptr<rex::ui::AchievementNotificationDialog>

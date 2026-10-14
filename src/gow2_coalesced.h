@@ -8,6 +8,7 @@
 //
 // Edits are grouped by purpose and each group is switched on by an option:
 //   mouse-look   right-stick dead zone off for the mouse-fed look axes (cvar mnk_mouse)
+//   mouse-aim    PC mouse axes with no smoothing for native mouse look (cvars mnk_mouse, gow2_mouse_aim)
 //   key-prompts  menu prompts show keyboard labels ([Space], [LMB]...) (cvar gow2_prompts)
 #pragma once
 
@@ -22,6 +23,7 @@ namespace rex::glue {
 
 struct CoalescedOptions {
   bool mouse_look = false;
+  bool native_mouse = false;
   // Key = a name in [ControllerFont] of GearGameUI ("Controller_A"), value = the label shown
   // ("[Space]"). Empty means "leave the pad glyphs alone".
   std::vector<std::pair<std::string, std::string>> prompt_labels;
