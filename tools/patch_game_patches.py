@@ -21,10 +21,34 @@ patch is a cvar and can be A/B'd without a rebuild:
                               (RHIGetTextureMemoryStats=FALSE; .../gow2_texture_streaming_fix=true)
   id 3 16x Anisotropic Filtering 8280E7FC lwz r5,408(r30) -> li r5,16
                               (GameFixes/gow2_aniso16=true)
+  id 4 Unlock FPS           824A2E94 lfs f1,1284(r3)  -> nop (skipped when on)
+                            8298CFB0 li r11,2         -> li r11,1
+                             (GameFixes/gow2_unlock_fps=false)
+  id 5 AO Upscaling Fix     82806B10 li r11,720       -> li r11,704 (height 704)
+                            8272E00C lwz r10,15568(r17) -> li r10,1
+                            8272FF54 lwz r11,15568(r11) -> li r11,1
+                            8272B1F8 mflr r12 (function entry) -> blr (early return)
+                            8252D608 beq cr6,0x8252d69c -> b 0x8252d69c (unconditional when on)
+                             (GameFixes/gow2_ao_upscaling_fix=true)
+  id 6 DoF Upscaling Fix    827296BC fsel f2,f4,f31,f28 -> fsubs f1,f1,f1 (f1=0)
+                            82729700 bl 0x827291f8    -> fsubs f1,f1,f1 (skip call, f1=0)
+                             (GameFixes/gow2_dof_upscaling_fix=true)
 
 The id 2 blr part is portable only because 0x8280DDC8/0x8280DDCC are the
 first two guest instructions of sub_8280DDC8 (no prologue); the patch is
 therefore "return 0 immediately", emitted as an early return.
+Likewise the id 5 blr at 0x8272B1F8 is portable only because it is the
+FIRST guest instruction of sub_8272B1F8; the patch is "return
+immediately", emitted as an early return.
+
+The id 5 blr at 0x8280759C (mr r30,r3, 6th instruction of
+sub_82807588) is REFUSED and has no entry below: a bl in the prologue
+clobbers LR (lr=0x82807590 at that site), so the hardware blr could not
+return to the caller, and the function's exits need explicit epilogue
+(addi r1,r1,128 + __restgprlr_28) instead of a plain return. The paired
+0x82807594 li r6,0 -> li r3,1 site is refused with it: on its own it would leave
+r6 unset for the first sub_829783A8 call and keep running a function the patch
+meant to leave.
 
     python tools/patch_game_patches.py generated/default/*.cpp
 
@@ -59,6 +83,38 @@ SITES = [
     (0x8280E7FC, 0x8280E740, "lwz r5,408(r30)",
      ["ctx.r5.u64 = REX_LOAD_U32(ctx.r30.u32 + 408);"],
      "ctx.r5.u64 = Gow2GamePatch(3) ? 16 : REX_LOAD_U32(ctx.r30.u32 + 408);", 3),
+    (0x824A2E94, 0x824A2E78, "lfs f1,1284(r3)",
+     ["temp.u32 = REX_LOAD_U32(ctx.r3.u32 + 1284);",
+      "ctx.f1.f64 = double(temp.f32);"],
+     "if (!Gow2GamePatch(4)) { temp.u32 = REX_LOAD_U32(ctx.r3.u32 + 1284); "
+     "ctx.f1.f64 = double(temp.f32); }", 4),
+    (0x8298CFB0, 0x8298CEC0, "li r11,2",
+     ["ctx.r11.s64 = 2;"],
+     "ctx.r11.s64 = Gow2GamePatch(4) ? 1 : 2;", 4),
+    (0x82806B10, 0x82806A80, "li r11,720",
+     ["ctx.r11.s64 = 720;"],
+     "ctx.r11.s64 = Gow2GamePatch(5) ? 704 : 720;", 5),
+    (0x8272E00C, 0x8272DF48, "lwz r10,15568(r17)",
+     ["ctx.r10.u64 = REX_LOAD_U32(ctx.r17.u32 + 15568);"],
+     "ctx.r10.u64 = Gow2GamePatch(5) ? 1 : REX_LOAD_U32(ctx.r17.u32 + 15568);", 5),
+    (0x8272FF54, 0x8272FD20, "lwz r11,15568(r11)",
+     ["ctx.r11.u64 = REX_LOAD_U32(ctx.r11.u32 + 15568);"],
+     "ctx.r11.u64 = Gow2GamePatch(5) ? 1 : REX_LOAD_U32(ctx.r11.u32 + 15568);", 5),
+    (0x8272B1F8, 0x8272B1F8, "mflr r12",
+     ["ctx.r12.u64 = ctx.lr;"],
+     "if (Gow2GamePatch(5)) { return; } ctx.r12.u64 = ctx.lr;", 5),
+    (0x8252D608, 0x8252D1B8, "beq cr6,0x8252d69c",
+     ["if (ctx.cr6.eq) goto loc_8252D69C;"],
+     "if (Gow2GamePatch(5) || ctx.cr6.eq) goto loc_8252D69C;", 5),
+    (0x827296BC, 0x82729610, "fsel f2,f4,f31,f28",
+     ["ctx.f2.f64 = ctx.f4.f64 >= 0.0 ? ctx.f31.f64 : ctx.f28.f64;"],
+     "if (Gow2GamePatch(6)) { ctx.f1.f64 = double(float(ctx.f1.f64 - ctx.f1.f64)); } else { "
+     "ctx.f2.f64 = ctx.f4.f64 >= 0.0 ? ctx.f31.f64 : ctx.f28.f64; }", 6),
+    (0x82729700, 0x82729610, "bl 0x827291f8",
+     ["ctx.lr = 0x82729704;",
+      "sub_827291F8(ctx, base);"],
+     "if (Gow2GamePatch(6)) { ctx.f1.f64 = double(float(ctx.f1.f64 - ctx.f1.f64)); } else { "
+     "ctx.lr = 0x82729704; sub_827291F8(ctx, base); }", 6),
 ]
 
 INSN = re.compile(r"^\s*// [a-z]")

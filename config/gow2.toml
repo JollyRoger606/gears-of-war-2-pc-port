@@ -1,0 +1,82 @@
+# Gears of War 2 (PC) settings.
+#
+# This file sits next to gow2.exe and is read at start-up. Every key is a real setting name;
+# command-line flags (--name=value) and REX_* environment variables override it. Delete a line
+# to get the built-in default back. Most settings can also be changed in game from the
+# runtime's settings overlay.
+
+# ---------- Display ----------
+fullscreen = true
+
+# Internal render resolution as a multiple of the game's 1280x720:
+# 1 = 720p (original), 2 = 1440p, 3 = 2160p (4K). Higher values sharpen everything at a GPU
+# cost; resolution fixes below keep the post-processing correct when this is above 1.
+resolution_scale = 2
+
+# How the final image is scaled to the window: "bilinear" with the stock runtime. Builds made
+# with scripts/build-sdk.ps1 (AMD FidelityFX) also accept "cas", "fsr" (FSR 1 spatial) and the
+# experimental temporal paths "fsr2" / "fsr3".
+present_effect = "bilinear"
+# Dither the final 8-bit output to hide banding in smoke, sky and dark corridors.
+present_dither = true
+
+# Resolution-scaling resolve fixes (runtime defaults, kept here for clarity).
+direct_host_resolve = true
+resolve_resolution_scale_fill_half_pixel_offset = true
+mrt_edram_used_range_clamp_to_min = true
+
+# ---------- Frame rate ----------
+vsync = true
+# Community patch: lifts the game's 30 fps cap. Turn vsync off too for more than the refresh rate.
+gow2_unlock_fps = false
+
+# ---------- Community game patches (xenia-canary/game-patches, authors illusion and boma) ----------
+gow2_black_shading_fix = true      # correct character lighting (turns off MSAA resolve artifacts)
+gow2_texture_streaming_fix = true  # bigger texture pool, less pop-in
+gow2_aniso16 = true                # 16x anisotropic filtering in the game's own sampler setup
+gow2_ao_upscaling_fix = true       # ambient occlusion without checkerboard/ghosting when scaled
+gow2_dof_upscaling_fix = true      # depth of field without blur artifacts when scaled
+
+# ---------- Textures ----------
+# The texture cache can hold more on PC than the console's budget.
+texture_cache_memory_limit_soft = 1024
+texture_cache_memory_limit_hard = 2048
+anisotropic_override = 4
+
+# Texture packs (README, "Texture packs"). Dumps go to textures\4D53082D\dump next to gow2.exe;
+# replacements are read from textures\4D53082D\replace (any size, full mip chain).
+texture_dump = false
+texture_replace = false
+
+# ---------- Keyboard and mouse ----------
+# The keyboard and mouse act as an Xbox 360 controller, so every action works as on the console.
+# A real controller can be used at the same time.
+mnk_mode = true
+mnk_mouse = true
+mnk_sensitivity = 1.0
+
+keybind_lstick_up = "W"
+keybind_lstick_down = "S"
+keybind_lstick_left = "A"
+keybind_lstick_right = "D"
+keybind_rstick_up = "Up"
+keybind_rstick_down = "Down"
+keybind_rstick_left = "Left"
+keybind_rstick_right = "Right"
+
+keybind_right_trigger = "LMB"    # fire
+keybind_left_trigger = "RMB"     # aim
+keybind_a = "Space"              # cover, roadie run (hold), roll, vault
+keybind_b = "F,V"                # melee, hold for chainsaw
+keybind_x = "E"                  # use, pick up, revive
+keybind_y = "Q"                  # look at point of interest
+keybind_right_shoulder = "R"     # reload (active reload)
+keybind_left_shoulder = "G"      # tactical display
+keybind_rstick_press = "MMB,Z"   # zoom
+keybind_lstick_press = "C"
+keybind_dpad_up = "1"            # weapon slots
+keybind_dpad_right = "2"
+keybind_dpad_down = "3"
+keybind_dpad_left = "4"
+keybind_back = "Tab"
+keybind_start = "Return,Escape"

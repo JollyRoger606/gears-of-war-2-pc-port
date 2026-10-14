@@ -5,6 +5,7 @@
 #pragma once
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include <rex/cvar.h>
@@ -19,6 +20,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <dxgi.h>
+#include <shobjidl.h>
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shell32.lib")
 #endif
 
 class Gow2App : public rex::ReXApp {
@@ -54,10 +58,121 @@ class Gow2App : public rex::ReXApp {
     return rex::filesystem::GetExecutablePath().parent_path();
   }
 
+  static std::filesystem::path RememberedGamePathFile() {
+    return AppHome() / "gow2_game_path.txt";
+  }
+
+  // One UTF-8 line with a folder path, or empty when missing/unreadable.
+  static std::filesystem::path ReadRememberedGamePath() {
+    std::ifstream in(RememberedGamePathFile(), std::ios::binary);
+    if (!in) return {};
+    std::string line;
+    if (!std::getline(in, line)) return {};
+    while (!line.empty() &&
+           (line.back() == '\n' || line.back() == '\r' || line.back() == ' ' ||
+            line.back() == '\t')) {
+      line.pop_back();
+    }
+    const auto first = line.find_first_not_of(" \t");
+    if (first == std::string::npos) return {};
+    line.erase(0, first);
+    if (line.empty()) return {};
+#ifdef _WIN32
+    int wide = MultiByteToWideChar(CP_UTF8, 0, line.c_str(), -1, nullptr, 0);
+    if (wide <= 0) return {};
+    std::wstring out(static_cast<size_t>(wide - 1), L'\0');
+    if (!MultiByteToWideChar(CP_UTF8, 0, line.c_str(), -1, out.data(), wide)) {
+      return {};
+    }
+    return std::filesystem::path(out);
+#else
+    return std::filesystem::path(line);
+#endif
+  }
+
+  static void WriteRememberedGamePath(const std::filesystem::path& dir) {
+#ifdef _WIN32
+    const std::wstring wide = dir.wstring();
+    int utf8 = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0,
+                                   nullptr, nullptr);
+    if (utf8 <= 0) return;
+    std::string out(static_cast<size_t>(utf8 - 1), '\0');
+    if (!WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, out.data(), utf8,
+                             nullptr, nullptr)) {
+      return;
+    }
+    std::ofstream(RememberedGamePathFile(),
+                  std::ios::binary | std::ios::trunc)
+        << out << '\n';
+#else
+    std::ofstream(RememberedGamePathFile(),
+                  std::ios::binary | std::ios::trunc)
+        << dir.string() << '\n';
+#endif
+  }
+
+#ifdef _WIN32
+  // Standard Windows folder picker. Returns empty when cancelled.
+  static std::filesystem::path PickGameFolder() {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    std::filesystem::path result;
+    IFileOpenDialog* dlg = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&dlg)))) {
+      DWORD opts = 0;
+      dlg->GetOptions(&opts);
+      dlg->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+      dlg->SetTitle(L"Select your Gears of War 2 folder (the one with default.xex)");
+      IShellItem* item = nullptr;
+      if (SUCCEEDED(dlg->Show(nullptr)) && SUCCEEDED(dlg->GetResult(&item))) {
+        PWSTR path = nullptr;
+        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+          result = path;
+          CoTaskMemFree(path);
+        }
+        item->Release();
+      }
+      dlg->Release();
+    }
+    if (SUCCEEDED(co)) CoUninitialize();
+    return result;
+  }
+
+  // Asks once. On a valid pick the choice is remembered and used; otherwise
+  // explains the requirement and returns the fallback for a clean runtime failure.
+  static std::filesystem::path PromptAndRememberGameFolder(
+      const std::filesystem::path& fallback) {
+    const std::filesystem::path picked = PickGameFolder();
+    if (auto hit = WithXex(picked); !hit.empty()) {
+      WriteRememberedGamePath(hit);
+      REXLOG_INFO("gow2 content root chosen by the player: {}", hit.string());
+      return hit;
+    }
+    MessageBoxW(nullptr,
+                L"Gears of War 2 needs your own game files to run.\n\n"
+                L"The selected folder must contain default.xex and GearGame "
+                L"from your own retail disc.",
+                L"Gears of War 2", MB_OK | MB_ICONWARNING);
+    return fallback;
+  }
+#endif
+
   static std::filesystem::path ResolveContentRoot(const std::filesystem::path& given) {
     std::error_code ec;
     if (!given.empty() && std::filesystem::exists(given, ec)) {
       if (auto hit = WithXex(given); !hit.empty()) return hit;
+    }
+    if (const auto remembered = ReadRememberedGamePath(); !remembered.empty()) {
+      ec.clear();
+      if (std::filesystem::exists(remembered, ec)) {
+        if (auto hit = WithXex(remembered); !hit.empty()) {
+          if (hit != given) {
+            REXLOG_INFO("gow2 content root from gow2_game_path.txt: {}",
+                        hit.string());
+          }
+          return hit;
+        }
+      }
     }
     std::filesystem::path dir = AppHome();
     for (int depth = 0; !dir.empty(); ++depth) {
@@ -70,7 +185,11 @@ class Gow2App : public rex::ReXApp {
       if (parent == dir) break;
       dir = parent;
     }
+#ifdef _WIN32
+    return PromptAndRememberGameFolder(given);
+#else
     return given;
+#endif
   }
 
   static bool SetIfUnset(const char* name, const std::string& value) {
@@ -120,6 +239,7 @@ class Gow2App : public rex::ReXApp {
   }
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
+    SetIfUnset("mnk_mode", "true");
     PickFastestAdapter();
     config.gpu_plugin = "xenos";
     // Guest content names are raw bytes; the runtime's UTF-8 decoder throws on a bad lead byte.
