@@ -38,6 +38,10 @@ codegen log by `tools/hint_fixpoint.py` and kept out through `hints/denylist.txt
 Anything still missing is found at runtime by `scripts/run-harvest-loop.sh`
 (boot, read the "unregistered function" FATAL, add it to `hints/runtime.toml`, rebuild).
 
+See [ROADMAP.md](ROADMAP.md) for the plan beyond retail parity: other platforms
+(Linux, Android), online play and modern enhancements (native high resolution, FSR,
+high-resolution texture packs).
+
 ## You need your own copy
 
 - You must provide your own legally-dumped copy of the retail Xbox 360 disc.
