@@ -11,17 +11,19 @@ Every guest instruction is preceded by its disassembly comment (one tab, then
 
   sync, sync 0/2, ptesync  seq_cst   arm64 dmb ish     x86-64 full fence
   lwsync, sync 1           acq_rel   arm64 dmb ish     x86-64 compiler barrier
-  eieio                    release   arm64 dmb ish     x86-64 compiler barrier
+  eieio                    seq_cst   arm64 dmb ish     x86-64 full fence
   isync                    acquire   arm64 dmb ishld   x86-64 compiler barrier
 
     python tools/patch_memory_barriers.py [--dry-run] [generated/default/*.cpp ...]
 
 Idempotent (marker GOW2 MEMBARRIER): a barrier already followed by a fence,
 ours or the codegen's, is left alone. Writes nothing unless every file verifies.
+Any leftover "// UNIMPLEMENTED: <barrier>" line fails verification.
 """
 import argparse
 import collections
 import glob
+import os
 import re
 import sys
 
@@ -30,14 +32,13 @@ _ISYNC_PAIR_RE = re.compile(r'\t// UNIMPLEMENTED: isync\r?\n\tREX_UNIMPLEMENTED\
 _FENCE_AHEAD_RE = re.compile(r'[ \t]*std::atomic_thread_fence\(')
 _GOW2_LINE_RE = re.compile(r'^\tstd::atomic_thread_fence\(std::memory_order_\w+\);  // GOW2 MEMBARRIER \w+(?:\r?\n|\Z)', re.M)
 _ISYNC_STRIP_RE = re.compile(r'(^\t// isync(?: [^\r\n]*)?\r?\n)\t// UNIMPLEMENTED: isync\r?\n\tREX_UNIMPLEMENTED\(0x[0-9A-Fa-f]+, "isync"\);(?:\r?\n|\Z)', re.M)
+_LEFTOVER_RE = re.compile(r'// UNIMPLEMENTED: (?P<mn>sync|lwsync|eieio|isync|ptesync)\b')
 _MNEMONICS = ("sync", "lwsync", "eieio", "isync", "ptesync")
 
 
 def fence_order(mnemonic: str, operands: str) -> str:
     if mnemonic == "isync":
         return "acquire"
-    if mnemonic == "eieio":
-        return "release"
     if mnemonic == "lwsync":
         return "acq_rel"
     if mnemonic == "sync" and operands.strip() == "1":
@@ -97,6 +98,13 @@ def unfenced_lines(text: str) -> list[int]:
     return missing
 
 
+def leftover_unimplemented(text: str) -> list[tuple[int, str]]:
+    found = []
+    for match in _LEFTOVER_RE.finditer(text):
+        found.append((text.count("\n", 0, match.start()) + 1, match.group("mn")))
+    return found
+
+
 def strip_patch(text: str) -> str:
     # The substring checks skip whole-text regex passes that cost seconds on 230 MB of codegen.
     if "GOW2 MEMBARRIER" in text:
@@ -113,6 +121,8 @@ def verify(original: str, patched: str) -> list[str]:
         problems.append("text other than fences changed")
     for number in unfenced_lines(patched):
         problems.append(f"barrier at line {number} has no fence")
+    for number, mnemonic in leftover_unimplemented(patched):
+        problems.append(f"UNIMPLEMENTED {mnemonic} at line {number} remains")
     return problems
 
 
@@ -150,8 +160,10 @@ def _write_if_changed(path: str, original: str, patched: str, dry_run: bool) -> 
     if patched == original:
         return False
     if not dry_run:
-        with open(path, "w", encoding="utf-8", newline="") as handle:
+        tmp = path + ".membarrier.tmp"
+        with open(tmp, "w", encoding="utf-8", newline="") as handle:
             handle.write(patched)
+        os.replace(tmp, path)
     return True
 
 

@@ -25,7 +25,7 @@ def test_sync_inserts_seq_cst_fence_before_next_instruction():
     ("marker", "mnemonic", "operands", "order"),
     [
         ("\t// lwsync \n", "lwsync", "", "acq_rel"),
-        ("\t// eieio \n", "eieio", "", "release"),
+        ("\t// eieio \n", "eieio", "", "seq_cst"),
         ("\t// ptesync \n", "ptesync", "", "seq_cst"),
         ("\t// sync 1\n", "sync", "1", "acq_rel"),
         ("\t// sync 0\n", "sync", "0", "seq_cst"),
@@ -233,6 +233,44 @@ def test_main_verify_failure_writes_nothing(tmp_path, capsys, monkeypatch):
         return text + "corrupt\n", collections.Counter()
 
     monkeypatch.setattr(pmb, "patch_source", fake_patch_source)
+    assert pmb.main([str(target)]) == 2
+    assert target.read_bytes() == before
+    assert "ERROR" in capsys.readouterr().err
+
+
+def test_verify_and_main_report_ptesync_unimplemented_pair(tmp_path, capsys):
+    src = (
+        "\t// ptesync \n"
+        "\t// UNIMPLEMENTED: ptesync\n"
+        '\tREX_UNIMPLEMENTED(0x1, "ptesync");\n'
+        "\t// add r3, r4\n"
+    )
+    patched, _ = pmb.patch_source(src)
+    assert "REX_UNIMPLEMENTED" in patched
+    problems = pmb.verify(src, patched)
+    assert any("ptesync" in problem and "UNIMPLEMENTED" in problem for problem in problems)
+    target = tmp_path / "ptesync.cpp"
+    target.write_text(src, encoding="utf-8")
+    before = target.read_bytes()
+    assert pmb.main([str(target)]) == 2
+    assert target.read_bytes() == before
+    assert "ERROR" in capsys.readouterr().err
+
+
+def test_verify_and_main_report_isync_pair_separated_by_code(tmp_path, capsys):
+    src = (
+        "\t// isync \n"
+        "\t// UNIMPLEMENTED: isync\n"
+        "\tctx.r3.u64 = 0;\n"
+        '\tREX_UNIMPLEMENTED(0x1, "isync");\n'
+    )
+    patched, _ = pmb.patch_source(src)
+    assert "REX_UNIMPLEMENTED" in patched
+    problems = pmb.verify(src, patched)
+    assert any("isync" in problem and "UNIMPLEMENTED" in problem for problem in problems)
+    target = tmp_path / "separated.cpp"
+    target.write_text(src, encoding="utf-8")
+    before = target.read_bytes()
     assert pmb.main([str(target)]) == 2
     assert target.read_bytes() == before
     assert "ERROR" in capsys.readouterr().err
