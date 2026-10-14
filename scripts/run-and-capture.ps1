@@ -18,6 +18,7 @@ public static class Win {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
 }
 "@
 
@@ -58,15 +59,31 @@ $start = Get-Date
 # pwsh -File passes "8,20,40" as one string, so split it here.
 $events = @()
 $events += $Seconds -split ',' | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ At = [int]$_; Key = '' } }
-# Keys: "sec:Key" or "sec:Key:holdMs".
-$events += $Keys -split ',' | Where-Object { $_ } | ForEach-Object { $p = $_ -split ':'; [pscustomobject]@{ At = [int]$p[0]; Key = $p[1]; Hold = $(if ($p.Count -gt 2) { [int]$p[2] } else { 120 }) } }
+function Send-MouseMove([System.Diagnostics.Process]$proc, [int]$dx, [int]$dy) {
+    $proc.Refresh()
+    if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { [Win]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null }
+    # Relative moves in small steps, like a real mouse (MOUSEEVENTF_MOVE = 1).
+    $steps = 20
+    for ($i = 0; $i -lt $steps; $i++) {
+        [Win]::mouse_event(1, [int]($dx / $steps), [int]($dy / $steps), 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 15
+    }
+    Write-Output "moved mouse $dx,$dy"
+}
+
+# Keys: "sec:Key", "sec:Key:holdMs" or "sec:Mouse:dx:dy".
+$events += $Keys -split ',' | Where-Object { $_ } | ForEach-Object {
+    $p = $_ -split ':'
+    if ($p[1] -eq 'Mouse') { [pscustomobject]@{ At = [int]$p[0]; Key = 'Mouse'; Dx = [int]$p[2]; Dy = [int]$p[3] } }
+    else { [pscustomobject]@{ At = [int]$p[0]; Key = $p[1]; Hold = $(if ($p.Count -gt 2) { [int]$p[2] } else { 120 }) } }
+}
 foreach ($e in ($events | Sort-Object At)) {
     while (((Get-Date) - $start).TotalSeconds -lt $e.At) {
         if ($proc.HasExited) { break }
         Start-Sleep -Milliseconds 250
     }
     if ($proc.HasExited) { Write-Output "process exited with code $($proc.ExitCode) before $($e.At)s"; break }
-    if ($e.Key) { Send-Key $proc $e.Key $e.Hold } else { Save-WindowShot $proc (Join-Path $OutDir "shot-$stamp-$($e.At)s.png") }
+    if ($e.Key -eq 'Mouse') { Send-MouseMove $proc $e.Dx $e.Dy } elseif ($e.Key) { Send-Key $proc $e.Key $e.Hold } else { Save-WindowShot $proc (Join-Path $OutDir "shot-$stamp-$($e.At)s.png") }
 }
 if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
 Write-Output "log: $log"
