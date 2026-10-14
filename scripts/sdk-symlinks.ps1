@@ -14,7 +14,10 @@ function Copy-SymlinkTarget([string]$repo, [string]$rel) {
     $link = Join-Path $repo $rel
     if (-not (Test-Path $link -PathType Leaf)) { return }
     if ((Get-Item $link).Attributes -band [IO.FileAttributes]::ReparsePoint) { return }
+    # A rerun finds the links already replaced by the real source files.
+    if ((Get-Item $link).Length -gt 260) { return }
     $target = (Get-Content $link -Raw).Trim()
+    if ($target -match '[\r\n<>|"*?]') { return }
     $resolved = Join-Path (Split-Path $link -Parent) $target
     if (Test-Path $resolved -PathType Leaf) {
         Copy-Item $resolved $link -Force
