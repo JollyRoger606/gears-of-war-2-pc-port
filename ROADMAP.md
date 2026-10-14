@@ -10,7 +10,18 @@ Each phase keeps the previous one working.
 - [x] First level playable with the keyboard (Act 1, early).
 - [ ] The whole campaign (solo and split-screen co-op).
 - [ ] Saves and checkpoints next to the executable (portable install).
-- [ ] Keyboard and mouse with real mouse look, rebinding, PC button prompts.
+- [ ] Keyboard and mouse that feel native, following what gears-judgement-recomp does for the same
+      engine: mouse movement written straight into the look axes (`aTurn`/`aLookUp`) with the
+      thumbstick smoothing and acceleration (`UGearPlayerInput.ViewAcceleration` natives)
+      bypassed, real key events handed to the engine's own `InputKey`, and the
+      `bUsingGamepad` flag cleared so the game shows keyboard prompts. Today the mouse is
+      turned into a right-stick deflection, which goes through the game's dead zone and
+      acceleration and feels wrong.
+- [ ] Button prompts and icons that follow the device in use (keyboard keys while playing with
+      the keyboard, Xbox or generic controller glyphs otherwise), including the button
+      pictures inside hints, through input-aware texture variants.
+- [ ] Full control mapping for Xbox controllers, keyboard and mouse, and generic controllers
+      (anything SDL knows), editable in game.
 - [ ] Title Update 6 support (`patch_file_path` for the `.xexp`), which Road to Ruin and
       later multiplayer fixes need.
 - [ ] Horde and versus over System Link (LAN). A friend of the project reports he already
@@ -33,7 +44,8 @@ port reached more platforms and added features.
       x64/ARM64 with Vulkan; the Mass Effect port runs on ARM64).
 - [ ] Linux x64 build (Vulkan) as the first non-Windows target.
 - [ ] Android ARM64 (Vulkan): packaging, touch and gamepad input, storage access to the
-      user's own game files, memory limits.
+      user's own game files, memory limits. Plan, precedents (two ReXGlue games already run on
+      Android) and the SDK changes it needs: [docs/ANDROID.md](docs/ANDROID.md).
 - [ ] Online play beyond LAN (System Link over the internet / relay), more players in
       co-op and versus where the engine allows it.
 
@@ -47,6 +59,9 @@ port reached more platforms and added features.
 - [ ] Higher quality textures (4K packs) through a texture replacement path that loads
       user-supplied files; no original assets are redistributed.
 - [ ] Graphics options (shadows, anisotropic filtering, AA, film grain, motion blur).
+- [ ] The new options inside the game: graphics (render resolution, upscaler, texture packs)
+      and controls (mapping, sensitivity), from the game's Options screen or the runtime's
+      overlay, instead of only `gow2.toml`.
 
 ## Rules that apply to every phase
 
