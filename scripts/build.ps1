@@ -106,12 +106,12 @@ cmake -S . -B $build -G Ninja "-DCMAKE_BUILD_TYPE=$Config" `
 if ($LASTEXITCODE -ne 0) { Fail 'CMake configure failed.' }
 
 Step 'Building'
-cmake --build $build --target gow2
+cmake --build $build --target gow2 gow2_sdk_dlls
 if ($LASTEXITCODE -ne 0) {
     # A source patcher can rewrite generated files after ninja planned its compiles; the
     # freshness check then fails the link once and the second build picks the patched tree up.
     Write-Host 'Build reported a problem; trying once more.' -ForegroundColor Yellow
-    cmake --build $build --target gow2
+    cmake --build $build --target gow2 gow2_sdk_dlls
     if ($LASTEXITCODE -ne 0) { Fail 'Build failed.' }
 }
 

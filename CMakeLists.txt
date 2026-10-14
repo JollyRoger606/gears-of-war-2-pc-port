@@ -31,6 +31,34 @@ add_custom_command(TARGET gow2 POST_BUILD
             $<TARGET_FILE_DIR:gow2>/gamecontrollerdb.txt
     COMMENT "Installing gamecontrollerdb.txt beside gow2.exe")
 
+# Default settings, read by the runtime from gow2.toml beside the exe.
+add_custom_command(TARGET gow2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/gow2.toml
+            $<TARGET_FILE_DIR:gow2>/gow2.toml
+    COMMENT "Installing gow2.toml beside gow2.exe")
+
+# The SDK DLLs built from source (scripts/build-sdk.ps1 builds them into out/sdk). When they are
+# there, they replace the stock rexruntime.dll / rexgpu-xenos.dll that the SDK stages next to the exe.
+set(GOW2_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/out/sdk" CACHE PATH "Folder with the self-built rexruntime.dll and rexgpu-xenos.dll")
+file(GLOB GOW2_FIDELITYFX_DLLS "${GOW2_SDK_DIR}/amd_fidelityfx_*.dll" "${GOW2_SDK_DIR}/nvngx_dlss.dll")
+# A separate target that runs on every build: a POST_BUILD step only runs when gow2.exe relinks,
+# so a rebuilt SDK would otherwise never reach the exe folder. It runs after gow2 so the stock
+# DLLs that rexglue_setup_target stages there do not overwrite these.
+if(EXISTS "${GOW2_SDK_DIR}/rexgpu-xenos.dll" AND EXISTS "${GOW2_SDK_DIR}/rexruntime.dll")
+    add_custom_target(gow2_sdk_dlls ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${GOW2_SDK_DIR}/rexgpu-xenos.dll" "${GOW2_SDK_DIR}/rexruntime.dll" ${GOW2_FIDELITYFX_DLLS}
+                $<TARGET_FILE_DIR:gow2>
+        COMMENT "Using the self-built SDK DLLs from ${GOW2_SDK_DIR}"
+        VERBATIM)
+    message(STATUS "Self-built SDK DLLs: ${GOW2_SDK_DIR}")
+else()
+    add_custom_target(gow2_sdk_dlls)
+    message(STATUS "Self-built SDK DLLs: not built (run scripts/build-sdk.ps1); the stock SDK DLLs are used")
+endif()
+add_dependencies(gow2_sdk_dlls gow2)
+
 # Post-codegen patchers. Each rewrites the generated sources before they are compiled, chained
 # by stamps because they edit the same files.
 #   switchtrap  jump tables codegen under-counted and unresolved branches: dispatch at runtime
