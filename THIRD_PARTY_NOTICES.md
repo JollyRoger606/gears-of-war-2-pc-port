@@ -23,6 +23,7 @@ Files in this repository derived from it:
 - `src/gow2_xam_input_guard.cpp` — adapted from its `src/gowj_xam_input_guard.cpp`.
 - `src/gow2_utf8_guard.h`, `src/gow2_utf8_guard.cpp` — adapted from its `src/gowj_utf8_guard.*`.
 - `src/gow2_crash_watch.h`, `src/gow2_crash_watch.cpp` — adapted from its `src/gowj_crash_watch.*`.
+- `tools/patch_game_patches.py`, `src/gow2_game_patches.cpp` — adapted from its `tools/patch_game_patches.py` and `src/gowj_game_patches.cpp`; the patched sites and values come from xenia-canary/game-patches (`4D53082D - Gears of War 2.patch.toml`, authors illusion and boma; that repository has no license file, so only the addresses and values are reused, with credit).
 
 ## SDL_GameControllerDB
 

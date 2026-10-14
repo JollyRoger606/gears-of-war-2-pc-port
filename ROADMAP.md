@@ -7,7 +7,8 @@ Each phase keeps the previous one working.
 
 - [x] Retail `default.xex` recompiles, builds and boots; title screen, main menu, campaign intro.
 - [x] Act 1 loads and runs in real time (input race in the runtime fixed with the XAM input guard).
-- [ ] First level playable; then the whole campaign (solo and split-screen co-op).
+- [x] First level playable with the keyboard (Act 1, early).
+- [ ] The whole campaign (solo and split-screen co-op).
 - [ ] Saves and checkpoints next to the executable (portable install).
 - [ ] Keyboard and mouse with real mouse look, rebinding, PC button prompts.
 - [ ] Title Update 6 support (`patch_file_path` for the `.xexp`), which Road to Ruin and

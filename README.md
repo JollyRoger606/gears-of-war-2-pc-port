@@ -14,10 +14,12 @@ project instead recompiles the complete retail game from the player's own disc.
 Early work in progress. The retail `default.xex` recompiles, builds and boots on a
 Radeon RX 7800 XT: the game initializes its kernel, audio, file system and Direct3D 12,
 reaches the title screen and the main menu (keyboard: `--mnk_mode=true`, Enter = Start,
-Space = A), starts Solo Campaign, plays the campaign intro cinematic and loads Act 1: the in-engine
-opening scene runs in real time and offers the "Choose Path" (Skip Training / Train) prompt.
-Not playable yet: character lighting shows MSAA-resolve artifacts (the community "Black
-Shading Fix" is being ported) and keyboard/mouse controls are not mapped for gameplay.
+Space = A), starts Solo Campaign, plays the campaign intro cinematic and loads Act 1 ("Tip of the
+Spear"): the level runs in real time and Marcus can be moved with the keyboard. Three
+community patches for this exact XEX are applied to the generated code, each behind a
+setting: Black Shading Fix (character lighting), Texture Streaming Fix and 16x anisotropic
+filtering. Early state: the full campaign has not been played through, and controls are the
+SDK's generic keyboard mapping (no proper mouse look yet).
 
 - [x] codegen of retail XEX
 - [x] first successful build
@@ -25,7 +27,7 @@ Shading Fix" is being ported) and keyboard/mouse controls are not mapped for gam
 - [x] title screen and main menu
 - [x] Solo Campaign: intro cinematic and loading screen
 - [x] Act 1 loads and runs (in-engine scene, Choose Path prompt)
-- [ ] first level playable
+- [x] first level playable with the keyboard (early)
 - [ ] full campaign playable
 - [ ] keyboard & mouse
 - [ ] multiplayer/Horde
@@ -52,6 +54,19 @@ high-resolution texture packs).
   `0.0.0.5`, file time 2008-09-23. Title-update builds are not supported.
 - This repository contains no game code, no generated C++, and no assets.
 - Do not pirate the game.
+
+## Running
+
+```
+gow2.exe --game_data_root="C:\path	o\your\game" --mnk_mode=true
+```
+
+`--game_data_root` is the folder that holds `default.xex` and `GearGame` (if the exe sits in or
+next to that folder it is found automatically). Keyboard (SDK defaults, `--mnk_mode=true`):
+W/A/S/D move, arrow keys look, Space = A, Backspace = B, L = X, P = Y, Q/E = LT/RT,
+1/3 = LB/RB, Enter = Start, Tab = Back. `--mnk_mouse=true` maps the mouse to the right stick.
+The game patches can be switched off with `--gow2_black_shading_fix=false`,
+`--gow2_texture_streaming_fix=false` and `--gow2_aniso16=false`.
 
 ## Building
 

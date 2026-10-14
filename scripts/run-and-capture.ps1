@@ -1,5 +1,5 @@
 # Boot gow2.exe, take screenshots of its window at the given seconds, then stop it.
-# Usage: pwsh -File scripts/run-and-capture.ps1 [-Seconds "10,25,45"] [-Keys "75:Return,90:X"] [-ExtraArgs "--mnk_mode=true"]
+# Usage: pwsh -File scripts/run-and-capture.ps1 [-Seconds "10,25,45"] [-Keys "75:Return,90:W:3000"] [-ExtraArgs "--mnk_mode=true"]
 param(
     [string]$Seconds = '10,25,45',
     [string]$Keys = '',
@@ -38,14 +38,14 @@ function Save-WindowShot([System.Diagnostics.Process]$proc, [string]$path) {
     Write-Output "saved $path ($w x $hgt)"
 }
 
-function Send-Key([System.Diagnostics.Process]$proc, [string]$name) {
+function Send-Key([System.Diagnostics.Process]$proc, [string]$name, [int]$holdMs = 120) {
     $proc.Refresh()
     if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { [Win]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null }
     $vk = [byte][System.Windows.Forms.Keys]::$name
     [Win]::keybd_event($vk, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 120
+    Start-Sleep -Milliseconds $holdMs
     [Win]::keybd_event($vk, 0, 2, [UIntPtr]::Zero)
-    Write-Output "sent key $name"
+    Write-Output "sent key $name (${holdMs}ms)"
 }
 
 New-Item -ItemType Directory -Force -Path $OutDir, 'out/runs' | Out-Null
@@ -58,14 +58,15 @@ $start = Get-Date
 # pwsh -File passes "8,20,40" as one string, so split it here.
 $events = @()
 $events += $Seconds -split ',' | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ At = [int]$_; Key = '' } }
-$events += $Keys -split ',' | Where-Object { $_ } | ForEach-Object { $p = $_ -split ':'; [pscustomobject]@{ At = [int]$p[0]; Key = $p[1] } }
+# Keys: "sec:Key" or "sec:Key:holdMs".
+$events += $Keys -split ',' | Where-Object { $_ } | ForEach-Object { $p = $_ -split ':'; [pscustomobject]@{ At = [int]$p[0]; Key = $p[1]; Hold = $(if ($p.Count -gt 2) { [int]$p[2] } else { 120 }) } }
 foreach ($e in ($events | Sort-Object At)) {
     while (((Get-Date) - $start).TotalSeconds -lt $e.At) {
         if ($proc.HasExited) { break }
         Start-Sleep -Milliseconds 250
     }
     if ($proc.HasExited) { Write-Output "process exited with code $($proc.ExitCode) before $($e.At)s"; break }
-    if ($e.Key) { Send-Key $proc $e.Key } else { Save-WindowShot $proc (Join-Path $OutDir "shot-$stamp-$($e.At)s.png") }
+    if ($e.Key) { Send-Key $proc $e.Key $e.Hold } else { Save-WindowShot $proc (Join-Path $OutDir "shot-$stamp-$($e.At)s.png") }
 }
 if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
 Write-Output "log: $log"

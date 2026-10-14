@@ -107,6 +107,12 @@ if ($LASTEXITCODE -ne 0) { Fail 'CMake configure failed.' }
 
 Step 'Building'
 cmake --build $build --target gow2
-if ($LASTEXITCODE -ne 0) { Fail 'Build failed.' }
+if ($LASTEXITCODE -ne 0) {
+    # A source patcher can rewrite generated files after ninja planned its compiles; the
+    # freshness check then fails the link once and the second build picks the patched tree up.
+    Write-Host 'Build reported a problem; trying once more.' -ForegroundColor Yellow
+    cmake --build $build --target gow2
+    if ($LASTEXITCODE -ne 0) { Fail 'Build failed.' }
+}
 
 Write-Host "`nDone: $build\gow2.exe" -ForegroundColor Green

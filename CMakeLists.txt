@@ -17,6 +17,7 @@ set(GOW2_SOURCES
     src/gow2_xam_input_guard.cpp
     src/gow2_utf8_guard.cpp
     src/gow2_crash_watch.cpp
+    src/gow2_game_patches.cpp
 )
 
 add_executable(gow2 WIN32 ${GOW2_SOURCES})
@@ -33,6 +34,7 @@ add_custom_command(TARGET gow2 POST_BUILD
 # Post-codegen patchers. Each rewrites the generated sources before they are compiled, chained
 # by stamps because they edit the same files.
 #   switchtrap  jump tables codegen under-counted and unresolved branches: dispatch at runtime
+#   gamepatch   xenia-canary community patches for this XEX, each behind a gow2_* cvar
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(GOW2_GEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/generated/default)
 set(_prev_stamp ${GOW2_GEN_DIR}/codegen.build.stamp)
@@ -53,6 +55,7 @@ macro(gow2_patch name script description)
 endmacro()
 
 gow2_patch(switchtrap patch_switch_traps.py "Patching switch traps in generated code")
+gow2_patch(gamepatch patch_game_patches.py "Applying the game patches")
 
 # A patcher that rewrites an already-compiled file after ninja planned its work would link a
 # stale object and still report success. Fail the build in that case; build again.
