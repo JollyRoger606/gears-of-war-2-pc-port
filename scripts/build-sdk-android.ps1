@@ -67,6 +67,9 @@ Write-Host "NDK:    $Ndk"
 Write-Host "Source: $Source"
 
 $flags = '-march=armv8.2-a -fno-emulated-tls'
+# Windows PowerShell 5.1 stops on the first line CMake writes to stderr (a warning) under 'Stop';
+# the exit codes below decide failure instead.
+$ErrorActionPreference = 'Continue'
 $log = cmake -S $Source -B $build -G Ninja `
     "-DCMAKE_TOOLCHAIN_FILE=$Ndk\build\cmake\android.toolchain.cmake" `
     '-DANDROID_ABI=arm64-v8a' "-DANDROID_PLATFORM=android-$Api" '-DANDROID_STL=c++_shared' `

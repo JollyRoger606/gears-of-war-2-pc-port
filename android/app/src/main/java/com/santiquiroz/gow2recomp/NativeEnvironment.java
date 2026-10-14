@@ -20,6 +20,8 @@ final class NativeEnvironment {
         set("XDG_DATA_HOME", paths.dataDir());
         // Android has no /tmp; std::filesystem::temp_directory_path() reads TMPDIR.
         set("TMPDIR", paths.cacheDir());
+        // The runtime keeps its config and logs beside the executable, which for an app is /system/bin.
+        set("REX_EXECUTABLE_FOLDER", paths.dataDir());
     }
 
     private static void set(String name, File dir) {
