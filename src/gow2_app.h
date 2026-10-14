@@ -12,6 +12,10 @@
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 
+#include "gow2_crash_watch.h"
+#include "gow2_utf8_guard.h"
+#include "gow2_xam_input_guard.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <dxgi.h>
@@ -118,6 +122,12 @@ class Gow2App : public rex::ReXApp {
   void OnPreSetup(rex::RuntimeConfig& config) override {
     PickFastestAdapter();
     config.gpu_plugin = "xenos";
+    // Guest content names are raw bytes; the runtime's UTF-8 decoder throws on a bad lead byte.
+    rex::glue::InstallUtf8Guard();
+    rex::glue::InstallXamInputGuard();
+    rex::glue::InstallDiscErrorSilencer();
+    // Last: it installs the unhandled-exception filter; the others only observe first-chance events.
+    rex::glue::InstallCrashWatch();
   }
 
   void OnConfigurePaths(rex::PathConfig& paths) override {

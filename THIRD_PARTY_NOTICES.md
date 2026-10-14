@@ -19,6 +19,10 @@ Files in this repository derived from it:
   PickFastestAdapter, and OnConfigurePaths adapted from its `src/gowj_app.h`.
 - `config/gamecontrollerdb.txt` — copied from its `config/gamecontrollerdb.txt`.
 - `CMakeLists.txt` — gamecontrollerdb.txt install step adapted from its `CMakeLists.txt`.
+- `src/gow2_xam_input_guard.h` — adapted from its `src/gowj_xam_input_guard.h`.
+- `src/gow2_xam_input_guard.cpp` — adapted from its `src/gowj_xam_input_guard.cpp`.
+- `src/gow2_utf8_guard.h`, `src/gow2_utf8_guard.cpp` — adapted from its `src/gowj_utf8_guard.*`.
+- `src/gow2_crash_watch.h`, `src/gow2_crash_watch.cpp` — adapted from its `src/gowj_crash_watch.*`.
 
 ## SDL_GameControllerDB
 

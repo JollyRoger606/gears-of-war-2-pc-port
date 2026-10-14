@@ -14,6 +14,9 @@ include(generated/rexglue.cmake)
 
 set(GOW2_SOURCES
     src/main.cpp
+    src/gow2_xam_input_guard.cpp
+    src/gow2_utf8_guard.cpp
+    src/gow2_crash_watch.cpp
 )
 
 add_executable(gow2 WIN32 ${GOW2_SOURCES})

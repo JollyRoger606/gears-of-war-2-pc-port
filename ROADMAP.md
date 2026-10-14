@@ -6,6 +6,7 @@ Each phase keeps the previous one working.
 ## Phase 1 - Complete port (retail parity)
 
 - [x] Retail `default.xex` recompiles, builds and boots; title screen, main menu, campaign intro.
+- [x] Act 1 loads and runs in real time (input race in the runtime fixed with the XAM input guard).
 - [ ] First level playable; then the whole campaign (solo and split-screen co-op).
 - [ ] Saves and checkpoints next to the executable (portable install).
 - [ ] Keyboard and mouse with real mouse look, rebinding, PC button prompts.
@@ -13,6 +14,10 @@ Each phase keeps the previous one working.
       later multiplayer fixes need.
 - [ ] Horde and versus over System Link (LAN). A friend of the project reports he already
       added System Link to a Gears port; find out which one and whether it can be reused.
+      ReXGlue 0.10.0.9 stubs most of it (XGI sessions return success without state,
+      `XNetGetTitleXnAddr` advertises loopback); GrizzlyOne95's
+      [LAN co-op audit](https://github.com/GrizzlyOne95/gears-judgement-recomp/blob/main/docs/LAN_COOP_NETWORK_AUDIT.md)
+      for Judgment lays out the trace -> session service -> replication milestones.
 - [ ] Stability: no unregistered-function FATALs in a full playthrough (hints complete),
       known Xenia-era GPU issues for this title fixed (character shading, lens flares,
       occlusion queries).

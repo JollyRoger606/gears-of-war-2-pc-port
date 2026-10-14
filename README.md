@@ -14,14 +14,17 @@ project instead recompiles the complete retail game from the player's own disc.
 Early work in progress. The retail `default.xex` recompiles, builds and boots on a
 Radeon RX 7800 XT: the game initializes its kernel, audio, file system and Direct3D 12,
 reaches the title screen and the main menu (keyboard: `--mnk_mode=true`, Enter = Start,
-Space = A), starts Solo Campaign, plays the campaign intro cinematic and reaches the
-level loading screen. Not playable yet: gameplay past the first load is untested.
+Space = A), starts Solo Campaign, plays the campaign intro cinematic and loads Act 1: the in-engine
+opening scene runs in real time and offers the "Choose Path" (Skip Training / Train) prompt.
+Not playable yet: character lighting shows MSAA-resolve artifacts (the community "Black
+Shading Fix" is being ported) and keyboard/mouse controls are not mapped for gameplay.
 
 - [x] codegen of retail XEX
 - [x] first successful build
 - [x] boots and plays the opening cinematic
 - [x] title screen and main menu
 - [x] Solo Campaign: intro cinematic and loading screen
+- [x] Act 1 loads and runs (in-engine scene, Choose Path prompt)
 - [ ] first level playable
 - [ ] full campaign playable
 - [ ] keyboard & mouse
