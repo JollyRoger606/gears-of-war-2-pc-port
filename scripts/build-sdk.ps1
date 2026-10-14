@@ -198,9 +198,9 @@ foreach ($n in 'loader', 'upscaler') {
 }
 # rexruntime.dll imports amd_fidelityfx_dx12.dll (FSR 1 / CAS present effects); the other signed
 # FidelityFX libraries (frame generation, denoiser, radiance cache, Vulkan) are not used.
-$ffxRuntime = Get-ChildItem $sdk -Recurse -Filter 'amd_fidelityfx_dx12.dll' -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-if (-not $ffxRuntime) { Fail "amd_fidelityfx_dx12.dll was not found under $sdk (REXGLUE_ENABLE_FIDELITYFX build)." }
+# The one the SDK builds next to its import library (bin\), not AMD's prebuilt copy under _deps\.
+$ffxRuntime = Get-Item (Join-Path $sdk 'bin\amd_fidelityfx_dx12.dll') -ErrorAction SilentlyContinue
+if (-not $ffxRuntime) { Fail "amd_fidelityfx_dx12.dll was not built in $sdk\bin (REXGLUE_ENABLE_FIDELITYFX build)." }
 Copy-Item $ffxRuntime.FullName $outDir -Force
 Write-Host "  amd_fidelityfx_dx12.dll <- $($ffxRuntime.FullName)"
 

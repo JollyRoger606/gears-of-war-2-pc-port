@@ -36,7 +36,11 @@ function Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
 
 function Find-VsWithMsvcHeaders {
     # Some VS installs ship cl.exe without the toolset headers (excpt.h); pick one that has them.
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    # Outside 64-bit Windows ${env:ProgramFiles(x86)} is missing; return $null so the caller
+    # reports the clean "no toolchain" error instead of crashing in Join-Path.
+    $pf86 = ${env:ProgramFiles(x86)}
+    if (-not $pf86) { return $null }
+    $vswhere = Join-Path $pf86 'Microsoft Visual Studio\Installer\vswhere.exe'
     if (-not (Test-Path $vswhere)) { return $null }
     $paths = & $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     foreach ($p in $paths) {
@@ -54,7 +58,11 @@ function Import-VcVars($vsPath) {
 }
 
 function Find-ClangDir($vsPath) {
-    foreach ($dir in @((Join-Path $vsPath 'VC\Tools\Llvm\x64\bin'), (Join-Path $env:ProgramFiles 'LLVM\bin'))) {
+    # Either variable can be missing (non-Windows shell, no VS); only probe roots that exist.
+    $roots = @()
+    if ($vsPath) { $roots += Join-Path $vsPath 'VC\Tools\Llvm\x64\bin' }
+    if ($env:ProgramFiles) { $roots += Join-Path $env:ProgramFiles 'LLVM\bin' }
+    foreach ($dir in $roots) {
         if (Test-Path (Join-Path $dir 'clang++.exe')) { return $dir }
     }
     $onPath = Get-Command clang++ -ErrorAction SilentlyContinue

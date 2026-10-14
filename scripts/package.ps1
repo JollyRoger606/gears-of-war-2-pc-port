@@ -24,6 +24,9 @@
 .PARAMETER OutDir
   Output folder for the zip and staging area. Default: out\package.
 
+.PARAMETER Config
+  Settings file shipped as gow2.toml. Default: config\gow2.toml.
+
 .EXAMPLE
   .\scripts\package.ps1 -Version "0.1.0"
 #>
@@ -35,7 +38,9 @@ param(
 
     [string]$SdkDir = 'out\sdk',
 
-    [string]$OutDir = 'out\package'
+    [string]$OutDir = 'out\package',
+
+    [string]$Config = 'config\gow2.toml'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -133,7 +138,7 @@ function Copy-VcRuntime([string]$StageDir) {
     }
 }
 
-function Copy-RepoDocs([string]$Root, [string]$StageDir) {
+function Copy-RepoDocs([string]$Root, [string]$StageDir, [string]$ConfigPath) {
     foreach ($name in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md')) {
         $src = Join-Path $Root $name
         if (-not (Test-Path $src)) {
@@ -141,10 +146,12 @@ function Copy-RepoDocs([string]$Root, [string]$StageDir) {
         }
         Copy-Item -Force $src (Join-Path $StageDir $name)
     }
-    $toml = Join-Path $Root 'config\gow2.toml'
-    if (Test-Path $toml) {
-        Copy-Item -Force $toml (Join-Path $StageDir 'gow2.toml')
-    }
+    if (-not (Test-Path $ConfigPath)) { Fail "Settings file not found: $ConfigPath" }
+    Copy-Item -Force $ConfigPath (Join-Path $StageDir 'gow2.toml')
+    # Texture pack helper (Python 3 + Pillow), see README "Texture packs".
+    $tools = Join-Path $StageDir 'tools'
+    New-Item -ItemType Directory -Force -Path $tools | Out-Null
+    Copy-Item -Force (Join-Path (Join-Path $Root 'tools') 'texpack.py') (Join-Path $tools 'texpack.py')
 }
 
 function Write-QuickstartFile([string]$StageDir) {
@@ -242,6 +249,7 @@ $root = Get-RepoRoot
 $BuildDir = Resolve-RootedPath $root $BuildDir
 $SdkDir = Resolve-RootedPath $root $SdkDir
 $OutDir = Resolve-RootedPath $root $OutDir
+$Config = Resolve-RootedPath $root $Config
 
 $topName = 'gow2-recomp-{0}-win64' -f $Version
 $stageRoot = Join-Path $OutDir 'staging'
@@ -263,7 +271,7 @@ Step 'VC++ runtime DLLs'
 Copy-VcRuntime $stageDir
 
 Step 'Docs and QUICKSTART.txt'
-Copy-RepoDocs $root $stageDir
+Copy-RepoDocs $root $stageDir $Config
 Write-QuickstartFile $stageDir
 
 Step 'Game-data safety check'

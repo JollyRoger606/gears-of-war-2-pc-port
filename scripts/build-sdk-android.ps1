@@ -21,17 +21,23 @@
 
 .PARAMETER Clean
   Delete the Android build folder first.
+
+.PARAMETER LowPriority
+  Run the build below normal priority (cmake, ninja and the compilers inherit it), so the PC stays
+  responsive while it compiles.
 #>
 param(
     [Parameter(Mandatory)][string]$Source,
     [string]$Ndk = '',
     [int]$Api = 29,
     [string[]]$Targets = @('rexruntime', 'rexgpu-xenos'),
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$LowPriority
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'sdk-symlinks.ps1')
+if ($LowPriority) { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' }
 
 function Fail($msg) { Write-Host "BUILD FAILED: $msg"; exit 1 }
 
