@@ -1,0 +1,4 @@
+# core.autocrlf would turn the POSIX wrapper script into CRLF and break it on Linux and macOS.
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">gow2-recomp</string>
+    <string name="setup_title">Your game files are needed</string>
+    <string name="setup_explanation">This app only contains the port\'s own code. To play, you need your own extracted copy of Gears of War 2: the folder that contains default.xex.\n\nChoose that folder and the app copies it into its own storage. The game memory-maps its files and Android cannot memory-map files opened through the folder picker, so the copy needs as much free space as the game takes.\n\nYou can also copy the folder yourself, for example over USB from a PC, so that default.xex ends up in:</string>
+    <string name="setup_choose_folder">Choose game folder</string>
+    <string name="setup_check_again">Check again</string>
+    <string name="setup_copying">Copying game files…</string>
+    <string name="setup_progress">%1$s of %2$s\n%3$s</string>
+    <string name="setup_no_folder">No folder was chosen.</string>
+    <string name="setup_no_picker">This device has no folder picker. Copy the game folder over USB instead.</string>
+    <string name="setup_still_missing">default.xex is not in %1$s yet.</string>
+    <string name="setup_copy_failed">The copy failed: %1$s</string>
+</resources>

@@ -3,6 +3,7 @@ generated/
 out/
 build/
 *.xex
+*.xxx
 *.iso
 pytest-of-*/
 __pycache__/

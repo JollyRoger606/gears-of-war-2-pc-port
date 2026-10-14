@@ -1,6 +1,7 @@
 # Android port: plan
 
-Status: research done (October 2026), no Android build yet. Target device for bring-up: Samsung
+Status (October 2026): the app shell runs on the phone with a placeholder native library, and the
+SDK is being ported to Android arm64; the game itself does not run on Android yet. Target device for bring-up: Samsung
 Galaxy S25 Ultra (Snapdragon 8 Elite, Adreno 830, Vulkan 1.3).
 
 ## What already exists
@@ -61,6 +62,8 @@ features need reverse engineering of Unreal Engine 3's session and network code.
    intrinsics; simde maps them to NEON).
 3. **App shell:** SDL3 activity, game folder chosen by the player (their own extracted disc,
    copied to app storage), controller and touch input, a separate `:game` process.
+   The shell exists in [`android/`](../android/README.md) and runs on the S25 Ultra with a
+   placeholder native library; input mapping, the `:game` process and the game libraries remain.
 4. **Bring-up on the S25 Ultra** with the stock driver first, then Turnip through adrenotools;
    record `vulkaninfo` for the device.
 5. **Measure.** If the generic Xenos path cannot hold 30 fps in Act 1, the proven alternative is a

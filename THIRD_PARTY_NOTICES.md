@@ -39,6 +39,19 @@ Files in this repository derived from it:
 - Copyright: Copyright (c) 2026, Tom Clay; portions Copyright (c) 2022, Ben Vanik and Xenia project contributors
 - License: BSD 3-Clause (full text below).
 
+## SDL3 Android project template
+
+- Project: [libsdl-org/SDL](https://github.com/libsdl-org/SDL), `android-project` template of SDL 3.4.14.
+- Description: the Java activity and helper classes in `android/app/src/main/java/org/libsdl/app/`, `android/app/proguard-rules.pro` and parts of `android/app/src/main/AndroidManifest.xml`, unchanged.
+- Copyright: Copyright (C) 1997-2026 Sam Lantinga
+- License: zlib (full text in `android/LICENSE.SDL3.txt`).
+
+## Gradle wrapper
+
+- Project: [gradle/gradle](https://github.com/gradle/gradle)
+- Description: `android/gradlew`, `android/gradlew.bat` and `android/gradle/wrapper/gradle-wrapper.jar`, which download and run Gradle to build the Android shell.
+- License: Apache License 2.0.
+
 ## TinySHA1
 
 - Project: [mohaps/TinySHA1](https://github.com/mohaps/TinySHA1), the copy in the ReXGlue SDK (`thirdparty/crypto/TinySHA1.hpp`, "Modified for use by Xenia"), vendored as `src/third_party/TinySHA1.hpp` to hash the edited Coalesced bundles.
