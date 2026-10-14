@@ -1,0 +1,6 @@
+game/
+generated/
+out/
+build/
+*.xex
+*.iso
