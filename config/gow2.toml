@@ -55,6 +55,10 @@ mnk_mode = true
 mnk_mouse = true
 mnk_sensitivity = 1.0
 
+# Menu button prompts: "auto" shows keyboard labels unless a controller is connected at
+# launch, "keyboard" always shows them, "controller" keeps the Xbox button art.
+gow2_prompts = "auto"
+
 keybind_lstick_up = "W"
 keybind_lstick_down = "S"
 keybind_lstick_left = "A"

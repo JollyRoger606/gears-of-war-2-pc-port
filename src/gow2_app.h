@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -13,6 +14,7 @@
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 
+#include "gow2_coalesced.h"
 #include "gow2_crash_watch.h"
 #include "gow2_utf8_guard.h"
 #include "gow2_xam_input_guard.h"
@@ -238,8 +240,23 @@ class Gow2App : public rex::ReXApp {
 #endif
   }
 
+  // Coalesced tweaks (mouse look, key prompts) work on a cached copy of the player's own bundles.
+  // Runs from OnPreSetup: OnConfigurePaths comes before gow2.toml is loaded and before logging,
+  // and the overrides must be live before the runtime mounts the game folder.
+  void PrepareCoalesced() {
+    const rex::glue::CoalescedResult coalesced = rex::glue::PrepareCoalescedOverrides(
+        game_data_root_, cache_root_, rex::glue::CoalescedOptionsFromCvars());
+#ifdef _WIN32
+    _putenv_s("GOW2_VFS_OVERRIDES", coalesced.overrides.c_str());
+#else
+    setenv("GOW2_VFS_OVERRIDES", coalesced.overrides.c_str(), 1);
+#endif
+    if (!coalesced.summary.empty()) REXLOG_INFO("{}", coalesced.summary);
+  }
+
   void OnPreSetup(rex::RuntimeConfig& config) override {
     SetIfUnset("mnk_mode", "true");
+    PrepareCoalesced();
     PickFastestAdapter();
     config.gpu_plugin = "xenos";
     // Guest content names are raw bytes; the runtime's UTF-8 decoder throws on a bad lead byte.
@@ -264,6 +281,8 @@ class Gow2App : public rex::ReXApp {
       std::filesystem::create_directories(paths.user_data_root, ec);
     }
 #endif
+    game_data_root_ = paths.game_data_root;
+    cache_root_ = paths.cache_root;
   }
 
   // Override virtual hooks for customization:
@@ -276,4 +295,8 @@ class Gow2App : public rex::ReXApp {
   // std::unique_ptr<rex::ui::AchievementNotificationDialog>
   // CreateAchievementNotificationDialog() override;
   // void OnShutdown() override {}
+
+ private:
+  std::filesystem::path game_data_root_;
+  std::filesystem::path cache_root_;
 };
