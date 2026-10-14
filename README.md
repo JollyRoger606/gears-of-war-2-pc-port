@@ -100,7 +100,7 @@ Measured on a Ryzen 9 7900X3D + Radeon RX 7800 XT, Act 1, `resolution_scale = 2`
 
 - Native resolution via `resolution_scale` (see Settings).
 - FSR: the release runtime is built with AMD FidelityFX. `present_effect = "fsr"` renders at a lower `resolution_scale` and upscales with FSR 1 plus sharpening; `"cas"` only sharpens. Measured with `resolution_scale = 1` and FSR 1 to 1440p: about 85 fps in Act 1.
-- Temporal upscaling: FSR 4.1 (Radeon RX 7000/9000, through AMD's signed FidelityFX SDK 2.3 DLLs), FSR 3.1 on other GPUs and DLSS on NVIDIA are built in, ported from the Gears of War: Judgment recompilation. It does not switch on for this game yet: its scene detection still expects Judgment's frame layout and is being calibrated. Off by default (`gow2_temporal`, `gow2_upscaler`).
+- Temporal upscaling: FSR 4.1 (Radeon RX 7000/9000, through AMD's signed FidelityFX SDK 2.3 DLLs), FSR 3.1 on other GPUs and DLSS on NVIDIA (bring your own `nvngx_dlss.dll`, see THIRD_PARTY_NOTICES.md) are built in, ported from the Gears of War: Judgment recompilation. It does not switch on for this game yet: its scene detection still expects Judgment's frame layout and is being calibrated. Off by default (`gow2_temporal`, `gow2_upscaler`).
 - Texture packs: see the next section. Tested with a texture replaced by a version twice its size:
 
   ![A title-screen texture replaced by a recoloured 2048x2048 version](docs/screenshots/texture-pack-test.jpg)

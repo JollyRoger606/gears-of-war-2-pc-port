@@ -88,8 +88,9 @@ function Copy-SdkOverlay([string]$Dir, [string]$StageDir) {
             Write-Host "SdkDir override: $name"
         }
     }
-    $ffx = @(Get-ChildItem -Path $Dir -Recurse -File -Filter 'amd_fidelityfx_*.dll' -ErrorAction SilentlyContinue) +
-        @(Get-ChildItem -Path $Dir -Recurse -File -Filter 'nvngx_dlss.dll' -ErrorAction SilentlyContinue)
+    # nvngx_dlss.dll stays out: NVIDIA's DLSS SDK license does not fit an open-source release
+    # (THIRD_PARTY_NOTICES.md, "NVIDIA DLSS").
+    $ffx = Get-ChildItem -Path $Dir -Recurse -File -Filter 'amd_fidelityfx_*.dll' -ErrorAction SilentlyContinue
     foreach ($f in $ffx) {
         Copy-Item -Force $f.FullName (Join-Path $StageDir $f.Name)
         Write-Host "SdkDir FidelityFX: $($f.Name)"
