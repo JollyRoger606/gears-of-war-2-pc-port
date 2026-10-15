@@ -1,6 +1,8 @@
 # Campaign co-op beyond two players
 
-Status: design only, nothing is implemented. This document condenses four read-only
+Status: Stage 1 is in progress. SDK patch `0010-system-link-sessions` (section 3, Stage 1, item 2)
+builds for Windows, compiles for Android and passes its unit tests, but has not run in the game
+yet; everything else is design only. This document condenses four read-only
 investigations from 2026-10-14 (join and spawn path, campaign systems, patch mechanism, network).
 A second pass re-checked each one, and the corrections from that pass are already applied here.
 The target is 4 players first, then 8-10, then PC-Android cross-play over System Link.
@@ -110,8 +112,8 @@ Two things that look like caps are not:
 
 ### 1.4 System Link in the port blocks even two players
 
-From `network.md`. Line numbers refer to the patched SDK tree in `out/sdk-build/rexglue-sdk`. [V
-unless marked]
+From `network.md`. Line numbers refer to the patched SDK tree in `out/sdk-build/rexglue-sdk` before
+patch 0010, which addresses every item in this list (section 3, Stage 1, item 2). [V unless marked]
 
 1. `XNetGetEthernetLinkStatus` returns 0 (`xam_net.cpp:600-606`). `HasLinkConnection()` is
    therefore false and `GearMenuGame.InitializeCoopSettingsFromProfile+0x0065` aborts. The link
@@ -267,7 +269,7 @@ stays loaded on the host and on every client for the whole chapter. Chapter 1 la
 Work:
 
 1. **Script patches.** The group in section 4, behind `gow2_coop_players`.
-2. **SDK patch `0007-system-link-sessions` (M2a), on top of 0003:**
+2. **SDK patch `0010-system-link-sessions` (M2a), applied after 0002-0007:**
    - SendTo/RecvFrom: fill `sockaddr_in` in network order, swap the received port, and write
      `from` only when the call succeeded.
    - `XNetGetEthernetLinkStatus`: return 0x0B (active, 100 Mbps, full duplex), with a setting to
@@ -297,6 +299,45 @@ Work:
 
      A socket bound to a specific address never receives broadcasts, so this mode requires the
      fan-out. [I] Both settings stay off on a real LAN.
+
+   Implemented in `sdk/patches/0010-system-link-sessions.patch`. Settings:
+
+   | Setting | Default | Effect |
+   |---|---|---|
+   | `net_link_active` | true | `XNetGetEthernetLinkStatus` returns 0x0B; false returns 0 (unplugged cable, co-op off) |
+   | `user_xuid` | empty | XUID the game sees. Empty: the one in `system_link_xuid.txt` in the user data folder, created on the first run as `0xB13E` plus 48 random bits |
+   | `user_name` | `User` | Gamertag, up to 15 characters |
+   | `net_local_ip` | empty | `XNADDR.ina`. Empty: `net_bind_ip` when set, else 127.0.0.1 |
+   | `net_bind_ip` | empty | Rewrites `0.0.0.0` binds and logs `[netlink] bind 0.0.0.0:1000 -> 127.0.0.2:1000 (net_bind_ip)` |
+   | `net_broadcast_targets` | empty | Unicast copies of every 255.255.255.255 send, skipping this instance (`net_bind_ip`, else `net_local_ip`); the list is logged once |
+   | `net_random_seed` | 0 | Non-zero: `XNetRandom`, XNKIDs, XNKEYs and nonces come from a SplitMix64 stream with this seed |
+
+   Decisions taken while implementing:
+
+   - Saves and profile files stay keyed by the old fixed identity. `UserProfile::xuid()`
+     (0xB13EBABEBABEBABE) still names the content folder and `name()` ("User") the profile-settings
+     folder. The game sees `network_xuid()` and `gamertag()` instead, through `XamUserGetXUID`,
+     `XamUserGetSigninInfo`, `XamUserGetName`, `XamUserGetGamerTag`, profile-setting reads and
+     `XamContentGetCreator`. Changing `user_xuid` or `user_name` never moves a save. Whether the game
+     accepts an existing save under a new XUID is a test item; `user_xuid=B13EBABEBABEBABE` restores the
+     old value.
+   - The MAC is `02` plus five bytes of SplitMix64 over the XUID and the IP, so instances on one PC
+     differ even when they share a XUID.
+   - Session handles are 0xCAFE0004, 0xCAFE0008 and so on. Each session object is a zeroed 16-byte
+     system-heap block, and `ObDereferenceObject` skips these blocks: the title dereferences the object
+     after every XSession call (for example `sub_829A5810` and `sub_829A3C70`). Unknown handles still
+     get the old 0xDEADF00D.
+   - Joins and leaves keep a member list per session; slot limits are not enforced. Leave handles
+     both forms, but the title only uses the remote one (`sub_829A3C70` passes a XUID array).
+     `XSessionGetDetails` fills the 128-byte `XSESSION_LOCAL_DETAILS` and as many 16-byte members as the
+     caller's size allows, right after it. The only caller, `sub_828333C8`, passes 640 bytes.
+   - `XNetRegisterKey`, `XNetUnregisterKey` and `XNetUnregisterInAddr` return 0.
+   - On Android the patch compiles; errno maps to WSA codes for `sendto`, `setsockopt` and `bind`
+     only. The rest of the POSIX work stays in Stage 4.
+
+   With the link reported active, a solo campaign also creates its LAN session and answers System
+   Link queries on UDP 14001, as a 360 with a cable would. [I] That is the main change to
+   single-player behaviour, and the Stage 1 test checks it.
 3. **Tools.** Move the `out/re-mouse` package tools into `tools/ue3/`, next to the patch generator.
 
 Out of scope for Stage 1 (known to break; see Stage 2): chapter transitions, the death of any
@@ -321,12 +362,21 @@ One instance, no network:
 5. Use a debug switch that corrupts one expected byte in the table. The group must be skipped, the
    log must name the row, and the game must stay retail.
 
-Network (needs SDK patch 0007):
+With SDK patch 0010, the single-instance runs also check its defaults: the log shows
+`Signed-in player: XUID <16 hex digits>, gamertag 'User'`, an existing save loads, and with
+`--system_link_trace=true` the solo campaign logs `XGISessionCreate ... flags=0x00000021 ... host=true
+known=true ... host_ip=127.0.0.1` and play is unchanged. With `--net_link_active=false` the trace
+shows `XNetGetEthernetLinkStatus ... ret=0x0` and no session is created, as before 0010.
+
+Network (needs SDK patch 0010):
 
 6. Two instances: host on 127.0.0.1, client on 127.0.0.2, unique XUIDs, fan-out targets set. The
    client finds the session (the beacon names 127.0.0.1), runs `open 127.0.0.1` and takes over the
    AI Dom. This is the two-player baseline; the script patches play no part yet. Capture with
-   `system_link_trace`.
+   `system_link_trace`. Settings: host `--net_bind_ip=127.0.0.1`, client `--net_bind_ip=127.0.0.2`,
+   both `--net_broadcast_targets=127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4 --system_link_trace=true`,
+   and a different XUID per instance (`--user_xuid=...`, or a separate `--user_data_root`, which also
+   separates the saves).
 7. Host and player 2 play into Act 1 chapter 2. One way to get there is to play chapter 1 first; a
    profile with chapter 2 unlocked also works. `GearGameSP_Base.InitGame+0x0063` reads `?chapter=`,
    but nobody has tested passing it.
@@ -544,7 +594,7 @@ server corrections, because UE3 is server-authoritative. [I]
   symmetrically in bind, sendto, recvfrom and getsockname. The remap must be on by default
   everywhere before cross-play. Also implement `getsockname` and `getpeername`, which are stubs
   today.
-- **SDK tree.** The Android SDK tree must carry 0003 and 0007. Patches 0005 and 0006 are not there
+- **SDK tree.** The Android SDK tree must carry 0003 and 0010. Patches 0005 and 0006 are not there
   yet (see `docs/ANDROID.md`).
 - **Version gate.** Both ends run the same game version. The patch-set hash goes in the session
   data, and a join is refused on mismatch.
@@ -628,12 +678,30 @@ Deliberately not in Stage 1:
 
 ## 5. Open questions
 
+Settled from code while writing patch 0010:
+
+- **`XSessionCreate` flags.** The flag builder `sub_8282A760` returns 0x21 (HOST |
+  USES_PEER_NETWORK, the XDK's `XSESSION_CREATE_SYSTEMLINK` plus HOST) as soon as `bIsLanMatch`
+  (+156, mask 0x40000000) is set, before it looks at any other setting, so a LAN host passes exactly
+  0x21. The join path `sub_8282CA88` calls the same builder and clears bit 0 (`rlwinm r24,r3,0,0,30`),
+  so a joiner passes 0x20. [V] `system_link_trace` prints the flags of every create to confirm it at
+  run time.
+- **XNKID marker.** The title never builds or tests an XNKID: it copies SessionInfo+12 into the
+  beacon response (`sub_828294A0`) and hands it back to XNet (`XNetRegisterKey`,
+  `XNetXnAddrToInAddr`). Only XNet reads the marker. The XDK convention is that a system-link XNKID
+  has the top bits of byte 0 clear (`XNET_XNKID_SYSTEM_LINK` = 0x00 under mask 0xE0/0xF0); patch 0010
+  clears the top nibble of a random XNKID. [V title side, I XDK constants]
+- **SessionInfo zero-fill.** Yes. The host path `sub_8282AA10` allocates the 72-byte SessionInfo
+  (`li r3,72` / `bl 0x827df658`), clears it with `memset(p, 0, 72)` (`bl 0x82a93150`) and stores it
+  at Session+8 before `sub_8282B370` calls `XSessionCreate`. The block is the nonce (+0), the
+  handle (+8) and `XSESSION_INFO` (+12, 60 bytes). A joiner reuses the block that `sub_8282A9A0` fills
+  from the search result. [V]
+- **`XSessionGetDetails` size.** The title's wrapper `sub_829A5810` requires at least 128 bytes
+  (`sizeof(XSESSION_LOCAL_DETAILS)`) and takes `pcbResultsBuffer` as a pointer; the XGI message
+  carries that pointer at +4, not the size. [V]
+
 Network and SDK:
 
-- Which `XSessionCreate` flag bits besides HOST does the title pass, and what is the system-link
-  marker nibble of the XNKID? Confirm with `system_link_trace` before the session fill depends on
-  them.
-- Does UE3 zero-fill `SessionInfo` before `XSessionCreate`?
 - Does Windows deliver the game's 255.255.255.255:14001 broadcast to other local instances bound to
   0.0.0.0 with `SO_REUSEADDR`? If it does, fan-out is needed only in `net_bind_ip` mode.
 - Which server cap clamps client rates, `MaxClientRate` or `MaxInternetClientRate`?
