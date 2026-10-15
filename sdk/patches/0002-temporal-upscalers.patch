@@ -762,10 +762,10 @@ index 0000000..0fecf91
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/src/graphics/d3d12/gow2_fsr.cpp b/src/graphics/d3d12/gow2_fsr.cpp
 new file mode 100644
-index 0000000..da6cd4a
+index 0000000..9990e92
 --- /dev/null
 +++ b/src/graphics/d3d12/gow2_fsr.cpp
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,255 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +// AMD FidelityFX Super Resolution backend for the temporal pipeline. Nothing from AMD is
 +// redistributed: amd_fidelityfx_loader_dx12.dll (and the upscaler provider next to it) are loaded
@@ -820,6 +820,37 @@ index 0000000..da6cd4a
 +  ffxCreateBackendDX12Desc be{};
 +  ffxOverrideVersion ov{};
 +};
++
++// Provider names are bare versions such as "4.1.1"; older loaders prefix them ("FSR 3.1.5").
++int VersionMajor(const std::string& name) {
++  size_t i = 0;
++  while (i < name.size() && (name[i] < '0' || name[i] > '9')) ++i;
++  if (i == name.size()) return -1;
++  int major = 0;
++  while (i < name.size() && name[i] >= '0' && name[i] <= '9') {
++    major = major * 10 + (name[i] - '0');
++    ++i;
++  }
++  return major;
++}
++
++// The guest frame is created TYPELESS; FidelityFX needs a concrete view format of the same family.
++uint32_t ColorViewFormat(ID3D12Resource* color, uint32_t fallback) {
++  if (!color) return fallback;
++  switch (color->GetDesc().Format) {
++    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
++    case DXGI_FORMAT_R8G8B8A8_UNORM:
++      return FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM;
++    case DXGI_FORMAT_B8G8R8A8_TYPELESS:
++    case DXGI_FORMAT_B8G8R8A8_UNORM:
++      return FFX_API_SURFACE_FORMAT_B8G8R8A8_UNORM;
++    case DXGI_FORMAT_R10G10B10A2_TYPELESS:
++    case DXGI_FORMAT_R10G10B10A2_UNORM:
++      return FFX_API_SURFACE_FORMAT_R10G10B10A2_UNORM;
++    default:
++      return fallback;
++  }
++}
 +}  // namespace
 +
 +bool FsrInit(ID3D12Device* device) {
@@ -865,10 +896,7 @@ index 0000000..da6cd4a
 +      for (uint64_t i = 0; i < cap; ++i) {
 +        g_versions.push_back({ids[i], names[i] ? names[i] : ""});
 +        REXGPU_WARN("FSR provider {}: id=0x{:X} '{}'", i, ids[i], names[i] ? names[i] : "?");
-+        std::string nm = names[i] ? names[i] : "";
-+        if (nm.find("4.") != std::string::npos && nm.find("FSR") != std::string::npos &&
-+            nm.find("3.") == std::string::npos)
-+          g_fsr4 = true;
++        if (VersionMajor(names[i] ? names[i] : "") == 4) g_fsr4 = true;
 +      }
 +    }
 +  }
@@ -895,12 +923,10 @@ index 0000000..da6cd4a
 +  c.be.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
 +  c.be.device = g_device;
 +  c.up.header.pNext = &c.be.header;
-+  // Pick a provider by major version (names look like "FSR 3.1.5" / "FSR 4.0.2").
++  // Pick a provider by major version (names look like "4.1.1" or "FSR 3.1.5").
 +  uint64_t chosen = 0;
 +  for (const Version& v : g_versions) {
-+    const size_t p = v.name.find_first_of("0123456789");
-+    if (p == std::string::npos) continue;
-+    int major = v.name[p] - '0';
++    const int major = VersionMajor(v.name);
 +    if (major == e.wanted_major) {
 +      chosen = v.id;
 +      g_provider = v.name;
@@ -929,6 +955,16 @@ index 0000000..da6cd4a
 +  return true;
 +}
 +
++static bool CreateCtxWithFallback(const FsrEval& e) {
++  if (CreateCtx(e)) return true;
++  if (e.wanted_major != 4) return false;
++  REXGPU_WARN("FSR: FSR 4 context failed, falling back to FSR 3.1");
++  g_fsr4 = false;
++  FsrEval fallback = e;
++  fallback.wanted_major = 3;
++  return CreateCtx(fallback);
++}
++
 +bool FsrEvaluate(ID3D12GraphicsCommandList* list, const FsrEval& e) {
 +  if (!g_ok) return false;
 +  if (!g_ctx || g_rw != e.render_w || g_rh != e.render_h || g_ow != e.out_w || g_oh != e.out_h ||
@@ -937,7 +973,7 @@ index 0000000..da6cd4a
 +      g_fn.DestroyContext(&g_ctx, nullptr);
 +      g_ctx = nullptr;
 +    }
-+    if (!CreateCtx(e)) return false;
++    if (!CreateCtxWithFallback(e)) return false;
 +  }
 +  ffxDispatchDescUpscale d{};
 +  d.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
@@ -946,8 +982,7 @@ index 0000000..da6cd4a
 +  d.depth = ffxApiGetResourceDX12(e.depth, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 +  d.motionVectors = ffxApiGetResourceDX12(e.motion, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 +  d.output = ffxApiGetResourceDX12(e.output, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
-+  // The guest scene colour is created TYPELESS; give FidelityFX a concrete format to view it with.
-+  d.color.description.format = FFX_API_SURFACE_FORMAT_R10G10B10A2_UNORM;
++  d.color.description.format = ColorViewFormat(e.color, d.color.description.format);
 +  d.jitterOffset = {e.jitter_x, e.jitter_y};
 +  d.motionVectorScale = {1.0f, 1.0f};
 +  d.renderSize = {e.render_w, e.render_h};
