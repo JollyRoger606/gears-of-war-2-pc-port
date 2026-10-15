@@ -26,14 +26,29 @@
   Also build the SDK development tools (frame tracing, dumps, the D3D12 debug
   layer switch: -DGOW2_DEV_TOOLS=ON).
 
+.PARAMETER NoDlss
+  Build the DLLs a binary release ships: no NVIDIA DLSS SDK is fetched or linked,
+  nvngx_dlss.dll is not installed, the development tools stay off (not allowed with
+  -Dev), and the DLLs go to out\sdk-nodlss\, which scripts\package.ps1 packages.
+  out\sdk\ is left as it is. NVIDIA's DLSS SDK license keeps NGX out of an
+  open-source release (THIRD_PARTY_NOTICES.md, "NVIDIA DLSS"); the build fails
+  if an NGX name is still found in an installed DLL.
+  The SDK build tree in out\sdk-build\ is shared: the next run without -NoDlss
+  compiles rexgpu-xenos.dll again with DLSS.
+
 .PARAMETER Clean
-  Delete out\sdk-build\ and out\sdk\ first.
+  Delete out\sdk-build\ and the output folder (out\sdk\, or out\sdk-nodlss\ with
+  -NoDlss) first.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\build-sdk.ps1
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File scripts\build-sdk.ps1 -NoDlss
 #>
 param(
     [switch]$Dev,
+    [switch]$NoDlss,
     [switch]$Clean
 )
 
@@ -71,6 +86,10 @@ function Import-VcVars($vsPath) {
 
 # The pinned SDK commit ($SdkCommit), the patched checkout and the symlink repair.
 . (Join-Path $PSScriptRoot 'sdk-source.ps1')
+# Find-NgxBinaries: NVIDIA NGX names left in a built DLL.
+. (Join-Path $PSScriptRoot 'ngx-scan.ps1')
+
+if ($NoDlss -and $Dev) { Fail '-NoDlss builds the release DLLs, which leave the development tools out; drop -Dev.' }
 
 function Find-ClangDir($vsPath) {
     foreach ($dir in @((Join-Path $vsPath 'VC\Tools\Llvm\x64\bin'), (Join-Path $env:ProgramFiles 'LLVM\bin'))) {
@@ -96,7 +115,7 @@ Write-Host "Visual Studio: $vsPath"
 Write-Host "clang:         $llvm"
 
 $work = Join-Path $root 'out\sdk-build'
-$outDir = Join-Path $root 'out\sdk'
+$outDir = if ($NoDlss) { Join-Path $root 'out\sdk-nodlss' } else { Join-Path $root 'out\sdk' }
 if ($Clean) {
     Step 'Cleaning'
     foreach ($d in $work, $outDir) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
@@ -115,7 +134,11 @@ try {
 
 # ---- public upscaler SDKs (not redistributed) --------------------------------------------------
 $dlss = Join-Path $work 'dlss-sdk'
-if (-not (Test-Path (Join-Path $dlss 'include\nvsdk_ngx.h'))) {
+# The SDK turns DLSS on only when this folder holds include\nvsdk_ngx.h; -NoDlss names one that never
+# exists, so a DLSS SDK fetched by an earlier run is not picked up.
+$dlssForCmake = if ($NoDlss) { Join-Path $work 'dlss-sdk-left-out' } else { $dlss }
+if ($NoDlss -and (Test-Path $dlssForCmake)) { Fail "$dlssForCmake must not exist for a -NoDlss build; delete it." }
+if (-not $NoDlss -and -not (Test-Path (Join-Path $dlss 'include\nvsdk_ngx.h'))) {
     Step 'Fetching the NVIDIA DLSS SDK headers'
     Run 'git clone DLSS' { git clone --depth 1 https://github.com/NVIDIA/DLSS.git $dlss }
 }
@@ -141,7 +164,7 @@ Push-Location $sdk
 try {
     Run 'cmake configure' {
         cmake --preset win-amd64 -DREXGLUE_ENABLE_FIDELITYFX=ON "-DGOW2_DEV_TOOLS=$devFlag" `
-            "-DGOW2_DLSS_SDK=$($dlss.Replace([string][char]92, '/'))" `
+            "-DGOW2_DLSS_SDK=$($dlssForCmake.Replace([string][char]92, '/'))" `
             "-DGOW2_FFX_SDK=$($ffx.Replace([string][char]92, '/'))/Kits/FidelityFX"
     }
     Step 'Building rexruntime.dll and rexgpu-xenos.dll (this takes a while)'
@@ -162,12 +185,14 @@ foreach ($dll in 'rexruntime.dll', 'rexgpu-xenos.dll') {
     Copy-Item $src.FullName $outDir -Force
     Write-Host "  $dll <- $($src.FullName)"
 }
-# The official, signed temporal-upscaler libraries the game loads at run time (redistribution is
-# permitted by both vendors; see THIRD_PARTY_NOTICES.md).
-$ngx = Join-Path $dlss 'lib\Windows_x86_64\rel\nvngx_dlss.dll'
-if (-not (Test-Path $ngx)) { Fail "nvngx_dlss.dll was not produced in the DLSS SDK ($ngx)." }
-Copy-Item $ngx $outDir -Force
-Write-Host "  nvngx_dlss.dll <- $ngx"
+# The official, signed temporal-upscaler libraries the game loads at run time (see
+# THIRD_PARTY_NOTICES.md; nvngx_dlss.dll is for local builds only and never ships in a release).
+if (-not $NoDlss) {
+    $ngx = Join-Path $dlss 'lib\Windows_x86_64\rel\nvngx_dlss.dll'
+    if (-not (Test-Path $ngx)) { Fail "nvngx_dlss.dll was not produced in the DLSS SDK ($ngx)." }
+    Copy-Item $ngx $outDir -Force
+    Write-Host "  nvngx_dlss.dll <- $ngx"
+}
 foreach ($n in 'loader', 'upscaler') {
     $f = Join-Path $ffx "Kits\FidelityFX\signedbin\amd_fidelityfx_${n}_dx12.dll"
     if (-not (Test-Path $f)) { Fail "$(Split-Path $f -Leaf) was not found in the FidelityFX-SDK ($f)." }
@@ -182,7 +207,16 @@ if (-not $ffxRuntime) { Fail "amd_fidelityfx_dx12.dll was not built in $sdk\bin 
 Copy-Item $ffxRuntime.FullName $outDir -Force
 Write-Host "  amd_fidelityfx_dx12.dll <- $($ffxRuntime.FullName)"
 
+if ($NoDlss) {
+    Step 'Checking that no NVIDIA NGX code was built in'
+    $withNgx = @(Find-NgxBinaries $outDir)
+    foreach ($b in $withNgx) { Write-Host "  $($b.Path): $($b.Markers)" -ForegroundColor Red }
+    if ($withNgx.Count) { Fail "NGX names found in $($withNgx.Count) DLL(s) of a -NoDlss build." }
+    Write-Host "  No NGX names in $outDir"
+}
+
 Step 'Done'
 Write-Host "Self-built SDK DLLs: $outDir" -ForegroundColor Green
 Get-ChildItem $outDir -Filter *.dll | ForEach-Object { Write-Host "  $($_.Name)" }
-Write-Host 'Run scripts\build.ps1 to build the game with them.'
+if ($NoDlss) { Write-Host 'Run scripts\package.ps1 -Version <version> to package them.' }
+else { Write-Host 'Run scripts\build.ps1 to build the game with them.' }
