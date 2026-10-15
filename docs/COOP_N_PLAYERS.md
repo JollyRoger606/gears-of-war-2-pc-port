@@ -2,16 +2,19 @@
 
 Status: Stage 1 is in progress. SDK patch `0010-system-link-sessions` (section 3, Stage 1, item 2)
 builds for Windows, compiles for Android and passes its unit tests, but has not run in the game
-yet; everything else is design only. This document condenses four read-only
-investigations from 2026-10-14 (join and spawn path, campaign systems, patch mechanism, network).
-A second pass re-checked each one, and the corrections from that pass are already applied here.
-The target is 4 players first, then 8-10, then PC-Android cross-play over System Link.
+yet. The script patches in guest memory (sections 2 and 4) build and pass their offline check on a
+retail package, but have not run in the game either; everything else is design only.
+
+This document condenses four read-only investigations from 2026-10-14 (join and spawn path,
+campaign systems, patch mechanism, network). A second pass re-checked each one, and the corrections
+from that pass are already applied here. The target is 4 players first, then 8-10, then PC-Android
+cross-play over System Link.
 
 ## Evidence conventions
 
 - `DG:n` / `DE:n`: line n of `out/re-mouse/decomp_GearGame.txt` / `out/re-mouse/decomp_Engine.txt`,
-  the script decompiled with this repo's own UnrealScript tools (`out/re-mouse/ubc.py`, `upk.py`,
-  `ue3script.py`, `ue3pkg.py`). A `~` marks an approximate line.
+  the script decompiled with this repo's own UnrealScript tools (now in `tools/ue3/`: `ubc.py`,
+  `upk.py`, `ue3script.py`, `ue3pkg.py`). A `~` marks an approximate line.
 - `Class.Function+0xNNNN`: byte offset of a statement inside that function's bytecode.
 - `upk 0x...`: file offset in the decompressed `GearGame.upk` (`out/re-mouse/pkg/`).
 - `sub_XXXXXXXX`: a recompiled guest function. `recomp.N.cpp:L` is line L of
@@ -20,8 +23,8 @@ The target is 4 players first, then 8-10, then PC-Android cross-play over System
   `patch-mechanism.md`, `network.md`, `join-spawn/verify_patches.py`, `script_patch_poc.py`,
   `hero_links.txt`, `kismet/`.
 - `out/` is gitignored. Its contents come from the player's own game files and are not in the
-  repository. To reproduce them, decompress your own packages with the `out/re-mouse` tools; moving
-  those tools into `tools/ue3/` is part of Stage 1.
+  repository. To reproduce them, decompress your own packages with the tools in `tools/ue3/` (see
+  its README).
 - **[V]** verified: read in code or bytes and confirmed by a second, independent pass.
   **[I]** inferred: follows from code structure or UE3 knowledge, but has not been confirmed in this
   binary or at run time.
@@ -186,7 +189,11 @@ Decision: change UnrealScript bytecode and default objects in guest memory, from
   - The generated `sub_` symbols are weak aliases (`gow2_pch.h`). A strong definition in `src/`
     replaces both the direct call and the function-table entry; the GTA IV ReXGlue port does this
     at scale.
-  - This repo has never linked such an override. [I until a build logs it]
+  - Implemented in `src/gow2_script_patch_hook.cpp`. With clang and lld-link on Windows the
+    override wins: in the link map `sub_8283F780` comes from `gow2_script_patch_hook.cpp.obj` and
+    `__imp__sub_8283F780` from `gow2_recomp.172.cpp.obj`, and `llvm-objdump` shows the call that
+    was `bl 0x8283f780` in `sub_828406F0` going to the hook. [V link; that it runs (the log line
+    `SCRIPTPATCH startup script packages loaded`) and the Android link are not confirmed yet]
 - **Lookup.** [V]
   - `GObjObjects` is the TArray at 0x83136860 and `GNames` the one at 0x83136834. An FNameEntry has
     its flags at +0 (bit 0 = UTF-16) and its text at +8.
@@ -201,9 +208,11 @@ Decision: change UnrealScript bytecode and default objects in guest memory, from
   2. Object operand swap: write another object's address into a 4-byte operand.
   3. Default-object field write.
   4. Grown script. Allocate a new buffer with the game's own allocator (`GMalloc` at
-     [0x8310B12C], vtable +4 = Malloc(size, align)), copy the bytes, then write Data, Num and Max.
-     Never free the old buffer. Allocating outside `GMalloc` risks a mismatched free when the array
-     is destroyed. [I]
+     [0x8310B12C], vtable +4 = Malloc(size, align), called with align 8 as the package loader does at
+     0x8226F610), copy the bytes, then write Data, Num and Max. Never free the old buffer.
+     Allocating outside `GMalloc` risks a mismatched free when the array is destroyed. [I] The
+     buffer is allocated while the group is still being checked, so a later failed check leaks that
+     one block and writes nothing to the game.
 - **Fail closed.** The patcher validates a group completely before it writes any byte. Each row must
   pass all of these:
   - the function is found exactly once;
@@ -212,22 +221,35 @@ Decision: change UnrealScript bytecode and default objects in guest memory, from
   - every pointer operand equals the object resolved by name.
 
   Bytes that are already patched count as applied. Any failure skips the whole group, leaves the
-  game retail and logs `SCRIPTPATCH <group>: skipped (<row>: <reason>)`. Success logs one line per
-  row plus a hash of the applied set.
+  game retail and logs `SCRIPTPATCH <group>: skipped (<row>: <reason>); the game stays retail`.
+  Success logs one line per row plus a hash of the applied set.
+- **Lookup as built.** Names match without regard to case, as in UE3, and a name's text must occur
+  once in `GNames`. An object matches when its own name and each outer spell the path exactly, the
+  outermost outer is null, and the name of its class is the expected one (`Function`, `Class`,
+  `IntProperty` and so on). The set hash is FNV-1a 64 over the rows and N, never over guest
+  addresses, so it is the same on every run and platform. On Windows a fault while reading guest
+  objects (a wrong layout) is caught and skips the group; Android has no such guard.
 - **Setting.** `gow2_coop_players` (int). The default 2 means off. Values from 3 to 255 enable the
-  Stage 1 group with N players; 255 is the ceiling because the cap is an `IntConstByte`.
-- **Offline tool.** `tools/script_patch.py` grows out of `out/re-coop/script_patch_poc.py` and
-  `join-spawn/verify_patches.py`. It runs on the player's own decompressed package and, for each
-  row:
-  - checks the old bytes;
+  Stage 1 group with N players; 255 is the ceiling because the cap is an `IntConstByte`. Two debug
+  settings: `gow2_coop_marcus_clones` uses row D-1 in place of S1-2, and `gow2_coop_patch_fail_test`
+  corrupts the first expected byte of the table (S1-1 +0x0000), which must skip the group.
+- **Offline tool.** `tools/script_patch.py` grew out of `out/re-coop/script_patch_poc.py` and
+  `join-spawn/verify_patches.py`. It owns the rows: `--cpp` prints
+  `src/gow2_script_patch_table.cpp` (a test fails when the two differ), and `--check <folder>` runs
+  on the player's own decompressed packages and, for each row of the group and for D-1:
+  - checks the old bytes, the context bytes and every object operand (as a package reference);
   - applies the edit to a copy and re-decompiles it;
-  - confirms the function still decodes to its end;
-  - prints the C++ table row.
+  - confirms the function still decodes to its end and, for the grown row, that no jump in the
+    kept prefix lands in the replaced tail;
+  - checks the default object's value, then prints the C++ table.
 
-  Its tests use synthetic bytecode only. The repo commits byte strings and offsets, never game
-  data.
-- **Build wiring.** Add the new `src/gow2_script_patches*.cpp` files to `GOW2_SOURCES` in
-  `CMakeLists.txt`, which is an explicit list. Android picks them up by glob.
+  Its tests (`tools/tests/test_script_patch.py`) and the C++ test target `gow2_script_patch_test`
+  (`tools/tests/script_patch_core_test.cpp`, the patcher core on a synthetic guest memory) use
+  synthetic bytecode only. The repo commits byte strings and offsets, never game data.
+- **Build wiring.** `src/gow2_script_patches.cpp` (the portable core), `gow2_script_patch_table.cpp`
+  and `gow2_script_patch_hook.cpp` (hook, settings, `GMalloc`, logging; the only part that needs
+  the runtime) are in `GOW2_SOURCES` in `CMakeLists.txt`, which is an explicit list. Android picks
+  them up by glob.
 - **Peers.** In-memory patches do not change package GUIDs, so the engine will not notice a host and
   a client running different patch sets. Stage 1 logs the patch-set hash; Stage 4 puts it in the
   session data.
@@ -245,15 +267,19 @@ edited `Xbox360TOC.txt`:
 [V loader paths; never run] The file route touches LZX blocks 63, 64, 67 and 69 and costs a 66 MB
 cached copy per game version.
 
-### Related finding (fix separately)
+### Related finding (fixed in Stage 1)
 
-The game reads and hashes each edited Coalesced bundle at its TOC size (`sub_827F5508`,
-`sub_82225018`). HashSec, however, receives the SHA-1 of the whole padded file
-(`src/gow2_coalesced.cpp:373`), which is about 2.1 KB longer. This most likely raises the DISCERR
-that every run with Coalesced overrides logs and that `DiscErrorNoop` parks on a worker thread. [I,
-from code plus logs] The fix is to pad each bundle to exactly its TOC size. Until then, expect that
-line in Stage 1 boot logs. The comment in `src/gow2_xam_input_guard.cpp:330-333`, which blames the
-missing disc drive, is wrong.
+The game reads and hashes each edited Coalesced bundle at its TOC size. `sub_82225018` creates the
+file reader, takes its `TotalSize()`, allocates and serializes that many bytes and wraps them in
+FBufferReaderWithSHA (vtable 0x820954C0); `sub_827F5508` sets the reader's size (+148) from the TOC
+`FileSize` while the flag at 0x830C9734 is set. [V] The served bundles carried 4 KiB of zero
+padding, so HashSec received the SHA-1 of a file about 2.1 KB longer than the bytes the game
+hashes. That most likely raised the DISCERR that every run with Coalesced overrides logged and that
+`DiscErrorNoop` parks on a worker thread. [I, from code plus logs] `src/gow2_coalesced.cpp` now
+pads each edited bundle to exactly its `FileSize` in `GearGame/Xbox360TOC.txt` (the original file
+size when the TOC has no entry; every retail Coalesced TOC size equals its file size) and does not
+serve a bundle whose edit is longer. The comment in `src/gow2_xam_input_guard.cpp` that blamed a
+missing disc drive is corrected. Still to confirm in a run: the DISCERR line is gone.
 
 ## 3. Staged plan
 
@@ -268,7 +294,8 @@ stays loaded on the host and on every client for the whole chapter. Chapter 1 la
 
 Work:
 
-1. **Script patches.** The group in section 4, behind `gow2_coop_players`.
+1. **Script patches.** The group in section 4, behind `gow2_coop_players`. Done; section 2 names the
+   files.
 2. **SDK patch `0010-system-link-sessions` (M2a), applied after 0002-0007:**
    - SendTo/RecvFrom: fill `sockaddr_in` in network order, swap the received port, and write
      `from` only when the call succeeded.
@@ -338,7 +365,8 @@ Work:
    With the link reported active, a solo campaign also creates its LAN session and answers System
    Link queries on UDP 14001, as a 360 with a cable would. [I] That is the main change to
    single-player behaviour, and the Stage 1 test checks it.
-3. **Tools.** Move the `out/re-mouse` package tools into `tools/ue3/`, next to the patch generator.
+3. **Tools.** Done: the package and script tools are in `tools/ue3/` (one line each in its
+   README), next to `tools/script_patch.py`.
 
 Out of scope for Stage 1 (known to break; see Stage 2): chapter transitions, the death of any
 player, a player leaving, cinematics with extra players present, vehicles and co-op splits.
@@ -347,20 +375,26 @@ player, a player leaving, cinematics with extra players present, vehicles and co
 
 Offline:
 
-1. Run `tools/script_patch.py --check` on your own decompressed `GearGame.upk`. Every old byte must
-   match, and every patched function must decode to its end: AtCapacity 0x11, ChangeCoopInviteSetting
-   0xB2, lobby InitGame 0xA9, SP InitGame 0xCA, and SuggestPawnClassFor 0x117 with the new tail.
-   The default object must hold 2.
-2. Unit tests on synthetic bytecode. A wrong old byte, a wrong `Num`, a wrong pointer operand, or a
-   function found twice must each skip the whole group.
+1. Run `python -I tools/script_patch.py --check <folder>` on your own decompressed Core, Engine,
+   GameFramework and GearGame packages. Every old byte must match, and every patched function must
+   decode to its end: AtCapacity 0x11, ChangeCoopInviteSetting 0xB2, lobby InitGame 0xA9, SP
+   InitGame 0xCA, and SuggestPawnClassFor 0x117 with the new tail. The default object must hold 2.
+   Passed on 2026-10-14 against the retail packages, D-1 included; the jumps in the kept prefix of
+   SuggestPawnClassFor go to 0x48, 0x67 and 0x84.
+2. Unit tests on synthetic bytecode: `python -m pytest tools/tests/test_script_patch.py` and the
+   `gow2_script_patch_test` target. A wrong old byte, a wrong `Num`, a wrong pointer operand, or a
+   function found twice must each skip the whole group. Both pass (18 tests, 56 checks).
 
 One instance, no network:
 
-3. Run with `gow2_coop_players=2`. The log shows `SCRIPTPATCH coop: off` and play is unchanged.
-4. Run with `gow2_coop_players=4`. Every row is logged as applied. Play the start of chapter 1 solo:
-   nothing changes, because the patches only act on joins.
-5. Use a debug switch that corrupts one expected byte in the table. The group must be skipped, the
-   log must name the row, and the game must stay retail.
+3. Run with `--gow2_coop_players=2` (the default). The log shows `SCRIPTPATCH startup script
+   packages loaded` and `SCRIPTPATCH coop: off (gow2_coop_players=2)`, and play is unchanged.
+4. Run with `--gow2_coop_players=4`. The log shows one `SCRIPTPATCH coop S1-n <function>: ...`
+   line per row (S1-2 `script grown to 279 bytes`) and `SCRIPTPATCH coop: 6 rows applied for 4
+   players, set hash <16 hex digits>`. Play the start of chapter 1 solo: nothing changes, because
+   the patches only act on joins.
+5. Add `--gow2_coop_patch_fail_test=true`. The log shows `SCRIPTPATCH coop: skipped (S1-1: +0x0000
+   expected FB, found 04); the game stays retail`, and the game stays retail.
 
 With SDK patch 0010, the single-instance runs also check its defaults: the log shows
 `Signed-in player: XUID <16 hex digits>, gamertag 'User'`, an existing save loads, and with
@@ -611,7 +645,8 @@ server corrections, because UE3 is server-authoritative. [I]
 
 Everything below is one group, enabled by `gow2_coop_players = N` (N >= 3; Stage 1 uses 4). The
 patcher validates every row and then writes every row. A single failed check leaves the whole game
-retail.
+retail. The rows as built are `src/gow2_script_patch_table.cpp`, printed by `tools/script_patch.py`;
+they also check the bytes between the edits (for example S1-1 +0x09 `16 04 3A`).
 
 Notation:
 
@@ -667,7 +702,8 @@ Diagnostic variant D-1, off by default and exclusive with S1-2: swap the operand
 `SuggestPawnClassFor` from `[GearGame.GearPawn_COGGear]` to `[GearGame.GearPawn_COGMarcus]` (disk
 `04 20 00006F95` -> `04 20 00006FA9`, same size). Players 3+ become Marcus clones, which are always
 loaded, have a mesh and survive chapter commits. Use D-1 only to separate network bring-up from the
-grown-script path; section 1.3 explains why it breaks Kismet.
+grown-script path; section 1.3 explains why it breaks Kismet. It is built in, behind
+`gow2_coop_marcus_clones`.
 
 Deliberately not in Stage 1:
 
@@ -719,8 +755,9 @@ Running four instances on one PC:
 
 Script and engine:
 
-- Does `REX_HOOK_RAW(sub_8283F780)` link and take effect with this repo's clang/lld on Windows and
-  Android? Are Num and Max of `UStruct::Script` at +88 and +92? The checks fail closed if not.
+- `REX_HOOK_RAW(sub_8283F780)` links and replaces the call on Windows (section 2). Does it run (the
+  `SCRIPTPATCH startup` log line), and does it link the same way on Android? Are Num and Max of
+  `UStruct::Script` at +88 and +92? The checks fail closed if not.
 - How does the native checkpoint loader match records to PCs, and who sets `bCheckpointDummy`?
 - How does `UWorld::CommitMapChange` treat remote players' pawns once
   `bKillDuringLevelTransition` is cleared?
