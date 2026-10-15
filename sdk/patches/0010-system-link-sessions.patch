@@ -2136,16 +2136,22 @@ index a77f5e6..68996cf 100644
    Setting* previous_setting = setting.get();
    std::swap(settings_[setting->setting_id], previous_setting);
 diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
-index 6b1f6b9..7a2ad1c 100644
+index 6b1f6b9..9321131 100644
 --- a/src/system/xsocket.cpp
 +++ b/src/system/xsocket.cpp
-@@ -9,12 +9,16 @@
+@@ -9,12 +9,22 @@
   * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
   */
  
 +#include <algorithm>
 +#include <atomic>
++#include <chrono>
  #include <cstring>
++#include <map>
++#include <mutex>
++#include <tuple>
++
++#include <rex/cvar.h>
  
  #include <rex/kernel/xam/module.h>
 +#include <rex/logging.h>
@@ -2156,7 +2162,7 @@ index 6b1f6b9..7a2ad1c 100644
  #include <rex/system/xsocket.h>
  // #include <rex/system/xnet.h>
  
-@@ -25,14 +29,59 @@
+@@ -25,14 +35,107 @@
  #include <WinSock2.h>
  
  #include <WS2tcpip.h>
@@ -2170,8 +2176,56 @@ index 6b1f6b9..7a2ad1c 100644
 +#include <cerrno>
  #endif
  
++REXCVAR_DEFINE_INT32(net_traffic_log_sec, 0, "Network",
++                     "Log the UDP bytes and packets sent to and received from each peer every this "
++                     "many seconds (0 = off); the per-client bandwidth baseline for co-op");
++
  namespace rex::system {
 +namespace {
++
++struct TrafficTotals {
++  uint64_t bytes = 0;
++  uint64_t packets = 0;
++};
++
++// (sent, ip, port) -> totals of the current window.
++using TrafficKey = std::tuple<bool, uint32_t, uint16_t>;
++
++struct TrafficWindow {
++  std::mutex lock;
++  std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
++  std::map<TrafficKey, TrafficTotals> totals;
++};
++
++TrafficWindow& Traffic() {
++  static TrafficWindow window;
++  return window;
++}
++
++void LogTrafficWindow(const std::map<TrafficKey, TrafficTotals>& totals, double seconds) {
++  for (const auto& [key, t] : totals) {
++    const auto& [sent, ip, port] = key;
++    REXLOG_INFO("[nettraffic] last {:.1f} s: {} {}:{} {} B in {} packets ({:.0f} B/s)", seconds,
++                sent ? "sent to" : "received from", system_link::FormatIpv4(ip), port, t.bytes,
++                t.packets, double(t.bytes) / seconds);
++  }
++}
++
++void CountTraffic(bool sent, uint32_t ip, uint16_t port, int bytes) {
++  const int32_t period = REXCVAR_GET(net_traffic_log_sec);
++  if (period <= 0 || bytes <= 0) return;
++  TrafficWindow& window = Traffic();
++  std::lock_guard<std::mutex> hold(window.lock);
++  TrafficTotals& t = window.totals[{sent, ip, port}];
++  t.bytes += uint64_t(bytes);
++  ++t.packets;
++  const auto now = std::chrono::steady_clock::now();
++  const double seconds = std::chrono::duration<double>(now - window.start).count();
++  if (seconds < period) return;
++  LogTrafficWindow(window.totals, seconds);
++  window.totals.clear();
++  window.start = now;
++}
 +
 +sockaddr_in MakeHostSockaddr(uint32_t ip, uint16_t port) {
 +  sockaddr_in addr = {};
@@ -2216,7 +2270,7 @@ index 6b1f6b9..7a2ad1c 100644
  
  XSocket::XSocket(KernelState* kernel_state) : XObject(kernel_state, kObjectType) {}
  
-@@ -57,10 +106,23 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
+@@ -57,10 +160,23 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
    if (native_handle_ == -1) {
      return X_STATUS_UNSUCCESSFUL;
    }
@@ -2240,7 +2294,7 @@ index 6b1f6b9..7a2ad1c 100644
  X_STATUS XSocket::Close() {
    if (native_handle_ == uint64_t(-1)) {
      return X_STATUS_SUCCESS;
-@@ -123,7 +185,16 @@ X_STATUS XSocket::Connect(N_XSOCKADDR* name, int name_len) {
+@@ -123,7 +239,16 @@ X_STATUS XSocket::Connect(N_XSOCKADDR* name, int name_len) {
  }
  
  X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
@@ -2258,7 +2312,7 @@ index 6b1f6b9..7a2ad1c 100644
    if (ret < 0) {
      return X_STATUS_UNSUCCESSFUL;
    }
-@@ -134,6 +205,19 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
+@@ -134,6 +259,19 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
    return X_STATUS_SUCCESS;
  }
  
@@ -2278,13 +2332,14 @@ index 6b1f6b9..7a2ad1c 100644
  X_STATUS XSocket::Listen(int backlog) {
    int ret = listen(native_handle_, backlog);
    if (ret < 0) {
-@@ -203,10 +287,13 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
+@@ -203,10 +341,14 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
    socklen_t nfromlen = sizeof(sockaddr_in);
    int ret = recvfrom(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,
                       (sockaddr*)&nfrom, &nfromlen);
 +  if (ret < 0) {
 +    return ret;
 +  }
++  CountTraffic(false, ntohl(nfrom.sin_addr.s_addr), ntohs(nfrom.sin_port), ret);
    if (from) {
      from->sin_family = nfrom.sin_family;
 -    from->sin_addr = ntohl(nfrom.sin_addr.s_addr);  // BE <- BE
@@ -2294,7 +2349,7 @@ index 6b1f6b9..7a2ad1c 100644
      std::memset(from->x_sin_zero, 0, sizeof(from->x_sin_zero));
    }
  
-@@ -234,15 +321,41 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
+@@ -234,15 +376,43 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
    }
    */
  
@@ -2312,16 +2367,18 @@ index 6b1f6b9..7a2ad1c 100644
    }
 +  return SendCopy(buf, buf_len, flags, destination_ip, to->sin_port);
 +}
- 
--  return sendto(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,
--                to ? (sockaddr*)&nto : nullptr, to_len);
++
 +int XSocket::SendCopy(const uint8_t* buf, uint32_t buf_len, uint32_t flags, uint32_t ip,
 +                      uint16_t port) {
 +  sockaddr_in addr = MakeHostSockaddr(ip, port);
-+  return sendto(native_handle_, reinterpret_cast<const char*>(buf), buf_len, flags,
-+                reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
++  const int sent = sendto(native_handle_, reinterpret_cast<const char*>(buf), buf_len, flags,
++                          reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
++  CountTraffic(true, ip, port, sent);
++  return sent;
 +}
-+
+ 
+-  return sendto(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,
+-                to ? (sockaddr*)&nto : nullptr, to_len);
 +int XSocket::SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags, uint16_t port) {
 +  auto targets = system_link::BroadcastTargets();
 +  auto destinations =
