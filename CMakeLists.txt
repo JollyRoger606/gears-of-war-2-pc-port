@@ -22,6 +22,9 @@ set(GOW2_SOURCES
     src/gow2_utf8_guard.cpp
     src/gow2_crash_watch.cpp
     src/gow2_game_patches.cpp
+    src/gow2_script_patches.cpp
+    src/gow2_script_patch_table.cpp
+    src/gow2_script_patch_hook.cpp
 )
 
 # The exe icon. CMake already turns on RC for clang on Windows; enable_language makes it explicit.
@@ -36,6 +39,15 @@ endif()
 add_executable(gow2 WIN32 ${GOW2_SOURCES})
 
 rexglue_setup_target(gow2 GPU_PLUGINS xenos)
+
+# Host-side test of the script patcher on synthetic guest memory (no game data). Not part of the
+# default build: cmake --build <dir> --target gow2_script_patch_test, then run the exe.
+add_executable(gow2_script_patch_test EXCLUDE_FROM_ALL
+    tools/tests/script_patch_core_test.cpp
+    src/gow2_script_patches.cpp
+    src/gow2_script_patch_table.cpp
+)
+target_include_directories(gow2_script_patch_test PRIVATE src)
 
 # SDL's gamepad mapping database; the input driver looks for it in the working directory.
 add_custom_command(TARGET gow2 POST_BUILD
