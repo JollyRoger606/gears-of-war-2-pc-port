@@ -327,15 +327,18 @@ void InstallXamInputGuard() {
 
 namespace {
 
-// The game checks the disc in the drive at startup. This port does not mount a disc drive (the game's
-// video decoder, which the disc movies need, crashes at mission start), so that check fails and the game
-// asks the system to show its "Disc Read Error" box. The game carries on without it, so the box is only
-// a startup popup that has to be dismissed. This replaces that one call with a parked thread and logs it once.
+// The game asks the system for its "Disc Read Error" box when a file cannot be read or when a loaded
+// file fails its SHA-1 check against the XEX's HashSec table (FAsyncSHAVerify, sub_8223EF68, calls
+// sub_82AAB778). A missing disc drive is not the cause: the retail files never raise it. The edited
+// Coalesced bundles did while their HashSec entry covered more bytes than the game reads, which
+// gow2_coalesced.cpp avoids by serving each bundle at exactly its TOC size. This replaces the call
+// with a parked thread and logs it once, so a failed check cannot end the game.
 void DiscErrorNoop(PPCContext& ctx, uint8_t* base) {
   (void)base;
   static std::atomic<bool> logged{false};
   if (!logged.exchange(true)) {
-    REXLOG_INFO("DISCERR the game's 'Disc Read Error' box was suppressed (no disc drive is mounted by design)");
+    REXLOG_INFO("DISCERR the game's 'Disc Read Error' box was suppressed (a file failed to read or "
+                "failed its SHA-1 check)");
   }
   // The guest treats this call as one that never comes back (the runtime's own version shows the box and
   // then exits the process), and the title shuts itself down if it does return. So only the box is removed:
