@@ -1,5 +1,12 @@
 # Gears of War 2 — native PC port (unofficial)
 
+[![Latest release](https://img.shields.io/github/v/release/santiquiroz/gears-of-war-2-pc-port?label=release)](https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/santiquiroz/gears-of-war-2-pc-port/total)](https://github.com/santiquiroz/gears-of-war-2-pc-port/releases)
+[![License: BSD-3-Clause](https://img.shields.io/github/license/santiquiroz/gears-of-war-2-pc-port)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/santiquiroz/gears-of-war-2-pc-port?style=social)](https://github.com/santiquiroz/gears-of-war-2-pc-port/stargazers)
+
+**Website:** [santiquiroz.github.io/gears-of-war-2-pc-port](https://santiquiroz.github.io/gears-of-war-2-pc-port/)
+
 Retail Xbox 360 Gears of War 2 statically recompiled from the player's own `default.xex` to native x64 code with the ReXGlue SDK. This is not emulation. Players must own the game. An earlier fan port ("Hollow") was built from a leaked 2008 development build; this one runs the complete retail game.
 
 Leer en español: [README.es.md](README.es.md)

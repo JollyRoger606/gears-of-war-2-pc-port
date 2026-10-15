@@ -24,6 +24,15 @@ set(GOW2_SOURCES
     src/gow2_game_patches.cpp
 )
 
+# The exe icon. CMake already turns on RC for clang on Windows; enable_language makes it explicit.
+# The .rc names the .ico by path, so OBJECT_DEPENDS rebuilds the resource when the icon changes.
+if(WIN32)
+    enable_language(RC)
+    list(APPEND GOW2_SOURCES src/gow2.rc)
+    set_source_files_properties(src/gow2.rc PROPERTIES
+        OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/gow2.ico)
+endif()
+
 add_executable(gow2 WIN32 ${GOW2_SOURCES})
 
 rexglue_setup_target(gow2 GPU_PLUGINS xenos)
