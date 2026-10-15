@@ -95,6 +95,11 @@ keybind_dpad_left = "4"
 keybind_back = "Tab"
 keybind_start = "Return,Escape"
 
+# ---------- Co-op beyond two players ----------
+# Campaign co-op player cap: 2 keeps the retail game; 3 to 255 apply the Stage 1 script
+# patches and turn System Link on. See docs/COOP_N_PLAYERS.md.
+# gow2_coop_players = 2
+
 # ---------- Network (System Link) ----------
 # System Link (LAN and internet co-op) stays off until this is true on every player's copy;
 # gow2_coop_players 3+ turns it on by itself. See docs/NETWORK_PLAY.md.
@@ -112,3 +117,6 @@ keybind_start = "Return,Escape"
 # net_public_address lets in only the local network and net_peers.
 # net_allow_peers = "friend1.example.com, 203.0.113.7"
 # system_link_trace = false
+# Log the UDP bytes and packets sent to and received from each peer every this many seconds
+# ([nettraffic] lines; 0 = off).
+# net_traffic_log_sec = 0
