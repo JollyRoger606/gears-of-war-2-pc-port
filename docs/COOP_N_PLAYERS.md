@@ -32,6 +32,25 @@ System Link campaign and loaded Act 1 chapter 2, the client as Dom, with `[nettr
 port 41000 in both logs (`out\pcpc-test\int1`); and `scripts/build-android.ps1`, whose library and
 APK checks passed, plus the app's JVM unit tests. The APK has not been installed on a phone.
 
+Smoke tests after the review fixes (2026-10-15, `out\smoke` in the integration worktree):
+- Solo with the defaults (own `--user_data_root`, windowed): the seeded Act 1 chapter 2 save loads
+  and Marcus plays; `SCRIPTPATCH coop: off (gow2_coop_players=2)`, `[netlink] link reported down
+  (net_link_active=false)`, `Signed-in player: XUID B13EBABEBABEBABE, gamertag 'User'`, no
+  `XGISessionCreate`, and with `--system_link_trace=true` the one bind is `bind port 1000 -> 41000
+  (net_port_offset)`. With `--gow2_temporal=true --gow2_upscaler=fsr4` the FSR providers read
+  `'4.1.1'`, `'3.1.5'`, `'2.3.4'` as on master and `FSR: context created '4.1.1'`; with
+  `--gow2_mouse_aim_log=true` mouse moves log `MOUSEAIM sent x=-400.0 y=0.0 frames=10
+  handled=10/10 ...`.
+- Two copies with `scripts/coop-instances.ps1` (pad files, separate `--user_data_root`, no
+  `--user_xuid`): the client found `Host` in the System Link Browser, both lobbies listed Host and
+  Client, the client spawned as Dom on RT; `XGISessionJoinRemote ... members=2`, game traffic to
+  `127.0.0.1:41000`, and two different per-install XUIDs (B13E4E1A1211F81E, B13E7C3AE4648C7F).
+- `--gow2_coop_players=4` logs `SCRIPTPATCH coop: 6 rows applied for 4 players` and turns the link
+  on. Two "PCs" (own `LOCALAPPDATA` each) sharing one `--gow2_save_dir` kept their own XUIDs
+  (`System Link XUID B13E01519A002D78 made and kept in ...\pcA\...\system_link_xuid.txt`, then
+  `B13E453A46694FCA` for pcB, then `read from` pcA's file again), and the shared folder got the
+  saves but no `system_link_xuid.txt`.
+
 On the `crossplay` branch `scripts/build-android.ps1` built and linked 0002-0011 (with the
 getsockname 0010, before the traffic log). Two copies of the crossplay build joined each other's
 campaign over loopback on one PC, and on 2026-10-15 a PC and a Galaxy S25 Ultra joined each other's

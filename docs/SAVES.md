@@ -102,6 +102,9 @@ after `gow2.toml` is loaded and before the runtime is built):
    runtime as `user_xuid`, and the log says
    `System Link XUID B13E... read from <file>: it stays on this PC, gow2_save_dir moves only the saves`.
    Two PCs that sync one save folder therefore still join a System Link session as two players.
+   Checked on 2026-10-15 with two `LOCALAPPDATA` folders standing in for two PCs and one shared
+   `gow2_save_dir`: each kept its own XUID, and the shared folder got the saves but no
+   `system_link_xuid.txt`.
 
 The setting takes effect on the next start.
 
