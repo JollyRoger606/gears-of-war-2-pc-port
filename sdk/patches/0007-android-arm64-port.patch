@@ -73,12 +73,146 @@ index d876846..7469db0 100644
  
  template <>
  struct clock_time_conversion<::rex::chrono::WinSystemClock, ::rex::chrono::XSystemClock> {
+diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
+index 914ef19..f7817f1 100644
+--- a/include/rex/graphics/pipeline/texture/cache.h
++++ b/include/rex/graphics/pipeline/texture/cache.h
+@@ -24,6 +24,7 @@
+ #include <rex/graphics/shared_memory.h>
+ #include <rex/graphics/xenos.h>
+ #include <rex/hash.h>
++#include <rex/platform.h>
+ #include <rex/thread/mutex.h>
+ 
+ namespace rex::graphics {
+@@ -130,6 +131,22 @@ class TextureCache {
+            (binding->texture_signed && binding->texture_signed->key().scaled_resolve);
+   }
+ 
++#if REX_PLATFORM_ANDROID
++  // Texture loads since the last TakeAndroidTextureLoadStats. "zero" counts loaded ranges whose
++  // guest data was all zero (block-compressed formats apart: a resolve target's data lives only
++  // on the GPU, a DXT texture's never does); invalidations count memory watches that fired.
++  struct AndroidTextureLoadStats {
++    uint32_t loads = 0;
++    uint32_t zero_base_compressed = 0;
++    uint32_t zero_mips_compressed = 0;
++    uint32_t zero_other = 0;
++    uint32_t reloaded_after_zero = 0;
++    uint32_t invalidations = 0;
++  };
++  AndroidTextureLoadStats TakeAndroidTextureLoadStats();
++  void SetAndroidTextureZeroCheck(bool enabled) { android_texture_zero_check_ = enabled; }
++#endif
++
+  protected:
+   struct TextureKey {
+     // Dimensions minus 1 are stored similarly to how they're stored in fetch
+@@ -238,6 +255,11 @@ class TextureCache {
+ 
+     void LogAction(const char* action) const;
+ 
++#if REX_PLATFORM_ANDROID
++    bool android_last_load_zero() const { return android_last_load_zero_; }
++    void set_android_last_load_zero(bool zero) { android_last_load_zero_ = zero; }
++#endif
++
+    protected:
+     // If track_usage is false, the texture won't be added to the LRU list.
+     explicit Texture(TextureCache& texture_cache, const TextureKey& key, bool track_usage = true);
+@@ -273,6 +295,9 @@ class TextureCache {
+     // Watch handles for the memory ranges.
+     SharedMemory::WatchHandle base_watch_handle_ = nullptr;
+     SharedMemory::WatchHandle mips_watch_handle_ = nullptr;
++#if REX_PLATFORM_ANDROID
++    bool android_last_load_zero_ = false;
++#endif
+   };
+ 
+   // Rules of data access in load shaders:
+@@ -566,6 +591,10 @@ class TextureCache {
+                           PendingSharedMemoryRange* pending_ranges_out,
+                           size_t& pending_range_count_out);
+   bool CommitPreparedTextureLoad(const PendingTextureLoad& pending_load);
++#if REX_PLATFORM_ANDROID
++  void RecordAndroidTextureLoad(Texture& texture, bool load_base, bool load_mips);
++  bool IsAndroidGuestRangeZero(uint32_t guest_address, uint32_t length) const;
++#endif
+ 
+   void UpdateTexturesTotalHostMemoryUsage(uint64_t add, uint64_t subtract);
+ 
+@@ -620,6 +649,13 @@ class TextureCache {
+   // constants have been changed.
+   std::atomic<bool> texture_became_outdated_{false};
+ 
++#if REX_PLATFORM_ANDROID
++  bool android_texture_zero_check_ = false;
++  AndroidTextureLoadStats android_texture_load_stats_;
++  // Watch callbacks run on the guest threads that write the memory.
++  std::atomic<uint32_t> android_texture_invalidations_{0};
++#endif
++
+   std::array<TextureBinding, xenos::kTextureFetchConstantCount> texture_bindings_;
+   // Bit vector with bits reset on fetch constant writes to avoid parsing fetch
+   // constants again and again.
+diff --git a/include/rex/graphics/shared_memory.h b/include/rex/graphics/shared_memory.h
+index 1ffd071..d1b720a 100644
+--- a/include/rex/graphics/shared_memory.h
++++ b/include/rex/graphics/shared_memory.h
+@@ -10,12 +10,14 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <atomic>
+ #include <cstdint>
+ #include <mutex>
+ #include <utility>
+ #include <vector>
+ 
+ #include <rex/memory.h>
++#include <rex/platform.h>
+ #include <rex/thread/mutex.h>
+ 
+ namespace rex::graphics {
+@@ -100,6 +102,18 @@ class SharedMemory {
+   // regions in those pages.
+   void RangeWrittenByGpu(uint32_t start, uint32_t length);
+ 
++#if REX_PLATFORM_ANDROID
++  // CPU writes to watched memory since the last call: invalidation callbacks and the bytes they
++  // marked for uploading again (a write invalidates up to 256 KB around it).
++  struct AndroidInvalidationStats {
++    uint32_t callbacks = 0;
++    uint64_t bytes = 0;
++    // Pages the callbacks turned from valid to invalid.
++    uint64_t newly_invalidated_pages = 0;
++  };
++  AndroidInvalidationStats TakeAndroidInvalidationStats();
++#endif
++
+  protected:
+   SharedMemory(memory::Memory& memory);
+   // Call in implementation-specific initialization.
+@@ -148,6 +162,13 @@ class SharedMemory {
+  private:
+   memory::Memory& memory_;
+ 
++#if REX_PLATFORM_ANDROID
++  // Invalidation callbacks run on the guest threads whose writes fault.
++  std::atomic<uint32_t> android_invalidation_callbacks_{0};
++  std::atomic<uint64_t> android_invalidated_bytes_{0};
++  std::atomic<uint64_t> android_newly_invalidated_pages_{0};
++#endif
++
+   // Log2 of invalidation granularity (the system page size, but the dependency
+   // on it is not hard - the access callback takes a range as an argument, and
+   // touched pages of the buffer of this size will be invalidated).
 diff --git a/include/rex/graphics/vulkan/android_gpu_stats.h b/include/rex/graphics/vulkan/android_gpu_stats.h
 new file mode 100644
-index 0000000..dca3a19
+index 0000000..59ac019
 --- /dev/null
 +++ b/include/rex/graphics/vulkan/android_gpu_stats.h
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,93 @@
 +#pragma once
 +// Per-window counters of the Vulkan command processor's work on Android, logged as GPUSTATS lines
 +// (vulkan_android_stats_log). Only the command processor thread touches them.
@@ -109,6 +243,11 @@ index 0000000..dca3a19
 +  uint32_t draws_geometry_shader = 0;
 +  uint32_t draws_depth_d24s8 = 0;
 +  uint32_t draws_depth_d24fs8 = 0;
++  uint32_t draws_without_vertices = 0;
++  uint32_t draws_user_clip_planes = 0;
++  uint32_t color_draws_user_clip_planes = 0;
++  uint32_t draws_vertex_kill = 0;
++  uint32_t color_draws_vertex_kill = 0;
 +  uint32_t missing_texture_bindings = 0;
 +  // Draws with a pixel shader and color writes, by the xenos::CompareFunction of their depth test;
 +  // the last slot counts those with the depth test off.
@@ -123,6 +262,29 @@ index 0000000..dca3a19
 +  uint32_t pipeline_setup_slow_calls = 0;
 +  int64_t pipeline_setup_us = 0;
 +  int64_t pipeline_setup_max_us = 0;
++  // Why render passes ended: pending barriers, a forced end without barriers (uploads, copies),
++  // or a switch to other render targets.
++  uint32_t render_pass_ends_barrier = 0;
++  uint32_t render_pass_ends_forced = 0;
++  uint32_t render_pass_ends_switch = 0;
++  uint32_t shared_memory_uploads = 0;
++  uint64_t shared_memory_upload_bytes = 0;
++  // Upload bytes by the draw step that requested them (the rest come from copies and resolves).
++  uint64_t upload_bytes_index = 0;
++  uint64_t upload_bytes_texture = 0;
++  uint64_t upload_bytes_vertex = 0;
++  uint64_t upload_bytes_memexport = 0;
++  uint32_t memexport_draws = 0;
++  uint32_t memexport_unknown_range_draws = 0;
++  uint32_t cpu_invalidation_callbacks = 0;
++  uint64_t cpu_invalidated_bytes = 0;
++  uint64_t cpu_newly_invalidated_pages = 0;
++  uint32_t texture_loads = 0;
++  uint32_t texture_zero_base_compressed = 0;
++  uint32_t texture_zero_mips_compressed = 0;
++  uint32_t texture_zero_other = 0;
++  uint32_t texture_reloaded_after_zero = 0;
++  uint32_t texture_invalidations = 0;
 +};
 +
 +constexpr int64_t kAndroidGpuStatsWindowUs = 5'000'000;
@@ -145,7 +307,7 @@ index 0000000..dca3a19
 +
 +}  // namespace rex::graphics::vulkan
 diff --git a/include/rex/graphics/vulkan/command_processor.h b/include/rex/graphics/vulkan/command_processor.h
-index 696ff48..ef2d91e 100644
+index 696ff48..e2296f6 100644
 --- a/include/rex/graphics/vulkan/command_processor.h
 +++ b/include/rex/graphics/vulkan/command_processor.h
 @@ -27,6 +27,7 @@
@@ -156,7 +318,17 @@ index 696ff48..ef2d91e 100644
  #include <rex/graphics/vulkan/deferred_command_buffer.h>
  #include <rex/graphics/vulkan/graphics_system.h>
  #include <rex/graphics/vulkan/pipeline_cache.h>
-@@ -417,6 +418,7 @@ class VulkanCommandProcessor : public CommandProcessor {
+@@ -190,6 +191,9 @@ class VulkanCommandProcessor : public CommandProcessor {
+   // Returns whether any barriers have been submitted - if true is returned, the
+   // render pass will also be closed.
+   bool SubmitBarriers(bool force_end_render_pass);
++#if REX_PLATFORM_ANDROID
++  void CountAndroidSharedMemoryUpload(uint64_t bytes);
++#endif
+ 
+   // If not started yet, begins a render pass from the render target cache.
+   // Submission must be open.
+@@ -417,6 +421,7 @@ class VulkanCommandProcessor : public CommandProcessor {
    // successfully, if it has failed, leaves it open.
    bool EndSubmission(bool is_swap);
    bool AwaitAllQueueOperationsCompletion() {
@@ -164,7 +336,7 @@ index 696ff48..ef2d91e 100644
      CheckSubmissionFenceAndDeviceLoss(GetCurrentSubmission());
      return !submission_open_ && submissions_in_flight_fences_.empty();
    }
-@@ -440,6 +442,16 @@ class VulkanCommandProcessor : public CommandProcessor {
+@@ -440,6 +445,30 @@ class VulkanCommandProcessor : public CommandProcessor {
    void DisableHostOcclusionQueries();
    uint64_t NormalizeOcclusionSamples(uint64_t samples) const;
    void WriteGuestOcclusionResult(uint32_t sample_count_address, uint64_t samples);
@@ -174,14 +346,28 @@ index 696ff48..ef2d91e 100644
 +      const VulkanShader* pixel_shader, uint32_t normalized_color_mask,
 +      reg::RB_DEPTHCONTROL normalized_depth_control,
 +      const PrimitiveProcessor::ProcessingResult& primitive_processing_result);
++  void RecordAndroidClipStats(const VulkanShader& vertex_shader, bool writes_color);
 +  void RecordAndroidOcclusionResult(uint64_t samples);
-+  void StartAndroidGpuStatsWindow(int64_t now_us);
++  bool IsAndroidDepthPrepassDrawSkipped(const VulkanShader* pixel_shader) const;
++  void CountAndroidMemexportDraw(bool memexport_writes_possible);
++  void ApplyAndroidScissorExperiment(VkRect2D& scissor_rect) const;
++  void UpdateAndroidFrameTrace();
++  std::string DescribeAndroidVertexBindings(const VulkanShader& vertex_shader) const;
++  std::string DescribeAndroidFirstVertex(const VulkanShader& vertex_shader) const;
++  void TraceAndroidDraw(const VulkanShader& vertex_shader, const VulkanShader* pixel_shader,
++                        const PrimitiveProcessor::ProcessingResult& primitive_processing_result,
++                        reg::RB_DEPTHCONTROL normalized_depth_control,
++                        uint32_t normalized_color_mask);
++  int64_t android_frame_trace_start_us_ = 0;
++  bool android_frame_trace_active_ = false;
++  bool android_frame_trace_done_ = false;
++  uint32_t android_frame_trace_draws_ = 0;  void StartAndroidGpuStatsWindow(int64_t now_us);
 +  void LogAndroidGpuStatsIfDue();
 +#endif
    void InvalidateAllVertexBufferResidency();
    void InvalidateVertexBufferResidency(uint32_t vfetch_index);
    void InvalidateVertexBufferResidencyRange(uint32_t first_vfetch, uint32_t last_vfetch);
-@@ -741,6 +753,9 @@ class VulkanCommandProcessor : public CommandProcessor {
+@@ -741,6 +770,9 @@ class VulkanCommandProcessor : public CommandProcessor {
      uint32_t host_index = UINT32_MAX;
      bool valid = false;
    } active_occlusion_query_;
@@ -192,10 +378,23 @@ index 696ff48..ef2d91e 100644
      uint32_t address = UINT32_MAX;
      uint32_t size = UINT32_MAX;
 diff --git a/include/rex/graphics/vulkan/pipeline_cache.h b/include/rex/graphics/vulkan/pipeline_cache.h
-index 7b938b9..96f54b5 100644
+index 7b938b9..3b04643 100644
 --- a/include/rex/graphics/vulkan/pipeline_cache.h
 +++ b/include/rex/graphics/vulkan/pipeline_cache.h
-@@ -369,6 +369,17 @@ class VulkanPipelineCache {
+@@ -334,6 +334,12 @@ class VulkanPipelineCache {
+ 
+   void WritePipelineRenderTargetDescription(reg::RB_BLENDCONTROL blend_control, uint32_t write_mask,
+                                             PipelineRenderTarget& render_target_out) const;
++#if REX_PLATFORM_ANDROID
++  // Diagnostic (vulkan_android_depth_experiment bit 16): depth-tested draws with a pixel shader
++  // write magenta instead of the guest shader's output.
++  void CreatePaintFragmentShader();
++  bool IsPaintedPipeline(const PipelineDescription& description, bool has_pixel_shader) const;
++#endif
+   bool GetCurrentStateDescription(
+       const VulkanShader::VulkanTranslation* vertex_shader,
+       const VulkanShader::VulkanTranslation* pixel_shader,
+@@ -369,6 +375,17 @@ class VulkanPipelineCache {
                               VkShaderModule fragment_shader_override = VK_NULL_HANDLE);
    void CreationThread(size_t thread_index);
    void CreateQueuedPipelinesOnProcessorThread();
@@ -213,7 +412,7 @@ index 7b938b9..96f54b5 100644
    void ProcessDeferredPipelineDestructions(bool force_all);
  
    VulkanCommandProcessor& command_processor_;
-@@ -420,6 +431,11 @@ class VulkanPipelineCache {
+@@ -420,6 +437,12 @@ class VulkanPipelineCache {
    // provided in host render target mode.
    VkShaderModule depth_float24_truncate_fragment_shader_ = VK_NULL_HANDLE;
    VkShaderModule depth_float24_round_fragment_shader_ = VK_NULL_HANDLE;
@@ -221,12 +420,13 @@ index 7b938b9..96f54b5 100644
 +  // For pipelines without a Xenos pixel shader that have color targets bound
 +  // (vulkan_android_empty_fragment_shader).
 +  VkShaderModule empty_fragment_shader_ = VK_NULL_HANDLE;
++  VkShaderModule paint_fragment_shader_ = VK_NULL_HANDLE;
 +#endif
  
    std::unordered_map<PipelineDescription, Pipeline, PipelineDescription::Hasher> pipelines_;
  
 diff --git a/include/rex/graphics/vulkan/texture_cache.h b/include/rex/graphics/vulkan/texture_cache.h
-index 04856ee..91daff7 100644
+index 04856ee..803c879 100644
 --- a/include/rex/graphics/vulkan/texture_cache.h
 +++ b/include/rex/graphics/vulkan/texture_cache.h
 @@ -88,6 +88,12 @@ class VulkanTextureCache final : public TextureCache {
@@ -242,11 +442,20 @@ index 04856ee..91daff7 100644
  
    SamplerParameters GetSamplerParameters(const VulkanShader::SamplerBinding& binding) const;
  
-@@ -359,6 +365,9 @@ class VulkanTextureCache final : public TextureCache {
+@@ -359,6 +365,18 @@ class VulkanTextureCache final : public TextureCache {
    VkImageView null_image_view_cube_ = VK_NULL_HANDLE;
    VkImageView null_image_view_3d_ = VK_NULL_HANDLE;
    bool null_images_cleared_ = false;
 +#if REX_PLATFORM_ANDROID
++  static bool IsAndroidBindingVariantUsed(const TextureBinding& binding,
++                                          xenos::FetchOpDimension dimension, bool is_signed) {
++    if (!AreDimensionsCompatible(dimension, binding.key.dimension)) {
++      return false;
++    }
++    return is_signed ? texture_util::IsAnySignSigned(binding.swizzled_signs)
++                     : texture_util::IsAnySignNotSigned(binding.swizzled_signs);
++  }
++
 +  uint32_t android_missing_texture_bindings_ = 0;
 +#endif
  
@@ -1169,10 +1378,10 @@ index 1774f97..85b169c 100644
      builder_->addMemberName(type_struct_per_vertex, output_per_vertex_member_clip_distance_,
                              "gl_ClipDistance");
 diff --git a/src/graphics/pipeline/texture/cache.cpp b/src/graphics/pipeline/texture/cache.cpp
-index 76f5600..bc58b09 100644
+index 76f5600..8b878f7 100644
 --- a/src/graphics/pipeline/texture/cache.cpp
 +++ b/src/graphics/pipeline/texture/cache.cpp
-@@ -125,8 +125,54 @@ REXCVAR_DEFINE_BOOL(pre_mask_resolve_l2_block, true, "GPU",
+@@ -125,8 +125,119 @@ REXCVAR_DEFINE_BOOL(pre_mask_resolve_l2_block, true, "GPU",
  //     "96 MB, and with 3x3, it will be 360 + 216 MB.",
  //     "GPU");
  
@@ -1221,13 +1430,78 @@ index 76f5600..bc58b09 100644
 +      info.width, info.height, uint32_t(info.signed_separate), uint32_t(info.scaled_resolve));
 +}
 +
++constexpr uint32_t kAndroidZeroTextureLogLimit = 64;
++constexpr uint32_t kAndroidReloadedTextureLogLimit = 32;
++
++bool IsBlockCompressedGuestFormat(xenos::TextureFormat format) {
++  const FormatInfo* format_info = FormatInfo::Get(format);
++  return format_info && format_info->block_width == 4 && format_info->block_height == 4;
++}
++
++bool AreBytesZero(const uint8_t* data, uint32_t length) {
++  uint32_t offset = 0;
++  for (; offset + sizeof(uint64_t) <= length; offset += sizeof(uint64_t)) {
++    uint64_t word;
++    std::memcpy(&word, data + offset, sizeof(word));
++    if (word) {
++      return false;
++    }
++  }
++  for (; offset < length; ++offset) {
++    if (data[offset]) {
++      return false;
++    }
++  }
++  return true;
++}
++
++// Only the GPU command thread loads textures.
++bool TakeAndroidLogSlot(uint32_t& logged, uint32_t limit) {
++  if (logged >= limit) {
++    return false;
++  }
++  ++logged;
++  return true;
++}
++
++struct AndroidTextureDescription {
++  xenos::TextureFormat format;
++  const char* dimension_name;
++  uint32_t width;
++  uint32_t height;
++  uint32_t depth;
++  uint32_t mip_levels;
++};
++
++struct AndroidTextureRanges {
++  uint32_t base_address;
++  uint32_t base_size;
++  bool base_zero;
++  uint32_t mips_address;
++  uint32_t mips_size;
++  bool mips_zero;
++};
++
++void LogAndroidTextureRanges(const char* tag, const char* what,
++                             const AndroidTextureDescription& texture,
++                             const AndroidTextureRanges& ranges) {
++  const FormatInfo* format_info = FormatInfo::Get(texture.format);
++  REXGPU_INFO(
++      "{} {} (guest format {}) {} {}x{}x{} mips {} base 0x{:08X} ({} bytes, zero {}) mips "
++      "0x{:08X} ({} bytes, zero {}): {}",
++      tag, format_info ? format_info->name : "?", uint32_t(texture.format),
++      texture.dimension_name, texture.width, texture.height, texture.depth, texture.mip_levels,
++      ranges.base_address, ranges.base_size, uint32_t(ranges.base_zero), ranges.mips_address,
++      ranges.mips_size, uint32_t(ranges.mips_zero), what);
++}
++
 +}  // namespace
 +#endif
 +
  const TextureCache::LoadShaderInfo TextureCache::load_shader_info_[kLoadShaderCount] = {
      // k8bpb
      {3, 4, 1, 4},
-@@ -437,6 +483,12 @@ bool TextureCache::CommitPreparedTextureLoad(const PendingTextureLoad& pending_l
+@@ -437,9 +548,19 @@ bool TextureCache::CommitPreparedTextureLoad(const PendingTextureLoad& pending_l
  
    if (!LoadTextureDataFromResidentMemoryImpl(texture, pending_load.load_base,
                                               pending_load.load_mips)) {
@@ -1240,31 +1514,181 @@ index 76f5600..bc58b09 100644
      return false;
    }
  
++#if REX_PLATFORM_ANDROID
++  RecordAndroidTextureLoad(texture, pending_load.load_base, pending_load.load_mips);
++#endif
++
+   // Mark the ranges as uploaded and watch them. This is needed for scaled
+   // resolves as well to detect when the CPU wants to reuse the memory for a
+   // regular texture or a vertex buffer, and thus the scaled resolve version is
+@@ -450,6 +571,79 @@ bool TextureCache::CommitPreparedTextureLoad(const PendingTextureLoad& pending_l
+   return true;
+ }
+ 
++#if REX_PLATFORM_ANDROID
++namespace {
++
++void CountAndroidZeroLoad(TextureCache::AndroidTextureLoadStats& stats,
++                          const AndroidTextureDescription& texture,
++                          const AndroidTextureRanges& ranges) {
++  static uint32_t logged = 0;
++  if (!IsBlockCompressedGuestFormat(texture.format)) {
++    ++stats.zero_other;
++    return;
++  }
++  stats.zero_base_compressed += ranges.base_zero ? 1 : 0;
++  stats.zero_mips_compressed += ranges.mips_zero ? 1 : 0;
++  if (TakeAndroidLogSlot(logged, kAndroidZeroTextureLogLimit)) {
++    LogAndroidTextureRanges("TEXZERO", "guest data all zero when loaded", texture, ranges);
++  }
++}
++
++void CountAndroidReloadAfterZero(TextureCache::AndroidTextureLoadStats& stats,
++                                 const AndroidTextureDescription& texture,
++                                 const AndroidTextureRanges& ranges) {
++  static uint32_t logged = 0;
++  ++stats.reloaded_after_zero;
++  if (IsBlockCompressedGuestFormat(texture.format) &&
++      TakeAndroidLogSlot(logged, kAndroidReloadedTextureLogLimit)) {
++    LogAndroidTextureRanges("TEXRELOAD", "loaded again with data after an all-zero load", texture,
++                            ranges);
++  }
++}
++
++}  // namespace
++
++bool TextureCache::IsAndroidGuestRangeZero(uint32_t guest_address, uint32_t length) const {
++  if (!length) {
++    return false;
++  }
++  return AreBytesZero(
++      shared_memory().guest_memory().TranslatePhysical<const uint8_t*>(guest_address), length);
++}
++
++void TextureCache::RecordAndroidTextureLoad(Texture& texture, bool load_base, bool load_mips) {
++  ++android_texture_load_stats_.loads;
++  const TextureKey& key = texture.key();
++  if (!android_texture_zero_check_ || key.scaled_resolve) {
++    return;
++  }
++  AndroidTextureRanges ranges = {uint32_t(key.base_page) << 12,
++                                 load_base ? texture.GetGuestBaseSize() : 0, false,
++                                 uint32_t(key.mip_page) << 12,
++                                 load_mips ? texture.GetGuestMipsSize() : 0, false};
++  ranges.base_zero = IsAndroidGuestRangeZero(ranges.base_address, ranges.base_size);
++  ranges.mips_zero = IsAndroidGuestRangeZero(ranges.mips_address, ranges.mips_size);
++  const AndroidTextureDescription description = {
++      key.format,         key.GetLogDimensionName(),        key.GetWidth(),
++      key.GetHeight(),    key.GetDepthOrArraySize(),        uint32_t(key.mip_max_level) + 1};
++  const bool zero = ranges.base_zero || ranges.mips_zero;
++  if (texture.android_last_load_zero() && !zero) {
++    CountAndroidReloadAfterZero(android_texture_load_stats_, description, ranges);
++  }
++  texture.set_android_last_load_zero(zero);
++  if (zero) {
++    CountAndroidZeroLoad(android_texture_load_stats_, description, ranges);
++  }
++}
++
++TextureCache::AndroidTextureLoadStats TextureCache::TakeAndroidTextureLoadStats() {
++  AndroidTextureLoadStats stats =
++      std::exchange(android_texture_load_stats_, AndroidTextureLoadStats{});
++  stats.invalidations = android_texture_invalidations_.exchange(0, std::memory_order_relaxed);
++  return stats;
++}
++#endif
++
+ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
+   const auto& regs = register_file();
+ 
+@@ -734,6 +928,9 @@ void TextureCache::Texture::MarkAsUsed() {
+ 
+ void TextureCache::Texture::WatchCallback(
+     [[maybe_unused]] const std::unique_lock<std::recursive_mutex>& global_lock, bool is_mip) {
++#if REX_PLATFORM_ANDROID
++  texture_cache_.android_texture_invalidations_.fetch_add(1, std::memory_order_relaxed);
++#endif
+   if (is_mip) {
+     assert_not_zero(GetGuestMipsSize());
+     mips_outdated_ = true;
+diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
+index f1286a6..7a05090 100644
+--- a/src/graphics/shared_memory.cpp
++++ b/src/graphics/shared_memory.cpp
+@@ -501,6 +501,17 @@ bool SharedMemory::RequestRange(uint32_t start, uint32_t length) {
+   return RequestRanges(&range, 1);
+ }
+ 
++#if REX_PLATFORM_ANDROID
++SharedMemory::AndroidInvalidationStats SharedMemory::TakeAndroidInvalidationStats() {
++  AndroidInvalidationStats stats;
++  stats.callbacks = android_invalidation_callbacks_.exchange(0, std::memory_order_relaxed);
++  stats.bytes = android_invalidated_bytes_.exchange(0, std::memory_order_relaxed);
++  stats.newly_invalidated_pages =
++      android_newly_invalidated_pages_.exchange(0, std::memory_order_relaxed);
++  return stats;
++}
++#endif
++
+ std::pair<uint32_t, uint32_t> SharedMemory::MemoryInvalidationCallbackThunk(
+     void* context_ptr, uint32_t physical_address_start, uint32_t length, bool exact_range) {
+   return reinterpret_cast<SharedMemory*>(context_ptr)
+@@ -552,10 +563,20 @@ std::pair<uint32_t, uint32_t> SharedMemory::MemoryInvalidationCallback(
+     if (i == block_last && (page_last & 63) != 63) {
+       invalidate_bits &= (uint64_t(1) << ((page_last & 63) + 1)) - 1;
+     }
++#if REX_PLATFORM_ANDROID
++    android_newly_invalidated_pages_.fetch_add(
++        rex::bit_count(system_page_flags_valid_[i] & invalidate_bits), std::memory_order_relaxed);
++#endif
+     system_page_flags_valid_[i] &= ~invalidate_bits;
+     system_page_flags_valid_and_gpu_written_[i] &= ~invalidate_bits;
+   }
+ 
++#if REX_PLATFORM_ANDROID
++  android_invalidation_callbacks_.fetch_add(1, std::memory_order_relaxed);
++  android_invalidated_bytes_.fetch_add(uint64_t(page_last - page_first + 1) << page_size_log2_,
++                                       std::memory_order_relaxed);
++#endif
++
+   FireWatches(page_first, page_last, false);
+ 
+   return std::make_pair(page_first << page_size_log2_, (page_last - page_first + 1)
 diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
-index 001f36b..e380540 100644
+index 001f36b..6e0761b 100644
 --- a/src/graphics/vulkan/command_processor.cpp
 +++ b/src/graphics/vulkan/command_processor.cpp
-@@ -69,6 +69,19 @@ REXCVAR_DEFINE_BOOL(vulkan_dynamic_rendering, true, "GPU/Vulkan",
+@@ -69,6 +69,29 @@ REXCVAR_DEFINE_BOOL(vulkan_dynamic_rendering, true, "GPU/Vulkan",
                      "device (falls back to render passes otherwise)")
      .lifecycle(rex::cvar::Lifecycle::kHotReload);
  
 +#if REX_PLATFORM_ANDROID
 +REXCVAR_DEFINE_BOOL(vulkan_android_stats_log, false, "GPU/Vulkan",
 +                    "Log the command processor's work every five seconds (GPUSTATS lines: draws, "
-+                    "render passes, submissions, queue drains, occlusion queries, pipeline setup "
-+                    "time) and each texture format the first time it is loaded (TEXFMT lines)")
++                    "render passes and why they ended, submissions, queue drains, occlusion "
++                    "queries, pipeline setup time, guest memory uploads by the draw step that "
++                    "needed them, CPU invalidations, texture loads and all-zero texture data) and "
++                    "each texture format the first time it is loaded (TEXFMT lines)")
 +    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 +
 +REXCVAR_DEFINE_BOOL(vulkan_occlusion_query_precise, false, "GPU/Vulkan",
 +                    "Begin host occlusion queries with VK_QUERY_CONTROL_PRECISE_BIT (exact sample "
 +                    "counts, as D3D12 gives) when the device supports occlusionQueryPrecise")
 +    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
++REXCVAR_DECLARE(int32_t, vulkan_android_depth_experiment);
++
++REXCVAR_DEFINE_INT32(vulkan_android_trace_frame_after_seconds, 0, "GPU/Vulkan",
++                     "Log every draw of one frame (FRAMETRACE lines: shaders, vertex formats, the "
++                     "first words of the first vertex buffer) once this many seconds have passed "
++                     "since the GPU started; 0 is off")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +#endif
 +
  namespace rex::graphics::vulkan {
  
  namespace {
-@@ -687,6 +700,7 @@ bool VulkanCommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuff
+@@ -687,6 +710,7 @@ bool VulkanCommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuff
    bool is_end_via_z_fail =
        sample_counts->ZFail_A == kQueryFinished || sample_counts->ZFail_B == kQueryFinished;
    bool is_end = is_end_via_z_pass || is_end_via_z_fail;
@@ -1272,8 +1696,21 @@ index 001f36b..e380540 100644
  
    if (!is_end) {
      if (active_occlusion_query_.valid &&
-@@ -2274,6 +2288,8 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
+@@ -1023,6 +1047,9 @@ bool VulkanCommandProcessor::SetupContext() {
+     REXGPU_ERROR("Failed to initialize the texture cache");
+     return false;
+   }
++#if REX_PLATFORM_ANDROID
++  texture_cache_->SetAndroidTextureZeroCheck(REXCVAR_GET(vulkan_android_stats_log));
++#endif
+ 
+   // Shared memory and EDRAM common bindings.
+   VkDescriptorPoolSize descriptor_pool_sizes[1];
+@@ -2272,8 +2299,11 @@ void VulkanCommandProcessor::OnGammaRampPWLValueWritten() {
+ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontbuffer_width,
+                                        uint32_t frontbuffer_height) {
    SCOPE_profile_cpu_f("gpu");
++  REX_ANDROID_GPU_STAT(UpdateAndroidFrameTrace());
    vertex_buffers_in_sync_[0] = 0;
    vertex_buffers_in_sync_[1] = 0;
 +  REX_ANDROID_GPU_STAT(++android_gpu_stats_.swaps);
@@ -1281,7 +1718,7 @@ index 001f36b..e380540 100644
  
    if (!graphics_system_)
      return;
-@@ -2300,6 +2316,7 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
+@@ -2300,6 +2330,7 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
            "Skipping Vulkan frame presentation due to async placeholder draw "
            "usage in this frame");
      }
@@ -1289,7 +1726,28 @@ index 001f36b..e380540 100644
      EndSubmission(true);
      return;
    }
-@@ -3159,6 +3176,7 @@ void VulkanCommandProcessor::SubmitBarriersAndEnterRenderTargetCacheRenderPass(
+@@ -3056,10 +3087,12 @@ bool VulkanCommandProcessor::SubmitBarriers(bool force_end_render_pass) {
+   SplitPendingBarrier();
+   if (pending_barriers_.empty()) {
+     if (force_end_render_pass) {
++      REX_ANDROID_GPU_STAT(android_gpu_stats_.render_pass_ends_forced += in_render_pass_ ? 1 : 0);
+       EndRenderPass();
+     }
+     return false;
+   }
++  REX_ANDROID_GPU_STAT(android_gpu_stats_.render_pass_ends_barrier += in_render_pass_ ? 1 : 0);
+   EndRenderPass();
+   for (auto it = pending_barriers_.cbegin(); it != pending_barriers_.cend(); ++it) {
+     auto it_next = std::next(it);
+@@ -3107,6 +3140,7 @@ void VulkanCommandProcessor::SubmitBarriersAndEnterRenderTargetCacheRenderPass(
+   }
+ 
+   if (in_render_pass_) {
++    REX_ANDROID_GPU_STAT(++android_gpu_stats_.render_pass_ends_switch);
+     if (use_dynamic_rendering) {
+       deferred_command_buffer_.CmdVkEndRendering();
+     } else {
+@@ -3159,6 +3193,7 @@ void VulkanCommandProcessor::SubmitBarriersAndEnterRenderTargetCacheRenderPass(
                                                    VK_SUBPASS_CONTENTS_INLINE);
    }
    in_render_pass_ = true;
@@ -1297,7 +1755,15 @@ index 001f36b..e380540 100644
  }
  
  void VulkanCommandProcessor::SubmitBarriersAndEnterRenderTargetCacheRenderPass(
-@@ -3251,6 +3269,7 @@ void VulkanCommandProcessor::SubmitBarriersAndEnterRenderTargetCacheRenderPass(
+@@ -3181,6 +3216,7 @@ void VulkanCommandProcessor::SubmitBarriersAndEnterRenderTargetCacheRenderPass(
+   }
+ 
+   if (in_render_pass_) {
++    REX_ANDROID_GPU_STAT(++android_gpu_stats_.render_pass_ends_switch);
+     if (use_dynamic_rendering) {
+       deferred_command_buffer_.CmdVkEndRendering();
+     } else {
+@@ -3251,6 +3287,7 @@ void VulkanCommandProcessor::SubmitBarriersAndEnterRenderTargetCacheRenderPass(
                                                    VK_SUBPASS_CONTENTS_INLINE);
    }
    in_render_pass_ = true;
@@ -1305,7 +1771,24 @@ index 001f36b..e380540 100644
  }
  
  void VulkanCommandProcessor::EndRenderPass() {
-@@ -3753,10 +3772,12 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+@@ -3708,11 +3745,16 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+     }
+ 
+     // Process primitives.
++    REX_ANDROID_GPU_STAT(const uint64_t uploaded_before_index =
++                             android_gpu_stats_.shared_memory_upload_bytes);
+     if (!primitive_processor_->Process(primitive_processing_result)) {
+       return draw_fail("primitive_processing");
+     }
++    REX_ANDROID_GPU_STAT(android_gpu_stats_.upload_bytes_index +=
++                         android_gpu_stats_.shared_memory_upload_bytes - uploaded_before_index);
+     if (!primitive_processing_result.host_draw_vertex_count) {
+       // Nothing to draw.
++      REX_ANDROID_GPU_STAT(++android_gpu_stats_.draws_without_vertices);
+       return true;
+     }
+     if (primitive_processing_result.host_primitive_type == xenos::PrimitiveType::kTriangleFan) {
+@@ -3753,10 +3795,12 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
          pixel_shader ? static_cast<VulkanShader::VulkanTranslation*>(
                             pixel_shader->GetOrCreateTranslation(pixel_shader_modification.value))
                       : nullptr;
@@ -1318,7 +1801,19 @@ index 001f36b..e380540 100644
  
      // Obtain the samplers. Note that the bindings don't depend on the shader
      // modification, so if on the second iteration of this loop it becomes
-@@ -3849,6 +3870,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+@@ -3835,7 +3879,11 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+   uint32_t used_texture_mask =
+       vertex_shader->GetUsedTextureMaskAfterTranslation() |
+       (pixel_shader != nullptr ? pixel_shader->GetUsedTextureMaskAfterTranslation() : 0);
++  REX_ANDROID_GPU_STAT(const uint64_t uploaded_before_textures =
++                           android_gpu_stats_.shared_memory_upload_bytes);
+   texture_cache_->RequestTextures(used_texture_mask);
++  REX_ANDROID_GPU_STAT(android_gpu_stats_.upload_bytes_texture +=
++                       android_gpu_stats_.shared_memory_upload_bytes - uploaded_before_textures);
+ 
+   const VulkanPipelineCache::PipelineLayoutProvider* pipeline_layout_provider;
+   // Set up the render targets - this may perform dispatches and draws.
+@@ -3849,6 +3897,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
    // textures.
    VkPipeline pipeline;
    void* pipeline_handle = nullptr;
@@ -1326,7 +1821,7 @@ index 001f36b..e380540 100644
    if (!pipeline_cache_->ConfigurePipeline(vertex_shader_translation, pixel_shader_translation,
                                            primitive_processing_result, normalized_depth_control,
                                            normalized_color_mask,
-@@ -3856,6 +3878,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+@@ -3856,6 +3905,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
                                            pipeline, pipeline_layout_provider, &pipeline_handle)) {
      return draw_fail("configure_pipeline");
    }
@@ -1334,7 +1829,7 @@ index 001f36b..e380540 100644
    bool pipeline_is_placeholder = false;
    // Reload the current handle state to observe async hot-swap completions that
    // may happen between pipeline configuration and binding.
-@@ -3863,11 +3886,15 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+@@ -3863,11 +3913,22 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
                                                  &pipeline_is_placeholder);
    if (REXCVAR_GET(async_shader_compilation) && pipeline_is_placeholder) {
      frame_used_async_placeholder_pipeline_ = true;
@@ -1347,10 +1842,50 @@ index 001f36b..e380540 100644
 +  REX_ANDROID_GPU_STAT(RecordAndroidDrawStats(pixel_shader, normalized_color_mask,
 +                                              normalized_depth_control,
 +                                              primitive_processing_result));
++  REX_ANDROID_GPU_STAT(RecordAndroidClipStats(*vertex_shader,
++                                              pixel_shader && normalized_color_mask));
++#if REX_PLATFORM_ANDROID
++  if (IsAndroidDepthPrepassDrawSkipped(pixel_shader)) {
++    return true;
++  }
++#endif
    if (current_guest_graphics_pipeline_ != pipeline) {
      deferred_command_buffer_.CmdVkBindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
      current_guest_graphics_pipeline_ = pipeline;
-@@ -4853,7 +4880,12 @@ bool VulkanCommandProcessor::BeginGuestOcclusionQuery(uint32_t sample_count_addr
+@@ -3978,6 +4039,8 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+   }
+ 
+   // Ensure vertex buffers are resident.
++  REX_ANDROID_GPU_STAT(const uint64_t uploaded_before_vertex =
++                           android_gpu_stats_.shared_memory_upload_bytes);
+   const Shader::ConstantRegisterMap& constant_map_vertex = vertex_shader->constant_register_map();
+   for (uint32_t i = 0; i < rex::countof(constant_map_vertex.vertex_fetch_bitmap); ++i) {
+     uint32_t vfetch_bits_remaining = constant_map_vertex.vertex_fetch_bitmap[i];
+@@ -4027,6 +4090,14 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+     }
+   }
+ 
++  REX_ANDROID_GPU_STAT(android_gpu_stats_.upload_bytes_vertex +=
++                       android_gpu_stats_.shared_memory_upload_bytes - uploaded_before_vertex);
++  REX_ANDROID_GPU_STAT(TraceAndroidDraw(*vertex_shader, pixel_shader, primitive_processing_result,
++                                        normalized_depth_control, normalized_color_mask));
++  REX_ANDROID_GPU_STAT(CountAndroidMemexportDraw(memexport_writes_possible));
++  REX_ANDROID_GPU_STAT(const uint64_t uploaded_before_memexport =
++                           android_gpu_stats_.shared_memory_upload_bytes);
++
+   // Synchronize the memory pages backing memory scatter export streams, and
+   // calculate the range that includes the streams for the buffer barrier.
+   uint32_t memexport_extent_start = UINT32_MAX, memexport_extent_end = 0;
+@@ -4051,6 +4122,8 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t
+       return false;
+     }
+   }
++  REX_ANDROID_GPU_STAT(android_gpu_stats_.upload_bytes_memexport +=
++                       android_gpu_stats_.shared_memory_upload_bytes - uploaded_before_memexport);
+ 
+   ScratchBufferAcquisition guest_dma_index_scratch_buffer;
+   if (primitive_processing_result.index_buffer_type ==
+@@ -4853,7 +4926,12 @@ bool VulkanCommandProcessor::BeginGuestOcclusionQuery(uint32_t sample_count_addr
  
    DeferredCommandBuffer& command_buffer = deferred_command_buffer();
    command_buffer.CmdVkResetQueryPool(occlusion_query_pool_, host_index, 1);
@@ -1363,7 +1898,7 @@ index 001f36b..e380540 100644
    active_occlusion_query_.sample_count_address = sample_count_address;
    active_occlusion_query_.host_index = host_index;
    active_occlusion_query_.valid = true;
-@@ -4908,6 +4940,7 @@ bool VulkanCommandProcessor::EndGuestOcclusionQuery(uint32_t sample_count_addres
+@@ -4908,6 +4986,7 @@ bool VulkanCommandProcessor::EndGuestOcclusionQuery(uint32_t sample_count_addres
  
    const uint64_t* results = reinterpret_cast<const uint64_t*>(occlusion_query_readback_mapping_);
    uint64_t samples = NormalizeOcclusionSamples(results[host_index]);
@@ -1371,7 +1906,7 @@ index 001f36b..e380540 100644
    WriteGuestOcclusionResult(sample_count_address, samples);
    return true;
  }
-@@ -4943,6 +4976,134 @@ void VulkanCommandProcessor::WriteGuestOcclusionResult(uint32_t sample_count_add
+@@ -4943,6 +5022,319 @@ void VulkanCommandProcessor::WriteGuestOcclusionResult(uint32_t sample_count_add
    sample_counts->StencilFail_B = 0;
  }
  
@@ -1421,13 +1956,48 @@ index 001f36b..e380540 100644
 +      c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[kDepthTestOffSlot]);
 +}
 +
++constexpr uint64_t kBytesPerKb = 1024;
++
++std::string FormatAndroidClipStats(const AndroidGpuStats& stats) {
++  return fmt::format("no_vertices {} ucp {} ucp_color {} vertex_kill {} vertex_kill_color {}",
++                     stats.draws_without_vertices, stats.draws_user_clip_planes,
++                     stats.color_draws_user_clip_planes, stats.draws_vertex_kill,
++                     stats.color_draws_vertex_kill);
++}
++
++std::string FormatAndroidPassEndStats(const AndroidGpuStats& stats) {
++  return fmt::format("pass_ends barrier {} forced {} switch {} uploads {} upload_kb {}",
++                     stats.render_pass_ends_barrier, stats.render_pass_ends_forced,
++                     stats.render_pass_ends_switch, stats.shared_memory_uploads,
++                     stats.shared_memory_upload_bytes / kBytesPerKb);
++}
++
++std::string FormatAndroidUploadSourceStats(const AndroidGpuStats& stats) {
++  return fmt::format(
++      "upload_kb_by index {} texture {} vertex {} memexport {} | memexport_draws {} unknown_range "
++      "{} | cpu_invalidations {} cpu_invalidated_kb {} newly_invalid_pages {}",
++      stats.upload_bytes_index / kBytesPerKb, stats.upload_bytes_texture / kBytesPerKb,
++      stats.upload_bytes_vertex / kBytesPerKb, stats.upload_bytes_memexport / kBytesPerKb,
++      stats.memexport_draws, stats.memexport_unknown_range_draws,
++      stats.cpu_invalidation_callbacks, stats.cpu_invalidated_bytes / kBytesPerKb,
++      stats.cpu_newly_invalidated_pages);
++}
++
++std::string FormatAndroidTextureLoadStats(const AndroidGpuStats& stats) {
++  return fmt::format(
++      "texture_loads {} zero_bc_base {} zero_bc_mips {} zero_other {} reloaded_after_zero {} "
++      "invalidated {}",
++      stats.texture_loads, stats.texture_zero_base_compressed, stats.texture_zero_mips_compressed,
++      stats.texture_zero_other, stats.texture_reloaded_after_zero, stats.texture_invalidations);
++}
++
 +std::string FormatAndroidGpuStats(const AndroidGpuStats& stats, int64_t now_us) {
 +  const double seconds = double(now_us - stats.window_start_us) / kUsPerSecond;
 +  return fmt::format(
 +      "GPUSTATS {:.1f} s: swaps {} unpresented {} | draws {} pending {} no_ps {} no_ps_color {} "
 +      "gs {} d24s8 {} d24fs8 {} missing_textures {} | color_draw_zfunc {} | passes {} submits {} "
 +      "drains {} | occlusion ends {} host {} zero {} samples {} | pipeline_setup {:.1f} ms slow {} "
-+      "max {:.1f} ms",
++      "max {:.1f} ms | {} | {} | {} | {}",
 +      seconds, stats.swaps, stats.swaps_skipped_pending, stats.draws, stats.draws_skipped_pending,
 +      stats.draws_without_pixel_shader, stats.draws_without_pixel_shader_color_bound,
 +      stats.draws_geometry_shader, stats.draws_depth_d24s8, stats.draws_depth_d24fs8,
@@ -1435,7 +2005,19 @@ index 001f36b..e380540 100644
 +      stats.submissions, stats.queue_drains, stats.occlusion_query_ends,
 +      stats.occlusion_host_results, stats.occlusion_zero_results, stats.occlusion_samples,
 +      double(stats.pipeline_setup_us) / kUsPerMs,
-+      stats.pipeline_setup_slow_calls, double(stats.pipeline_setup_max_us) / kUsPerMs);
++      stats.pipeline_setup_slow_calls, double(stats.pipeline_setup_max_us) / kUsPerMs,
++      FormatAndroidClipStats(stats), FormatAndroidPassEndStats(stats),
++      FormatAndroidUploadSourceStats(stats), FormatAndroidTextureLoadStats(stats));
++}
++
++void CopyAndroidTextureLoadStats(const TextureCache::AndroidTextureLoadStats& loads,
++                                 AndroidGpuStats& stats) {
++  stats.texture_loads = loads.loads;
++  stats.texture_zero_base_compressed = loads.zero_base_compressed;
++  stats.texture_zero_mips_compressed = loads.zero_mips_compressed;
++  stats.texture_zero_other = loads.zero_other;
++  stats.texture_reloaded_after_zero = loads.reloaded_after_zero;
++  stats.texture_invalidations = loads.invalidations;
 +}
 +
 +}  // namespace
@@ -1467,6 +2049,131 @@ index 001f36b..e380540 100644
 +  CountDepthFormat(stats, key);
 +}
 +
++void VulkanCommandProcessor::UpdateAndroidFrameTrace() {
++  const int32_t after_seconds = REXCVAR_GET(vulkan_android_trace_frame_after_seconds);
++  if (after_seconds <= 0 || android_frame_trace_done_) {
++    return;
++  }
++  const int64_t now_us = AndroidGpuStatsNowUs();
++  if (!android_frame_trace_start_us_) {
++    android_frame_trace_start_us_ = now_us;
++    return;
++  }
++  if (android_frame_trace_active_) {
++    android_frame_trace_active_ = false;
++    android_frame_trace_done_ = true;
++    REXGPU_INFO("FRAMETRACE end: {} draws", android_frame_trace_draws_);
++    return;
++  }
++  if (now_us - android_frame_trace_start_us_ >= int64_t(after_seconds) * 1'000'000) {
++    android_frame_trace_active_ = true;
++    REXGPU_INFO("FRAMETRACE begin");
++  }
++}
++
++std::string VulkanCommandProcessor::DescribeAndroidVertexBindings(
++    const VulkanShader& vertex_shader) const {
++  std::string description;
++  for (const Shader::VertexBinding& binding : vertex_shader.vertex_bindings()) {
++    description += fmt::format(" [vf{} stride {}:", binding.fetch_constant, binding.stride_words);
++    for (const Shader::VertexBinding::Attribute& attribute : binding.attributes) {
++      const auto& attributes = attribute.fetch_instr.attributes;
++      description += fmt::format(" fmt{}@{}{}{}", uint32_t(attributes.data_format),
++                                 attributes.offset, attributes.is_signed ? "s" : "",
++                                 attributes.exp_adjust ? fmt::format("e{}", attributes.exp_adjust)
++                                                       : std::string());
++    }
++    description += "]";
++  }
++  return description;
++}
++
++std::string VulkanCommandProcessor::DescribeAndroidFirstVertex(
++    const VulkanShader& vertex_shader) const {
++  if (vertex_shader.vertex_bindings().empty()) {
++    return "no vertex buffer";
++  }
++  const xenos::xe_gpu_vertex_fetch_t fetch =
++      register_file_->GetVertexFetch(vertex_shader.vertex_bindings().front().fetch_constant);
++  const uint32_t address = fetch.address << 2;
++  const uint32_t size = fetch.size << 2;
++  constexpr uint32_t kWords = 4;
++  if (size < kWords * sizeof(uint32_t)) {
++    return fmt::format("vb 0x{:08X} size {}", address, size);
++  }
++  const auto* words = memory_->TranslatePhysical<const uint32_t*>(address);
++  return fmt::format("vb 0x{:08X} size {} endian {} words {:08X} {:08X} {:08X} {:08X}", address,
++                     size, uint32_t(fetch.endian), rex::byte_swap(words[0]),
++                     rex::byte_swap(words[1]), rex::byte_swap(words[2]),
++                     rex::byte_swap(words[3]));
++}
++
++void VulkanCommandProcessor::TraceAndroidDraw(
++    const VulkanShader& vertex_shader, const VulkanShader* pixel_shader,
++    const PrimitiveProcessor::ProcessingResult& primitive_processing_result,
++    reg::RB_DEPTHCONTROL normalized_depth_control, uint32_t normalized_color_mask) {
++  if (!android_frame_trace_active_) {
++    return;
++  }
++  REXGPU_INFO("FRAMETRACE #{} vs {:016X} ps {:016X} prim {} verts {} color {:04X} z {}{}{} {}{}",
++              android_frame_trace_draws_++, vertex_shader.ucode_data_hash(),
++              pixel_shader ? pixel_shader->ucode_data_hash() : 0,
++              uint32_t(primitive_processing_result.host_primitive_type),
++              primitive_processing_result.host_draw_vertex_count, normalized_color_mask,
++              normalized_depth_control.z_enable ? uint32_t(normalized_depth_control.zfunc) : 9,
++              normalized_depth_control.z_write_enable ? "w" : "",
++              normalized_depth_control.stencil_enable ? "s" : "",
++              DescribeAndroidFirstVertex(vertex_shader),
++              DescribeAndroidVertexBindings(vertex_shader));
++}
++
++void VulkanCommandProcessor::ApplyAndroidScissorExperiment(VkRect2D& scissor_rect) const {
++  constexpr int32_t kWholeTargetScissor = 8;
++  constexpr uint32_t kWholeTargetExtent = 8192;
++  if (!(REXCVAR_GET(vulkan_android_depth_experiment) & kWholeTargetScissor)) {
++    return;
++  }
++  scissor_rect.offset = {0, 0};
++  scissor_rect.extent = {kWholeTargetExtent, kWholeTargetExtent};
++}
++
++void VulkanCommandProcessor::CountAndroidMemexportDraw(bool memexport_writes_possible) {
++  if (!memexport_writes_possible) {
++    return;
++  }
++  ++android_gpu_stats_.memexport_draws;
++  android_gpu_stats_.memexport_unknown_range_draws += memexport_ranges_.empty() ? 1 : 0;
++}
++
++void VulkanCommandProcessor::CountAndroidSharedMemoryUpload(uint64_t bytes) {
++  ++android_gpu_stats_.shared_memory_uploads;
++  android_gpu_stats_.shared_memory_upload_bytes += bytes;
++}
++
++bool VulkanCommandProcessor::IsAndroidDepthPrepassDrawSkipped(
++    const VulkanShader* pixel_shader) const {
++  constexpr int32_t kSkipDepthPrepass = 2;
++  if (pixel_shader || !(REXCVAR_GET(vulkan_android_depth_experiment) & kSkipDepthPrepass)) {
++    return false;
++  }
++  const VulkanRenderTargetCache::RenderPassKey key =
++      render_target_cache_->last_update_render_pass_key();
++  return (key.depth_and_color_used & 1) &&
++         key.depth_format == xenos::DepthRenderTargetFormat::kD24FS8;
++}
++
++void VulkanCommandProcessor::RecordAndroidClipStats(const VulkanShader& vertex_shader,
++                                                    bool writes_color) {
++  const auto pa_cl_clip_cntl = register_file_->Get<reg::PA_CL_CLIP_CNTL>();
++  const bool user_clip_planes = !pa_cl_clip_cntl.clip_disable && pa_cl_clip_cntl.ucp_ena;
++  const bool vertex_kill = (vertex_shader.writes_point_size_edge_flag_kill_vertex() & 0b100) != 0;
++  AndroidGpuStats& stats = android_gpu_stats_;
++  stats.draws_user_clip_planes += user_clip_planes ? 1 : 0;
++  stats.color_draws_user_clip_planes += user_clip_planes && writes_color ? 1 : 0;
++  stats.draws_vertex_kill += vertex_kill ? 1 : 0;
++  stats.color_draws_vertex_kill += vertex_kill && writes_color ? 1 : 0;
++}
++
 +void VulkanCommandProcessor::RecordAndroidOcclusionResult(uint64_t samples) {
 +  ++android_gpu_stats_.occlusion_host_results;
 +  android_gpu_stats_.occlusion_samples += samples;
@@ -1480,6 +2187,10 @@ index 001f36b..e380540 100644
 +  android_gpu_stats_.window_start_us = now_us;
 +  if (texture_cache_) {
 +    texture_cache_->TakeAndroidMissingTextureBindings();
++    texture_cache_->TakeAndroidTextureLoadStats();
++  }
++  if (shared_memory_) {
++    shared_memory_->TakeAndroidInvalidationStats();
 +  }
 +}
 +
@@ -1496,6 +2207,15 @@ index 001f36b..e380540 100644
 +    if (texture_cache_) {
 +      android_gpu_stats_.missing_texture_bindings =
 +          texture_cache_->TakeAndroidMissingTextureBindings();
++      CopyAndroidTextureLoadStats(texture_cache_->TakeAndroidTextureLoadStats(),
++                                  android_gpu_stats_);
++    }
++    if (shared_memory_) {
++      const SharedMemory::AndroidInvalidationStats invalidations =
++          shared_memory_->TakeAndroidInvalidationStats();
++      android_gpu_stats_.cpu_invalidation_callbacks = invalidations.callbacks;
++      android_gpu_stats_.cpu_invalidated_bytes = invalidations.bytes;
++      android_gpu_stats_.cpu_newly_invalidated_pages = invalidations.newly_invalidated_pages;
 +    }
 +    REXGPU_INFO("{}", FormatAndroidGpuStats(android_gpu_stats_, now_us));
 +  }
@@ -1506,7 +2226,7 @@ index 001f36b..e380540 100644
  void VulkanCommandProcessor::CheckSubmissionFenceAndDeviceLoss(uint64_t await_submission) {
    // Only report once, no need to retry a wait that won't succeed anyway.
    if (device_lost_) {
-@@ -5419,6 +5580,7 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+@@ -5419,6 +5811,7 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
            vulkan_device->AcquireQueue(vulkan_device->queue_family_graphics_compute(), 0);
        submit_result = dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info, fence);
      }
@@ -1514,11 +2234,21 @@ index 001f36b..e380540 100644
      if (submit_result != VK_SUCCESS) {
        REXGPU_ERROR("Failed to submit a Vulkan command buffer");
        if (submit_result == VK_ERROR_DEVICE_LOST && !device_lost_) {
+@@ -5701,6 +6094,9 @@ void VulkanCommandProcessor::UpdateDynamicState(const draw_util::ViewportInfo& v
+   scissor_rect.offset.y = int32_t(scissor.offset[1]);
+   scissor_rect.extent.width = scissor.extent[0];
+   scissor_rect.extent.height = scissor.extent[1];
++#if REX_PLATFORM_ANDROID
++  ApplyAndroidScissorExperiment(scissor_rect);
++#endif
+   SetScissor(scissor_rect);
+ 
+   if (render_target_cache_->GetPath() == RenderTargetCache::Path::kHostRenderTargets) {
 diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
-index 91ac08f..967ac6b 100644
+index 91ac08f..a7633a7 100644
 --- a/src/graphics/vulkan/pipeline_cache.cpp
 +++ b/src/graphics/vulkan/pipeline_cache.cpp
-@@ -59,10 +59,32 @@ REXCVAR_DEFINE_BOOL(vulkan_tessellation_wireframe, false, "GPU/Vulkan",
+@@ -59,10 +59,87 @@ REXCVAR_DEFINE_BOOL(vulkan_tessellation_wireframe, false, "GPU/Vulkan",
                      "Render tessellation as wireframe")
      .lifecycle(rex::cvar::Lifecycle::kHotReload);
  
@@ -1536,6 +2266,16 @@ index 91ac08f..967ac6b 100644
 +                    "building it, and also builds pipelines without a pixel shader in the "
 +                    "background")
 +    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
++REXCVAR_DEFINE_INT32(vulkan_android_depth_experiment, 0, "GPU/Vulkan",
++                     "Diagnostic bits for scene parts that stay black (each draws the scene "
++                     "wrongly; 0 is normal): 1 makes draws that write color but not depth pass "
++                     "their depth test always, 2 skips draws without a pixel shader on the float24 "
++                     "depth buffer (the depth prepass), 4 turns the stencil test off for draws "
++                     "that write color, 8 replaces the guest scissor with the whole target, 16 "
++                     "paints draws with a pixel shader and the depth test on in magenta, 32 turns "
++                     "face culling off, 64 drops user clip planes and the vertex kill flag")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +#endif
 +
  namespace rex::graphics::vulkan {
@@ -1546,12 +2286,57 @@ index 91ac08f..967ac6b 100644
 +constexpr std::string_view kEmptyFragmentShaderSource = R"(#version 460
 +void main() {}
 +)";
++
++constexpr int32_t kAndroidExperimentDepthAlwaysForColor = 1;
++constexpr int32_t kAndroidExperimentNoStencilForColor = 4;
++
++bool IsAndroidExperimentOn(int32_t bit) {
++  return (REXCVAR_GET(vulkan_android_depth_experiment) & bit) != 0;
++}
++
++bool IsAndroidDepthTestRelaxed(bool has_pixel_shader, uint32_t normalized_color_mask,
++                               reg::RB_DEPTHCONTROL normalized_depth_control) {
++  if (!IsAndroidExperimentOn(kAndroidExperimentDepthAlwaysForColor)) {
++    return false;
++  }
++  return has_pixel_shader && normalized_color_mask && !normalized_depth_control.z_write_enable;
++}
++
++bool IsAndroidStencilTestDropped(bool has_pixel_shader, uint32_t normalized_color_mask) {
++  return IsAndroidExperimentOn(kAndroidExperimentNoStencilForColor) && has_pixel_shader &&
++         normalized_color_mask;
++}
++
++bool IsAndroidCullingDropped() {
++  constexpr int32_t kAndroidExperimentNoCulling = 32;
++  return IsAndroidExperimentOn(kAndroidExperimentNoCulling);
++}
++
++bool IsAndroidClipAndKillDropped() {
++  constexpr int32_t kAndroidExperimentNoClipPlanesOrVertexKill = 64;
++  return IsAndroidExperimentOn(kAndroidExperimentNoClipPlanesOrVertexKill);
++}
++
++constexpr int32_t kAndroidExperimentPaintDepthTestedColor = 16;
++
++constexpr std::string_view kPaintFragmentShaderSource = R"(#version 460
++layout(location = 0) out vec4 o0;
++layout(location = 1) out vec4 o1;
++layout(location = 2) out vec4 o2;
++layout(location = 3) out vec4 o3;
++void main() {
++  o0 = vec4(1.0, 0.0, 1.0, 1.0);
++  o1 = o0;
++  o2 = o0;
++  o3 = o0;
++}
++)";
 +#endif
 +
  constexpr std::string_view kPlaceholderPixelShaderSource = R"(#version 460
  layout(location = 0) out vec4 oC0;
  void main() {
-@@ -357,6 +379,11 @@ bool VulkanPipelineCache::Initialize() {
+@@ -357,6 +434,15 @@ bool VulkanPipelineCache::Initialize() {
          "VulkanPipelineCache: Failed to create placeholder pixel shader - "
          "async placeholder hot-swap will be unavailable");
    }
@@ -1559,22 +2344,42 @@ index 91ac08f..967ac6b 100644
 +  if (REXCVAR_GET(vulkan_android_empty_fragment_shader) && !edram_fragment_shader_interlock) {
 +    CreateEmptyFragmentShader();
 +  }
++  if (IsAndroidExperimentOn(kAndroidExperimentPaintDepthTestedColor) &&
++      !edram_fragment_shader_interlock) {
++    CreatePaintFragmentShader();
++  }
 +#endif
  
    uint32_t logical_processor_count = rex::thread::logical_processor_count();
    if (!logical_processor_count) {
-@@ -843,6 +870,10 @@ void VulkanPipelineCache::Shutdown() {
+@@ -843,6 +929,12 @@ void VulkanPipelineCache::Shutdown() {
                                           depth_float24_round_fragment_shader_);
    ui::vulkan::util::DestroyAndNullHandle(dfn.vkDestroyShaderModule, device,
                                           placeholder_pixel_shader_);
 +#if REX_PLATFORM_ANDROID
 +  ui::vulkan::util::DestroyAndNullHandle(dfn.vkDestroyShaderModule, device,
 +                                         empty_fragment_shader_);
++  ui::vulkan::util::DestroyAndNullHandle(dfn.vkDestroyShaderModule, device,
++                                         paint_fragment_shader_);
 +#endif
    if (tessellation_indexed_vertex_shader_ != VK_NULL_HANDLE) {
      dfn.vkDestroyShaderModule(device, tessellation_indexed_vertex_shader_, nullptr);
      tessellation_indexed_vertex_shader_ = VK_NULL_HANDLE;
-@@ -1113,6 +1144,10 @@ bool VulkanPipelineCache::ConfigurePipeline(
+@@ -954,6 +1046,13 @@ SpirvShaderTranslator::Modification VulkanPipelineCache::GetCurrentVertexShaderM
+   modification.vertex.vertex_kill_and = uint32_t(
+       device_properties.shaderCullDistance &&
+       (shader.writes_point_size_edge_flag_kill_vertex() & 0b100) && !pa_cl_clip_cntl.vtx_kill_or);
++#if REX_PLATFORM_ANDROID
++  if (IsAndroidClipAndKillDropped()) {
++    modification.vertex.user_clip_plane_count = 0;
++    modification.vertex.user_clip_plane_cull = 0;
++    modification.vertex.vertex_kill_and = 0;
++  }
++#endif
+ 
+   return modification;
+ }
+@@ -1113,6 +1212,10 @@ bool VulkanPipelineCache::ConfigurePipeline(
  
    bool use_async = REXCVAR_GET(async_shader_compilation) && !creation_threads_.empty() &&
                     pixel_shader && placeholder_pixel_shader_ != VK_NULL_HANDLE;
@@ -1585,7 +2390,7 @@ index 91ac08f..967ac6b 100644
    uint8_t async_priority = pipeline_util::kPriorityLowest;
    if (use_async) {
      uint32_t bound_rts =
-@@ -1128,6 +1163,13 @@ bool VulkanPipelineCache::ConfigurePipeline(
+@@ -1128,6 +1231,13 @@ bool VulkanPipelineCache::ConfigurePipeline(
    auto it = pipelines_.find(description);
    if (it != pipelines_.end()) {
      VkPipeline found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
@@ -1599,7 +2404,7 @@ index 91ac08f..967ac6b 100644
      if (found_pipeline == VK_NULL_HANDLE) {
        PipelineCreationArguments creation_arguments;
        if (!TryGetPipelineCreationArgumentsForDescription(description, &*it, creation_arguments) ||
-@@ -1157,6 +1199,13 @@ bool VulkanPipelineCache::ConfigurePipeline(
+@@ -1157,6 +1267,13 @@ bool VulkanPipelineCache::ConfigurePipeline(
    }
  
    bool queued_async_creation = false;
@@ -1613,7 +2418,7 @@ index 91ac08f..967ac6b 100644
    if (use_async) {
      creation_arguments_real.priority = async_priority;
      PipelineCreationArguments creation_arguments_placeholder;
-@@ -1197,6 +1246,11 @@ bool VulkanPipelineCache::ConfigurePipeline(
+@@ -1197,6 +1314,11 @@ bool VulkanPipelineCache::ConfigurePipeline(
      storage_write_request_cond_.notify_all();
    }
    last_pipeline_ = &pipeline;
@@ -1625,7 +2430,7 @@ index 91ac08f..967ac6b 100644
    pipeline_out = pipeline.second.pipeline.load(std::memory_order_acquire);
    pipeline_layout_out = pipeline.second.pipeline_layout.load(std::memory_order_acquire);
    if (pipeline_handle_out) {
-@@ -1225,10 +1279,18 @@ void VulkanPipelineCache::GetPipelineAndLayoutByHandle(
+@@ -1225,10 +1347,18 @@ void VulkanPipelineCache::GetPipelineAndLayoutByHandle(
      return;
    }
    const auto* pipeline = reinterpret_cast<const Pipeline*>(handle);
@@ -1644,7 +2449,45 @@ index 91ac08f..967ac6b 100644
    }
  }
  
-@@ -3151,6 +3213,11 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
+@@ -1483,6 +1613,12 @@ bool VulkanPipelineCache::GetCurrentStateDescription(
+     // highest) based on which faces are not culled.
+     bool cull_front = pa_su_sc_mode_cntl.cull_front;
+     bool cull_back = pa_su_sc_mode_cntl.cull_back;
++#if REX_PLATFORM_ANDROID
++    if (IsAndroidCullingDropped()) {
++      cull_front = false;
++      cull_back = false;
++    }
++#endif
+     description_out.cull_front = cull_front;
+     description_out.cull_back = cull_back;
+     if (device_properties.fillModeNonSolid) {
+@@ -1527,6 +1663,12 @@ bool VulkanPipelineCache::GetCurrentStateDescription(
+       if (normalized_depth_control.z_enable) {
+         description_out.depth_write_enable = normalized_depth_control.z_write_enable;
+         description_out.depth_compare_op = normalized_depth_control.zfunc;
++#if REX_PLATFORM_ANDROID
++        if (IsAndroidDepthTestRelaxed(pixel_shader != nullptr, normalized_color_mask,
++                                      normalized_depth_control)) {
++          description_out.depth_compare_op = xenos::CompareFunction::kAlways;
++        }
++#endif
+       } else {
+         description_out.depth_compare_op = xenos::CompareFunction::kAlways;
+       }
+@@ -1548,6 +1690,11 @@ bool VulkanPipelineCache::GetCurrentStateDescription(
+           description_out.stencil_back_compare_op = description_out.stencil_front_compare_op;
+         }
+       }
++#if REX_PLATFORM_ANDROID
++      if (IsAndroidStencilTestDropped(pixel_shader != nullptr, normalized_color_mask)) {
++        description_out.stencil_test_enable = 0;
++      }
++#endif
+     }
+ 
+     // Color blending and write masks (filled only for the attachments present
+@@ -3151,6 +3298,14 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
        }
      }
    }
@@ -1652,11 +2495,14 @@ index 91ac08f..967ac6b 100644
 +  if (shader_stage_fragment.module == VK_NULL_HANDLE && NeedsEmptyFragmentShader(description)) {
 +    shader_stage_fragment.module = empty_fragment_shader_;
 +  }
++  if (IsPaintedPipeline(description, creation_arguments.pixel_shader != nullptr)) {
++    shader_stage_fragment.module = paint_fragment_shader_;
++  }
 +#endif
    if (shader_stage_fragment.module == VK_NULL_HANDLE) {
      --shader_stage_count;
    }
-@@ -3550,6 +3617,9 @@ void VulkanPipelineCache::CreationThread(size_t thread_index) {
+@@ -3550,6 +3705,9 @@ void VulkanPipelineCache::CreationThread(size_t thread_index) {
        } else {
          creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
                                                             std::memory_order_release);
@@ -1666,7 +2512,7 @@ index 91ac08f..967ac6b 100644
        }
      }
  
-@@ -3583,11 +3653,75 @@ void VulkanPipelineCache::CreateQueuedPipelinesOnProcessorThread() {
+@@ -3583,11 +3741,101 @@ void VulkanPipelineCache::CreateQueuedPipelinesOnProcessorThread() {
        } else {
          creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
                                                             std::memory_order_release);
@@ -1697,6 +2543,32 @@ index 91ac08f..967ac6b 100644
 +  REXGPU_INFO(
 +      "VulkanPipelineCache: pipelines without a pixel shader get an empty fragment shader when "
 +      "color targets are bound");
++}
++
++void VulkanPipelineCache::CreatePaintFragmentShader() {
++  std::vector<uint32_t> spirv;
++  std::string compile_error;
++  if (!command_processor_.CompileGlslToSpirv(VK_SHADER_STAGE_FRAGMENT_BIT,
++                                             kPaintFragmentShaderSource, spirv, compile_error)) {
++    REXGPU_WARN("VulkanPipelineCache: Failed to compile the paint fragment shader: {}",
++                compile_error);
++    return;
++  }
++  paint_fragment_shader_ = ui::vulkan::util::CreateShaderModule(
++      command_processor_.GetVulkanDevice(), spirv.data(), spirv.size() * sizeof(uint32_t));
++  REXGPU_INFO("VulkanPipelineCache: depth-tested draws with a pixel shader are painted magenta");
++}
++
++bool VulkanPipelineCache::IsPaintedPipeline(const PipelineDescription& description,
++                                            bool has_pixel_shader) const {
++  if (paint_fragment_shader_ == VK_NULL_HANDLE || !has_pixel_shader) {
++    return false;
++  }
++  // Only the scene's own draws: the float24 scene depth bound and a real depth comparison.
++  const auto& key = description.render_pass_key;
++  return (key.depth_and_color_used & 1) &&
++         key.depth_format == xenos::DepthRenderTargetFormat::kD24FS8 &&
++         description.depth_compare_op != xenos::CompareFunction::kAlways;
 +}
 +
 +bool VulkanPipelineCache::NeedsEmptyFragmentShader(const PipelineDescription& description) const {
@@ -1742,8 +2614,45 @@ index 91ac08f..967ac6b 100644
  void VulkanPipelineCache::ProcessDeferredPipelineDestructions(bool force_all) {
    std::vector<VkPipeline> pipelines_to_destroy;
    uint64_t completed_submission = command_processor_.GetCompletedSubmission();
+diff --git a/src/graphics/vulkan/shared_memory.cpp b/src/graphics/vulkan/shared_memory.cpp
+index 6788214..de133a0 100644
+--- a/src/graphics/vulkan/shared_memory.cpp
++++ b/src/graphics/vulkan/shared_memory.cpp
+@@ -29,6 +29,21 @@ REXCVAR_DEFINE_BOOL(vulkan_sparse_shared_memory, true, "GPU/Vulkan",
+ 
+ namespace rex::graphics::vulkan {
+ 
++#if REX_PLATFORM_ANDROID
++namespace {
++
++uint64_t UploadedBytes(const std::vector<std::pair<uint32_t, uint32_t>>& upload_page_ranges,
++                       uint32_t page_size_log2) {
++  uint64_t pages = 0;
++  for (const auto& range : upload_page_ranges) {
++    pages += range.second;
++  }
++  return pages << page_size_log2;
++}
++
++}  // namespace
++#endif
++
+ VulkanSharedMemory::VulkanSharedMemory(VulkanCommandProcessor& command_processor,
+                                        memory::Memory& memory,
+                                        VkPipelineStageFlags guest_shader_pipeline_stages)
+@@ -273,6 +288,10 @@ bool VulkanSharedMemory::UploadRanges(
+   if (upload_page_ranges.empty()) {
+     return true;
+   }
++#if REX_PLATFORM_ANDROID
++  command_processor_.CountAndroidSharedMemoryUpload(UploadedBytes(upload_page_ranges,
++                                                                  page_size_log2()));
++#endif
+   // upload_page_ranges are sorted, use them to determine the range for the
+   // ordering barrier.
+   Use(Usage::kTransferDestination,
 diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
-index ecbd940..867cda0 100644
+index ecbd940..e8a0872 100644
 --- a/src/graphics/vulkan/texture_cache.cpp
 +++ b/src/graphics/vulkan/texture_cache.cpp
 @@ -35,6 +35,13 @@
@@ -1806,17 +2715,19 @@ index ecbd940..867cda0 100644
  }  // namespace
  
  static_assert(VK_FORMAT_UNDEFINED == VkFormat(0),
-@@ -658,6 +704,9 @@ VkImageView VulkanTextureCache::GetActiveBindingOrNullImageView(uint32_t fetch_c
+@@ -658,6 +704,11 @@ VkImageView VulkanTextureCache::GetActiveBindingOrNullImageView(uint32_t fetch_c
    if (image_view != VK_NULL_HANDLE) {
      return image_view;
    }
 +#if REX_PLATFORM_ANDROID
-+  android_missing_texture_bindings_ += binding ? 1 : 0;
++  // Every fetch declares signed and unsigned (and 3D) images; only the ones its texture uses count.
++  android_missing_texture_bindings_ +=
++      binding && IsAndroidBindingVariantUsed(*binding, dimension, is_signed) ? 1 : 0;
 +#endif
    if (command_processor_.GetVulkanDevice()->properties().nullDescriptor) {
      return VK_NULL_HANDLE;
    }
-@@ -1229,6 +1278,12 @@ bool VulkanTextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1229,6 +1280,12 @@ bool VulkanTextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
    const HostFormat& host_format =
        host_format_is_signed ? host_format_pair.format_signed : host_format_pair.format_unsigned;
    LoadShaderIndex load_shader = host_format.load_shader;
