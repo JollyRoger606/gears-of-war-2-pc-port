@@ -22,6 +22,7 @@ public static class Win {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
 }
 "@
@@ -47,9 +48,12 @@ function Send-Key([System.Diagnostics.Process]$proc, [string]$name, [int]$holdMs
     $proc.Refresh()
     if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { [Win]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null }
     $vk = [byte][System.Windows.Forms.Keys]::$name
-    [Win]::keybd_event($vk, 0, 0, [UIntPtr]::Zero)
+    # SDL reads scan codes: without the real one (extended for arrows) arrow keys never reach the game.
+    $scan = [byte][Win]::MapVirtualKey($vk, 0)
+    $ext = if ($name -in 'Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Insert', 'Delete', 'PageUp', 'PageDown') { 1 } else { 0 }
+    [Win]::keybd_event($vk, $scan, $ext, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds $holdMs
-    [Win]::keybd_event($vk, 0, 2, [UIntPtr]::Zero)
+    [Win]::keybd_event($vk, $scan, $ext -bor 2, [UIntPtr]::Zero)
     Write-Output "sent key $name (${holdMs}ms)"
 }
 
