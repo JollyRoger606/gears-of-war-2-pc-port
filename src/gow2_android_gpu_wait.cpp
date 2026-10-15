@@ -9,9 +9,10 @@
 #include <rex/hook.h>
 #include <rex/ppc.h>
 
-REXCVAR_DEFINE_BOOL(gow2_android_gpu_wait_yield, true, "GameFixes",
+REXCVAR_DEFINE_BOOL(gow2_android_gpu_wait_yield, false, "GameFixes",
                     "Android: give the CPU core away once per poll of the game's wait for the GPU "
-                    "(sub_82977688), which otherwise spins at full speed")
+                    "(sub_82977688); off by default: on the S25 Ultra it changed neither CPU use "
+                    "nor the frame rate at the thermal cap")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
 REX_EXTERN(__imp__sub_82977688);

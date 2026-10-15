@@ -39,11 +39,16 @@ REXCVAR_DEFINE_STRING(gow2_prompts, "auto", "input", GOW2_PROMPTS_HELP);
 #undef GOW2_PROMPTS_HELP
 
 #if defined(__ANDROID__)
-REXCVAR_DEFINE_STRING(gow2_system_settings, "", "debug",
+// Default measured on the S25 Ultra (docs/ANDROID_EXPERIMENTS.md, October 15 second session).
+REXCVAR_DEFINE_STRING(gow2_system_settings, "LightEnvironmentShadows=0", "debug",
                       "Values for the game's own [SystemSettings] (Xe-GearEngine.ini in the "
                       "Coalesced bundles) as Key=Value pairs separated by ';', for example "
-                      "AmbientOcclusion=False;MotionBlur=False. Only keys the bundle has are "
-                      "changed, in a cached copy prepared at launch")
+                      "AmbientOcclusion=0;MotionBlur=0. Only keys the bundle has are changed, in a "
+                      "cached copy prepared at launch; an edit that makes a bundle longer than its "
+                      "TOC size is not applied, so write 0 rather than False. The Android default "
+                      "turns off light environment shadows, which draw some lit objects solid "
+                      "white on the Adreno 830 and cost about a quarter of the GPU frame there; "
+                      "setting this replaces the default, and \"\" keeps the game's values")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 #endif
 

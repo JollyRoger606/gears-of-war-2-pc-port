@@ -2075,10 +2075,10 @@ index 4fcfd7b..7565c36 100644
  
  std::string to_utf8(const std::u16string_view source) {
 diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
-index a744375..9d6d647 100644
+index a744375..e466ae3 100644
 --- a/src/graphics/command_processor.cpp
 +++ b/src/graphics/command_processor.cpp
-@@ -31,16 +31,39 @@
+@@ -31,16 +31,40 @@
  #include <rex/math.h>
  #include <rex/memory.h>
  #include <rex/memory/ring_buffer.h>
@@ -2095,10 +2095,11 @@ index a744375..9d6d647 100644
  REXCVAR_DEFINE_BOOL(vsync, true, "GPU", "Enable vertical sync");
  
 +#if REX_PLATFORM_ANDROID
-+REXCVAR_DEFINE_INT32(gpu_worker_spin_us, 50, "GPU",
++REXCVAR_DEFINE_INT32(gpu_worker_spin_us, -1, "GPU",
 +                     "Microseconds the GPU command thread polls for new commands, pausing with an "
-+                     "ISB between polls, before it sleeps on the write pointer event; -1 keeps the "
-+                     "500 yields")
++                     "ISB between polls, before it sleeps on the write pointer event; -1 (the "
++                     "default) keeps the SDK's 500 yields: on the S25 Ultra 50 changed neither CPU "
++                     "use nor the frame rate at the thermal cap")
 +    .range(-1, 10000)
 +    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 +
@@ -2118,7 +2119,7 @@ index a744375..9d6d647 100644
  
  REXCVAR_DEFINE_BOOL(occlusion_query_enable, true, "GPU", "Enable host occlusion query handling")
      .lifecycle(rex::cvar::Lifecycle::kHotReload);
-@@ -86,6 +109,16 @@ using namespace rex::graphics::xenos;
+@@ -86,6 +110,16 @@ using namespace rex::graphics::xenos;
  
  namespace {
  
@@ -2135,7 +2136,7 @@ index a744375..9d6d647 100644
  ReadbackResolveMode ParseReadbackResolveMode(std::string_view value) {
    if (value == "fast") {
      return ReadbackResolveMode::kFast;
-@@ -217,6 +250,22 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -217,6 +251,22 @@ void CommandProcessor::WorkerThreadMain() {
        // We spin here waiting for new ones, as the overhead of waiting on our
        // event is too high.
        PrepareForWait();
@@ -2158,7 +2159,7 @@ index a744375..9d6d647 100644
        uint32_t loop_count = 0;
        do {
          // If we spin around too much, revert to a "low-power" state.
-@@ -231,6 +280,9 @@ void CommandProcessor::WorkerThreadMain() {
+@@ -231,6 +281,9 @@ void CommandProcessor::WorkerThreadMain() {
          write_ptr_index = write_ptr_index_.load();
        } while (worker_running_ && pending_fns_.empty() &&
                 (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
