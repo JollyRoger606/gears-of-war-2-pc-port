@@ -95,6 +95,13 @@ The PC (Ethernet, 192.168.10.10) and a Galaxy S25 Ultra (Wi-Fi,
   lists the PC's campaign and joins, and both load chapter 2. This needs
   the inbound rule for that `gow2.exe` path (see Windows Firewall below).
 - In game, each player sees the other move when the other moves.
+- Repeated with the merged build (master, saves, coop-stage1 and crossplay),
+  PC hosting from the path with the firewall rule: the phone's browser
+  listed `Pc`, both lobbies listed Pc and User, both loaded chapter 2, and
+  the phone spawned as Dom on RT. Both logs show
+  `bind port 1000 -> 41000 (net_port_offset)` and
+  `XGISessionJoinRemote ... members=2`; the PC sent the phone about 2.8 KB/s
+  and received about 1 KB/s (`[nettraffic]`).
 
 Both logs show `XGISessionJoinRemote ... members=2` with the other
 side's XUID, and game traffic on port 41000 in both directions. The phone

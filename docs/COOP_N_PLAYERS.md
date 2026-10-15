@@ -30,7 +30,7 @@ host tests `gow2_test_input_test`, `gow2_script_patch_test` and `gow2_save_dir_t
 on loopback (`scripts/run-instances.ps1` with `--net_traffic_log_sec=10`) that joined each other's
 System Link campaign and loaded Act 1 chapter 2, the client as Dom, with `[nettraffic]` lines for
 port 41000 in both logs (`out\pcpc-test\int1`); and `scripts/build-android.ps1`, whose library and
-APK checks passed, plus the app's JVM unit tests. The APK has not been installed on a phone.
+APK checks passed, plus the app's JVM unit tests. The APK was installed on a phone later that day (below).
 
 Smoke tests after the review fixes (2026-10-15, `out\smoke` in the integration worktree):
 - Solo with the defaults (own `--user_data_root`, windowed): the seeded Act 1 chapter 2 save loads
@@ -50,6 +50,11 @@ Smoke tests after the review fixes (2026-10-15, `out\smoke` in the integration w
   (`System Link XUID B13E01519A002D78 made and kept in ...\pcA\...\system_link_xuid.txt`, then
   `B13E453A46694FCA` for pcB, then `read from` pcA's file again), and the shared folder got the
   saves but no `system_link_xuid.txt`.
+- The integration APK on the Galaxy S25 Ultra joined a campaign that the integration PC build hosted
+  from the firewall-allowed path: browser entry `Pc`, both lobbies with Pc and User, chapter 2 on
+  both, the phone spawned as Dom. The phone logged `SCRIPTPATCH coop: off (gow2_coop_players=2)`,
+  `bind port 1000 -> 41000 (net_port_offset)`, `first datagram to 192.168.10.10:41000` and
+  `XGISessionJoinRemote ... members=2`.
 
 On the `crossplay` branch `scripts/build-android.ps1` built and linked 0002-0011 (with the
 getsockname 0010, before the traffic log). Two copies of the crossplay build joined each other's

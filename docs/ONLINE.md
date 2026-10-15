@@ -10,8 +10,8 @@ address, 198.51.100.20 and 198.51.100.30 are friends, `gow2.example.com` is a DN
 controls, and 192.168.1.10 is the host PC on its home network. Use your own values.
 
 Status: PC and phone joined each other's campaign over one home LAN (NETWORK_PLAY.md,
-2026-10-15), and the merged build joined on loopback. No session has crossed the internet yet;
-see "Not verified yet".
+2026-10-15), and the merged build repeated it: two copies on loopback, and a phone that joined
+a PC-hosted campaign on the LAN. No session has crossed the internet yet; see "Not verified yet".
 
 ## How the connection works
 Only the host needs open ports. In the loopback runs (2026-10-14 and 2026-10-15), every datagram
@@ -293,8 +293,8 @@ advertising its ZeroTier address is unreachable for devices outside it.
 - No System Link session has crossed the internet yet: the forwards, DNS name and firewall rule
   this guide describes have not been tried end to end.
 - PC and phone on one LAN joined each other's campaign on 2026-10-15 with the crossplay build
-  ([NETWORK_PLAY.md](NETWORK_PLAY.md)); the merged build was verified on loopback (two copies on
-  one PC).
+  ([NETWORK_PLAY.md](NETWORK_PLAY.md)); the merged build repeated the PC-hosted case (the phone
+  joined) and two copies on one PC over loopback.
 - Tailscale and ZeroTier have not been tried.
 - A remote NAT that maps a friend's port to an external port below 1024 would be remapped wrongly.
   This is rare.
