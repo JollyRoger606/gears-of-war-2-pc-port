@@ -138,7 +138,7 @@ Campaign co-op over System Link works between PCs, Android phones and several co
 
 - [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): a PC and a phone on one network, the settings, several copies on one PC, troubleshooting.
 - [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): co-op with more than two players (`gow2_coop_players`; four verified on one PC) and what is still missing, such as chapter travel with extra players.
-- [docs/ONLINE.md](docs/ONLINE.md): playing over the internet with port forwarding or a VPN (Tailscale, ZeroTier). Built, not tested yet.
+- [docs/ONLINE.md](docs/ONLINE.md): playing over the internet. `scripts/host-online.ps1 -Start` opens UDP 14001 and 41000 through UPnP on every router between the PC and the internet, with a lease (6 h by default), and `-Stop` closes them; tested on 2026-10-15 on a network with two routers. For the maintainer's sessions, friends use `net_peers=suruworks.com`. Without UPnP: forward by hand; with no open ports: Tailscale or ZeroTier. No game has crossed the internet yet.
 
 Horde and Versus over System Link have not been tried. See [ROADMAP.md](ROADMAP.md).
 

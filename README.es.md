@@ -138,7 +138,7 @@ La campaña cooperativa por System Link funciona entre PC, teléfonos Android y 
 
 - [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): un PC y un teléfono en la misma red, los ajustes, varias copias en un mismo PC y solución de problemas.
 - [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): cooperativo con más de dos jugadores (`gow2_coop_players`; cuatro verificados en un mismo PC) y lo que aún falta, como el cambio de capítulo con jugadores extra.
-- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet con reenvío de puertos o una VPN (Tailscale, ZeroTier). Implementado, sin probar.
+- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet. `scripts/host-online.ps1 -Start` abre por UPnP los puertos UDP 14001 y 41000 en cada router entre el PC y internet, con un plazo (6 h por defecto), y `-Stop` los cierra; probado el 2026-10-15 en una red con dos routers. Para las sesiones del mantenedor, los amigos usan `net_peers=suruworks.com`. Sin UPnP: reenvío manual; sin abrir puertos: Tailscale o ZeroTier. Ninguna partida ha cruzado internet todavía.
 
 Horda y Versus por System Link no se han probado. Ver [ROADMAP.md](ROADMAP.md).
 

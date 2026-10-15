@@ -2,16 +2,21 @@
 
 System Link was made for a LAN. Patch 0011 (`sdk/patches/0011-network-crossplay.patch`) lets one
 player host a campaign that friends on other networks join: the host opens two UDP ports, and
-every friend names the host with `net_peers`. This guide covers that set-up, what it exposes, and
-two VPN alternatives that open no port at all.
+every friend names the host with `net_peers`. On a PC, `scripts/host-online.ps1` opens those ports
+through UPnP for a few hours and closes them again. This guide covers that set-up, forwarding by
+hand for routers without UPnP, what it exposes, and two VPN alternatives that open no port at all.
 
-Addresses below are examples from the documentation ranges: 203.0.113.10 is the host's public
-address, 198.51.100.20 and 198.51.100.30 are friends, `gow2.example.com` is a DNS name the host
-controls, and 192.168.1.10 is the host PC on its home network. Use your own values.
+`suruworks.com` is the ready host name for the maintainer's sessions: its DNS A record already
+points at the public address of the PC that hosts them, so friends joining those sessions set
+`net_peers=suruworks.com` and need nothing else. Anyone else who hosts uses their own name or
+address. Other addresses below are examples from the documentation ranges: 203.0.113.10 is the
+host's public address, 198.51.100.20 and 198.51.100.30 are friends, `gow2.example.com` is a DNS
+name the host controls, and 192.168.1.10 is the host PC on its home network.
 
 Status: PC and phone joined each other's campaign over one home LAN (NETWORK_PLAY.md,
-2026-10-15), and the merged build joined on loopback. No session has crossed the internet yet;
-see "Not verified yet".
+2026-10-15), and the merged build joined on loopback. `host-online.ps1` opened and closed both
+ports on a home network with two routers in a row (2026-10-15). No session has crossed the
+internet yet; see "Not verified yet".
 
 ## How the connection works
 Only the host needs open ports. In the loopback runs (2026-10-14 and 2026-10-15), every datagram
@@ -40,23 +45,84 @@ Campaign co-op takes two players. For three or more, the host also sets `gow2_co
 (co-op Stage 1, see [COOP_N_PLAYERS.md](COOP_N_PLAYERS.md)); that has not been tried over the
 internet.
 
+### Open the ports with host-online.ps1 (UPnP)
+Most home routers let programs on the LAN add port mappings through UPnP (IGD).
+`scripts/host-online.ps1` asks every router between the PC and the internet for UDP 14001 and UDP
+41000, for a limited time, and removes them again. It needs no administrator and runs in Windows
+PowerShell 5.1 and PowerShell 7:
+```
+powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Start
+powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Status
+powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Stop
+```
+`-Start` does this, in order:
+1. Finds the routers. It sends an SSDP search for InternetGatewayDevice:1 and :2 on the LAN, then
+   probes the route toward 1.1.1.1 one hop at a time (as traceroute does) and sends each hop a
+   unicast UPnP search. A router whose WAN address (GetExternalIPAddress) is private has another
+   router in front of it, so the script goes on to the next hop; it stops at the router whose WAN
+   address is public.
+2. Checks that this WAN address is what https://api.ipify.org sees.
+3. Reads UDP 14001 and 41000 on every router (GetSpecificPortMappingEntry) and refuses to go on
+   if either port already goes to another device or port.
+4. Maps both ports on every router, with the description `gow2 System Link` and a lease
+   (`-LeaseHours`, default 6, at most 168), each to the next device inward: on the PC's own router
+   to the PC's LAN address, and on the router in front of it to the WAN address of the router
+   behind, which is the address that router sees the request come from. It reads every mapping
+   back; if one fails, it removes the ones it added in that run.
+5. Checks that `-Hostname` (default `suruworks.com`) resolves to the public address, and prints
+   the settings for the host and for friends on PC and Android. When the name points elsewhere,
+   it warns and prints the address instead. `-AllowPeers 198.51.100.20,friend2.example.net` fills
+   in the host's `net_allow_peers`.
+
+`-Start` again renews the leases. `-Status` lists both ports on every router. `-Stop` deletes the
+mappings that carry the script's description and point where the script points them, and leaves
+any other mapping alone. `-PortOffset` follows a different `net_port_offset`.
+
+Run `-Stop` after every session: not every router honours the lease. In a test with a 6-minute
+lease (`-LeaseHours 0.1`), the OpenWRT router counted it down and had dropped both mappings by a
+check two minutes after the lease ended. The ISP modem reported the full lease without counting
+it down and still listed both mappings, with lease 0, ten minutes after the lease ended. With two
+routers in a row the path closes once the inner router drops its mappings, but a modem like that
+keeps its own until `-Stop`. `-Start` re-reads one mapping per router 2.5 seconds after mapping
+and warns about a router whose lease does not go down. [V on that network]
+
+It stops with a message, and maps nothing, when a router on the path does not answer UPnP (turn
+UPnP on there, or forward by hand as below), when a router refuses changes (UPnP error 606), and
+when it detects carrier-grade NAT: the outermost WAN address is in 100.64.0.0/10, or differs from
+the address the internet sees. If a router's WAN address is private and the next hop does not
+answer UPnP, that hop is either a second router of yours with UPnP off or the ISP's carrier-grade
+NAT; the message names both.
+
+On 2026-10-15, on a home network with two routers in a row (an OpenWRT router behind the ISP's
+cable modem), `-Start`, `-Status`, a second `-Start` and `-Stop` ran in both PowerShell versions,
+and `-Start` refused a test mapping that sent UDP 14001 to another port. Each router's own list of
+mappings (GetGenericPortMappingEntry, read separately with curl) showed the four mappings while
+hosting and was back to its earlier state after `-Stop`. [V on that network] Traffic from the
+internet has not yet reached the game through the mappings.
+
+The script opens router ports only: the Windows Firewall rule below is still needed, and it needs
+an administrator.
+
 ### Is the connection reachable at all?
-Compare the WAN address on the router's status page with the public address that
-https://api.ipify.org shows. If they differ and the router's WAN address is private (10.x,
-172.16-31.x, 192.168.x) or in 100.64.0.0/10, either there is a second router in front of it
-(double NAT, below) or the ISP shares one public address between customers (carrier-grade NAT).
+`host-online.ps1 -Start` makes this check itself. By hand: compare the WAN address on the
+router's status page with the public address that https://api.ipify.org shows. If they differ and
+the router's WAN address is private (10.x, 172.16-31.x, 192.168.x) or in 100.64.0.0/10, either
+there is a second router in front of it (double NAT, below) or the ISP shares one public address
+between customers (carrier-grade NAT).
 Behind carrier-grade NAT no port forward can work: ask the ISP for a public address or use one of
 the VPN options at the end. The game speaks IPv4 only (an XNADDR holds an IPv4 address), so IPv6
 does not help.
 
-### Ports to forward
+### Ports to forward by hand
 Forward exactly UDP 14001 (System Link beacon) and UDP 41000 (game traffic) to the host PC. With
 another `net_port_offset` the second port is 1000 plus that offset, and every player must use the
 same offset; leave the default. No TCP port is needed for campaign co-op. TCP 8675 (versus party
 beacon) must stay closed because stream sockets are not filtered by `net_allow_peers`. [V code]
 
-UPnP does not help: the runtime's UPnP exports are stubs (`REX_EXPORT_STUB(__imp__NetDll_Upnp...)`
-in the SDK's `src/kernel/xam/xam_net.cpp`), so the game opens no port by itself. [V code]
+The game opens no port by itself: the runtime's UPnP exports are stubs
+(`REX_EXPORT_STUB(__imp__NetDll_Upnp...)` in the SDK's `src/kernel/xam/xam_net.cpp`). [V code]
+`host-online.ps1` does it from outside the game; forward by hand when a router has no UPnP or it
+must stay off.
 
 With one router:
 
@@ -80,9 +146,11 @@ the public address. Some ISPs lock parts of the modem's admin page; if the forwa
 missing, ask the ISP.
 
 ### DNS name (optional)
-A literal public address works (`--net_public_address=203.0.113.10`), but home addresses are often
-dynamic. A DNS name lets friends keep the same settings when it changes. In your domain's DNS
-editor, add one of these records:
+For the maintainer's sessions `suruworks.com` is ready: its A record already points at the
+hosting PC's public address, and `host-online.ps1 -Start` checks that each time. For your own
+host, a literal public address works (`--net_public_address=203.0.113.10`), but home addresses
+are often dynamic. A DNS name lets friends keep the same settings when it changes. In your
+domain's DNS editor, add one of these records:
 ```
 gow2   A       203.0.113.10        (TTL 300)
 gow2   CNAME   <name>.duckdns.org.
@@ -101,7 +169,8 @@ The result must end in the host's current public address (https://api.ipify.org)
 ### Game settings
 On PC, pass settings on the command line. Every build copies `config/gow2.toml` over
 `out\build\release\gow2.toml`, so edits to the latter are lost, and the command line outranks
-`gow2.toml`. See [NETWORK_PLAY.md](NETWORK_PLAY.md), "Settings".
+`gow2.toml`. See [NETWORK_PLAY.md](NETWORK_PLAY.md), "Settings". `host-online.ps1 -Start` prints
+this line with the name it checked:
 ```
 gow2.exe --net_link_active=true --net_public_address=gow2.example.com --net_allow_peers=198.51.100.20,friend2.example.net --system_link_trace=true
 ```
@@ -163,13 +232,14 @@ forwards as the only boundary: forward nothing beyond the two UDP ports.
 
 ## Friends' setup
 Every friend needs the host's build and their own copy of the game's files: this project ships no
-game data.
+game data. The lines below join the maintainer's sessions at `suruworks.com`; for another host,
+use the name or address its `host-online.ps1 -Start` printed.
 
 ### PC
 Use the same build as the host. No version check exists yet, and a build without patch 0011 uses
 UDP 1000 instead of 41000 and cannot see a 0011 host.
 ```
-gow2.exe --net_link_active=true --net_peers=gow2.example.com --user_name=<name>
+gow2.exe --net_link_active=true --net_peers=suruworks.com --user_name=<name>
 ```
 Then choose CO-OP CAMPAIGN -> JOIN CO-OP CAMPAIGN to open the System Link browser; X (E on the
 keyboard with `--mnk_mode=true`) refreshes. See [NETWORK_PLAY.md](NETWORK_PLAY.md) for the menu
@@ -182,7 +252,7 @@ Use the same APK build. Put a `gow2.toml` in
 `/sdcard/Android/data/com.santiquiroz.gow2recomp/files/` with these lines:
 ```
 net_link_active = true
-net_peers = "gow2.example.com"
+net_peers = "suruworks.com"
 user_name = "<name>"
 ```
 Copy it over USB, or push it from Git Bash (without `MSYS_NO_PATHCONV=1`, Git Bash rewrites the
@@ -202,8 +272,8 @@ reserved address) instead of the PC, and put `net_public_address` and `net_allow
 phone's `gow2.toml`. Android shows no inbound firewall prompt. Untested.
 
 ## Test before inviting friends
-1. Put the forwards, the DNS record and the firewall rule in place. Confirm
-   `Resolve-DnsName gow2.example.com` returns the public address.
+1. Run `scripts\host-online.ps1 -Start` and put the firewall rule in place. When you forward by
+   hand instead, also confirm that `Resolve-DnsName gow2.example.com` returns the public address.
 2. On a phone, turn Wi-Fi off and mobile data on. Open https://api.ipify.org and note the phone's
    address.
 3. Start the PC host with the command from "Game settings" and
@@ -211,6 +281,7 @@ phone's `gow2.toml`. Android shows no inbound firewall prompt. Untested.
 4. Put the Android `gow2.toml` from the Android subsection in place, then join the host.
 5. Check the host log for `first datagram from <phone's mobile address>:<port> on local port
    14001`, then the same on local port 41000.
+6. Close the game and run `scripts\host-online.ps1 -Stop`.
 
 Do not test the internet path from a device on the home Wi-Fi: from inside, the public name leads
 back through the router (hairpin NAT), which proves nothing about access from outside. Carriers
@@ -229,11 +300,19 @@ can change a phone's public address between connections. If the log shows
   the last second on the beacon socket, at most 4 per broadcast and 2 per second per address. The
   host cannot be used as a traffic amplifier.
 - TCP is not filtered. Forward no TCP port.
-- Host only while playing: enable the two forwards (or the DMZ) and the firewall rule for the
-  session, disable them after, and close `gow2.exe`. Nothing else needs to be exposed for the game.
+- Host only while playing: run `host-online.ps1 -Start` (or enable the two forwards, or the DMZ)
+  and the firewall rule for the session; after it, close `gow2.exe`, run `-Stop` (or disable the
+  forwards) and disable the rule. Do not rely on the lease alone (see the script's section). Nothing
+  else needs to be exposed for the game.
+- UPnP lets any program on the LAN open router ports, which is why some people turn it off. The
+  script maps only the two UDP ports, with a lease, and `-Status` shows whether anything else
+  holds them.
 - Everyone runs the same build. An older or different build can misread the traffic.
 
 ## Safer alternatives with no open ports
+Use one of these when `host-online.ps1` reports carrier-grade NAT, when a router in the path has
+no UPnP and you cannot forward on it, or when you would rather expose nothing.
+
 ### Tailscale
 Tailscale is a WireGuard mesh with a free personal plan and apps for Windows and Android.
 Installing on Windows needs an administrator once. Everyone joins the host's tailnet by invitation
@@ -285,13 +364,15 @@ advertising its ZeroTier address is unreachable for devices outside it.
 ### Comparison
 | Option | Open ports | Admin on host | Broadcasts | Friends need |
 |---|---|---|---|---|
-| Port forwarding | UDP 14001 + 41000 on every router in the path | Router pages + firewall rule | n/a | `net_peers=<host name>` |
+| UPnP (`host-online.ps1`) | UDP 14001 + 41000 on every router in the path, until `-Stop` | Firewall rule | n/a | `net_peers=<host name>` |
+| Port forwarding by hand | UDP 14001 + 41000 on every router in the path | Router pages + firewall rule | n/a | `net_peers=<host name>` |
 | Tailscale | None | Installer + firewall rule | No | Tailscale + `net_peers` |
 | ZeroTier | None | Installer + firewall rule | Yes | ZeroTier + `net_local_ip`, `net_peers` |
 
 ## Not verified yet
-- No System Link session has crossed the internet yet: the forwards, DNS name and firewall rule
-  this guide describes have not been tried end to end.
+- No System Link session has crossed the internet yet. `host-online.ps1` mapped and removed both
+  ports on both routers of a double-NAT home network on 2026-10-15, but no friend's traffic has
+  come through them, and the manual forwards and the firewall rule have not been tried end to end.
 - PC and phone on one LAN joined each other's campaign on 2026-10-15 with the crossplay build
   ([NETWORK_PLAY.md](NETWORK_PLAY.md)); the merged build was verified on loopback (two copies on
   one PC).

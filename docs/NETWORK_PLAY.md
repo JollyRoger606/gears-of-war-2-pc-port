@@ -153,8 +153,10 @@ name, the firewall rule, a test from mobile data) and covers Tailscale and ZeroT
 
 1. On the router, forward UDP 14001 (System Link beacon) and UDP 41000
    (game traffic, guest port 1000 + 40000) to the hosting PC's LAN
-   address. TCP is not needed for campaign co-op (TCP 8675 is the
-   versus party beacon).
+   address. `scripts/host-online.ps1 -Start` does this through UPnP on
+   every router in the path, with a lease, and `-Stop` undoes it.
+   TCP is not needed for campaign co-op (TCP 8675 is the versus party
+   beacon).
 2. DNS: create an A record such as `gow2.example.com` that points at the
    home's public IP. If the ISP changes the address, use dynamic DNS.
    Check for CGNAT first: if the router's WAN address differs from the
