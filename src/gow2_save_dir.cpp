@@ -1,6 +1,8 @@
 // gow2 - ReXGlue Recompiled Project
 #include "gow2_save_dir.h"
 
+#include "gow2_machine_xuid.h"
+
 #include <algorithm>
 #include <cwctype>
 #include <filesystem>
@@ -149,6 +151,8 @@ bool HasAnyEntry(const std::filesystem::path& dir) {
 bool CopyOneEntry(const std::filesystem::path& src, const std::filesystem::path& to,
                   const std::filesystem::path& skip, std::string& reason) {
   if (IsSameFolder(src, skip)) return true;
+  // The System Link XUID names this PC; a synced save folder would hand it to every PC.
+  if (IsMachineXuidFile(src)) return true;
   std::error_code ec;
   std::filesystem::copy(src, to / src.filename(),
                         std::filesystem::copy_options::recursive |

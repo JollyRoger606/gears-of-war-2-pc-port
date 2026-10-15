@@ -80,7 +80,11 @@ function Expand-InstanceArgs([string]$text, [int]$i) { ($text -replace '\{i\}', 
 function New-InstanceFolder([int]$i) {
     $dir = Join-Path $OutDir "inst$i"
     $user = Join-Path $dir 'user'
-    if ($SeedUser -and -not (Test-Path $user)) { Copy-Item -Recurse -Path $SeedUser -Destination $user }
+    if ($SeedUser -and -not (Test-Path $user)) {
+        Copy-Item -Recurse -Path $SeedUser -Destination $user
+        # 0010's per-install System Link XUID: a copy would give every instance the same XUID.
+        Remove-Item -LiteralPath (Join-Path $user 'system_link_xuid.txt') -Force -ErrorAction SilentlyContinue
+    }
     New-Item -ItemType Directory -Force -Path $user | Out-Null
     Set-Content -Path (Join-Path $dir 'pad.txt') -Value ''
     $cache = Join-Path $user 'cache'

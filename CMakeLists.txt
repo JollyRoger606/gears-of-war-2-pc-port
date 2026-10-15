@@ -22,6 +22,7 @@ set(GOW2_SOURCES
     src/gow2_utf8_guard.cpp
     src/gow2_crash_watch.cpp
     src/gow2_game_patches.cpp
+    src/gow2_machine_xuid.cpp
     src/gow2_save_dir.cpp
     src/gow2_save_dir_setting.cpp
     src/gow2_script_patches.cpp
@@ -66,6 +67,7 @@ target_include_directories(gow2_test_input_test PRIVATE src)
 add_executable(gow2_save_dir_test EXCLUDE_FROM_ALL
     tools/tests/save_dir_test.cpp
     src/gow2_save_dir.cpp
+    src/gow2_machine_xuid.cpp
 )
 target_include_directories(gow2_save_dir_test PRIVATE src)
 

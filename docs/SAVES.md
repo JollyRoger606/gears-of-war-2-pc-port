@@ -91,12 +91,17 @@ after `gow2.toml` is loaded and before the runtime is built):
 3. The folder is created if needed and a probe file is written and removed, so a folder the game cannot
    write to is caught before any save is lost.
 4. If the folder is empty and the old save folder is not, the old saves are copied into it once
-   (never overwriting a file, never deleting anything, never copying the cache). Your old folder stays
-   as a backup.
+   (never overwriting a file, never deleting anything, never copying the cache or
+   `system_link_xuid.txt`). Your old folder stays as a backup.
 5. The log says where the saves are, for example
    `saves, profile settings and achievements in C:\Users\you\OneDrive\GearsOfWar2\saves (gow2_save_dir)`.
    If the folder cannot be used, a warning box names the reason and the saves stay in the default
    folder for that run.
+6. With System Link on (`net_link_active`) and no `user_xuid`, the System Link XUID stays on this
+   PC: the game reads or makes `system_link_xuid.txt` in the default user folder and passes it to the
+   runtime as `user_xuid`, and the log says
+   `System Link XUID B13E... read from <file>: it stays on this PC, gow2_save_dir moves only the saves`.
+   Two PCs that sync one save folder therefore still join a System Link session as two players.
 
 The setting takes effect on the next start.
 

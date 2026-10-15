@@ -4,11 +4,13 @@
 
 #pragma once
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <random>
 #include <string>
 
 #include <rex/cvar.h>
@@ -21,6 +23,7 @@
 #include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
 #include "gow2_gpu_pick.h"
+#include "gow2_machine_xuid.h"
 #include "gow2_mouse_aim.h"
 #include "gow2_save_dir.h"
 #include "gow2_sha_table.h"
@@ -368,9 +371,41 @@ class Gow2App : public rex::ReXApp {
     const rex::glue::SaveDirChoice saves = rex::glue::ChooseUserDataRoot(
         rex::glue::SaveDirSetting(), paths.user_data_root, paths.cache_root,
         paths.config_path.parent_path());
-    paths.user_data_root = saves.user_data_root;
     ReportSaveDir(saves);
+    PinMachineXuid(paths.user_data_root, saves.user_data_root != paths.user_data_root);
+    paths.user_data_root = saves.user_data_root;
     return paths;
+  }
+
+  static uint64_t RandomXuidBits() {
+    std::random_device device;
+    return (uint64_t{device()} << 32) | device();
+  }
+
+  static std::string PathUtf8(const std::filesystem::path& path) {
+    const std::u8string text = path.u8string();
+    return std::string(text.begin(), text.end());
+  }
+
+  // Patch 0010 keeps the System Link XUID in the user data folder, which gow2_save_dir may point at
+  // a folder several PCs sync: the XUID stays in this PC's default folder and reaches 0010 as
+  // user_xuid, so two PCs never join one session under the same XUID.
+  static void PinMachineXuid(const std::filesystem::path& machine_root, bool user_root_moved) {
+    const bool link_active = rex::cvar::GetFlagByName("net_link_active") == "true";
+    const bool xuid_set = !rex::cvar::GetFlagByName("user_xuid").empty();
+    if (!rex::glue::ShouldPinMachineXuid(user_root_moved, link_active, xuid_set)) return;
+    const rex::glue::MachineXuid machine =
+        rex::glue::LoadOrCreateMachineXuid(machine_root, RandomXuidBits);
+    const std::string file = PathUtf8(machine_root / rex::glue::kMachineXuidFileName);
+    if (!rex::cvar::SetFlagByName("user_xuid", machine.xuid)) {
+      REXLOG_WARN("Could not set user_xuid to this PC's System Link XUID {} ({})", machine.xuid, file);
+      return;
+    }
+    REXLOG_INFO("System Link XUID {} {} {}: it stays on this PC, gow2_save_dir moves only the saves",
+                machine.xuid, machine.created ? "made and kept in" : "read from", file);
+    if (!machine.saved) {
+      REXLOG_WARN("Could not write {}: the System Link XUID {} lasts this run only", file, machine.xuid);
+    }
   }
 
   // Override virtual hooks for customization:

@@ -1,5 +1,6 @@
 // Host-side test of the gow2_save_dir logic on temporary folders (no game data, no SDK).
 // Build: cmake --build <dir> --target gow2_save_dir_test, then run the exe.
+#include "gow2_machine_xuid.h"
 #include "gow2_save_dir.h"
 
 #include <cstdio>
@@ -202,6 +203,60 @@ void TestRelativeSettingAgainstBase(const fs::path& root) {
   Expect(Exists(base / "saves"), "relative setting creates the folder");
 }
 
+void TestSeedCopySkipsMachineXuid(const fs::path& root) {
+  const fs::path kase = root / "case13";
+  const fs::path def = kase / "user";
+  const fs::path cache = kase / "cache";
+  const fs::path cloud = kase / "cloud";
+  const fs::path base = kase / "base";
+  WriteFile(def / "Gears2Checkpoint0.sav", "win-save");
+  WriteFile(def / "system_link_xuid.txt", "B13E0000000000AB\n");
+  const rex::glue::SaveDirChoice choice = rex::glue::ChooseUserDataRoot(ToUtf8(cloud), def, cache, base);
+  Expect(choice.user_data_root == cloud.lexically_normal(), "machine XUID case uses cloud folder");
+  Expect(ReadFile(cloud / "Gears2Checkpoint0.sav") == "win-save", "machine XUID case copies the save");
+  Expect(!Exists(cloud / "system_link_xuid.txt"), "seed copy leaves the System Link XUID on this PC");
+  Expect(ReadFile(def / "system_link_xuid.txt") == "B13E0000000000AB\n", "seed copy keeps the PC's XUID file");
+}
+
+void TestShouldPinMachineXuid() {
+  Expect(rex::glue::ShouldPinMachineXuid(true, true, false), "moved root with the link on pins the XUID");
+  Expect(!rex::glue::ShouldPinMachineXuid(false, true, false), "default root leaves the XUID to 0010");
+  Expect(!rex::glue::ShouldPinMachineXuid(true, false, false), "link off keeps the offline XUID");
+  Expect(!rex::glue::ShouldPinMachineXuid(true, true, true), "an explicit user_xuid wins");
+}
+
+void TestNormalizeXuid() {
+  Expect(rex::glue::NormalizeXuid("b13e00000000abcd") == "B13E00000000ABCD", "lower case is upper-cased");
+  Expect(rex::glue::NormalizeXuid("  0xB13E000000000002\r\n") == "B13E000000000002", "0x and blanks are trimmed");
+  Expect(rex::glue::NormalizeXuid("1A") == "000000000000001A", "short XUIDs are zero-padded");
+  Expect(!rex::glue::NormalizeXuid(""), "empty is no XUID");
+  Expect(!rex::glue::NormalizeXuid("0"), "zero is no XUID");
+  Expect(!rex::glue::NormalizeXuid("00C0000000000001"), "bits 54-55 are refused");
+  Expect(!rex::glue::NormalizeXuid("B13E0000000000001"), "17 digits are refused");
+  Expect(!rex::glue::NormalizeXuid("B13E00000000XYZW"), "non-hex is refused");
+}
+
+void TestMakeMachineXuid() {
+  Expect(rex::glue::MakeMachineXuid(0x123456789ABCDEF0ull) == "B13E56789ABCDEF0", "keeps the low 48 bits");
+  Expect(rex::glue::MakeMachineXuid(0xFFFF000000000000ull) == "B13E000000000001", "zero low bits use 1");
+  Expect(rex::glue::NormalizeXuid(rex::glue::MakeMachineXuid(~0ull)).has_value(), "made XUIDs are usable");
+}
+
+void TestLoadOrCreateMachineXuid(const fs::path& root) {
+  const fs::path dir = root / "case14" / "user";
+  int draws = 0;
+  const auto random_bits = [&draws]() { ++draws; return 0x00000000000000ABull; };
+  const rex::glue::MachineXuid first = rex::glue::LoadOrCreateMachineXuid(dir, random_bits);
+  Expect(first.xuid == "B13E0000000000AB" && first.created && first.saved, "first run makes and saves the XUID");
+  Expect(ReadFile(dir / "system_link_xuid.txt") == "B13E0000000000AB\n", "the file holds the XUID as 0010 writes it");
+  const rex::glue::MachineXuid second = rex::glue::LoadOrCreateMachineXuid(dir, random_bits);
+  Expect(second.xuid == first.xuid && !second.created, "second run reads the same XUID");
+  Expect(draws == 1, "a stored XUID needs no new random bits");
+  WriteFile(dir / "system_link_xuid.txt", "not a xuid\n");
+  const rex::glue::MachineXuid replaced = rex::glue::LoadOrCreateMachineXuid(dir, random_bits);
+  Expect(replaced.created && draws == 2, "an unusable file is replaced");
+}
+
 int main() {
   fs::path root;
   std::error_code ec;
@@ -232,6 +287,11 @@ int main() {
     TestSettingEqualToDefault(root);
     TestUnusableFolder(root);
     TestRelativeSettingAgainstBase(root);
+    TestSeedCopySkipsMachineXuid(root);
+    TestShouldPinMachineXuid();
+    TestNormalizeXuid();
+    TestMakeMachineXuid();
+    TestLoadOrCreateMachineXuid(root);
   } catch (const std::exception& e) {
     ++g_checks;
     ++g_failures;

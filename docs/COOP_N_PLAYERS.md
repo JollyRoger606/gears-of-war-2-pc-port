@@ -388,7 +388,7 @@ Work:
    | Setting | Default | Effect |
    |---|---|---|
    | `net_link_active` | false | true: `XNetGetEthernetLinkStatus` returns 0x0B and System Link works. false: it returns 0 (unplugged cable), as before 0010. `gow2_coop_players` 3 or more turns it on unless `gow2.toml` or the command line set it |
-   | `user_xuid` | empty | XUID the game sees. Empty with the link on: the one in `system_link_xuid.txt` in the user data folder, created on the first such run as `0xB13E` plus 48 random bits. Empty with the link off: the fixed offline XUID 0xB13EBABEBABEBABE, and no file is created |
+   | `user_xuid` | empty | XUID the game sees. Empty with the link on: the one in `system_link_xuid.txt` in the user data folder, created on the first such run as `0xB13E` plus 48 random bits. When `gow2_save_dir` moves the user data folder, the game reads or makes that file in the PC's default user folder instead and passes it as `user_xuid`, so PCs that sync one save folder keep different XUIDs. Empty with the link off: the fixed offline XUID 0xB13EBABEBABEBABE, and no file is created |
    | `user_name` | `User` | Gamertag, up to 15 characters |
    | `net_local_ip` | empty | `XNADDR.ina`. Empty: `net_bind_ip` when set, else the address of the adapter that holds the default route, else 127.0.0.1 (with a warning that other PCs cannot join). The log line `[netlink] link active: local <ip> (<where from>)` names it; set it by hand when that is not the LAN address |
    | `net_bind_ip` | empty | Rewrites `0.0.0.0` binds and logs `[netlink] bind 0.0.0.0:1000 -> 127.0.0.2:1000 (net_bind_ip)` |
@@ -504,7 +504,8 @@ Network (needs SDK patch 0010):
    both `--net_link_active=true --net_broadcast_targets=127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4
    --system_link_trace=true`,
    and a different XUID per instance (`--user_xuid=...`, or a separate `--user_data_root`, which also
-   separates the saves).
+   separates the saves; `scripts/coop-instances.ps1 -SeedUser` drops the seed's
+   `system_link_xuid.txt` from each copy, so every instance makes its own XUID).
 
    Done 2026-10-14 [V] with the crossplay build (patches 0010 and 0011): the client found the host in
    the System Link Browser, joined the lobby, loaded chapter 2 with the host and spawned as Dom on
