@@ -119,6 +119,9 @@ address (swlan0/ap0) itself.
 
 ## Over the internet (host on a PC)
 
+[ONLINE.md](ONLINE.md) applies these steps to the home network measured on 2026-10-15 (two
+routers in a row, the suruworks.com DNS zone) and covers Tailscale and ZeroTier.
+
 1. On the router, forward UDP 14001 (System Link beacon) and UDP 41000
    (game traffic, guest port 1000 + 40000) to the hosting PC
    (192.168.10.10). TCP is not needed for campaign co-op (TCP 8675 is the
