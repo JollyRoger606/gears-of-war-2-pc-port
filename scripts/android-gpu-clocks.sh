@@ -7,9 +7,14 @@ kgsl=${KGSL:-/sys/class/kgsl/kgsl-3d0}
 seconds=${1:-120}
 out=${2:-/data/local/tmp/gpu-clocks.txt}
 
+# The shell user may not read gpuclk (Android 16 on the S25 Ultra); devfreq's cur_freq is the same Hz.
+clock_hz() {
+  cat "$kgsl/gpuclk" 2>/dev/null || cat "$kgsl/devfreq/cur_freq"
+}
+
 sample() {
   busy=$(cut -d' ' -f1 "$kgsl/gpu_busy_percentage")
-  echo "$(date '+%Y-%m-%d %H:%M:%S') $(cat "$kgsl/gpuclk") $busy $(cat "$kgsl/thermal_pwrlevel")"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') $(clock_hz) $busy $(cat "$kgsl/thermal_pwrlevel")"
 }
 
 : > "$out"

@@ -66,6 +66,17 @@ std::string KgslValue(const char* name, long divisor, const char* unit) {
   return fmt::format("{}{}", *value / divisor, unit);
 }
 
+// Android 16 on the S25 Ultra hides gpuclk from apps; devfreq and clock_mhz give the same clock.
+std::string GpuClock() {
+  const std::string kgsl_dir = kKgslDir;
+  for (const char* hz_file : {"gpuclk", "devfreq/cur_freq"}) {
+    if (const std::optional<long> hz = ReadLeadingNumber(kgsl_dir + hz_file)) {
+      return fmt::format("{} MHz", *hz / kHzPerMhz);
+    }
+  }
+  return KgslValue("clock_mhz", 1, " MHz");
+}
+
 std::string ThermalStatus() {
   const ThermalApi& api = Thermal();
   if (!api.manager || !api.get_status) return "n/a";
@@ -83,8 +94,7 @@ std::string ThermalHeadroom() {
 }  // namespace
 
 std::string DescribeGpuAndThermalState() {
-  return fmt::format("gpu {} of {} busy {} pwrlevel {} thermal {} headroom {}",
-                     KgslValue("gpuclk", kHzPerMhz, " MHz"),
+  return fmt::format("gpu {} of {} busy {} pwrlevel {} thermal {} headroom {}", GpuClock(),
                      KgslValue("max_gpuclk", kHzPerMhz, " MHz"),
                      KgslValue("gpu_busy_percentage", 1, "%"),
                      KgslValue("thermal_pwrlevel", 1, ""), ThermalStatus(), ThermalHeadroom());
