@@ -311,8 +311,25 @@ tested. Black shares of 35.1 % and 38.1 % were consistent with the stock driver 
 
 At 160 MHz F3 ran at 10.1 fps and 15.8 Mcycles/frame. It draws the whole scene with about 14 %
 less GPU cost per frame and 17 % more frames at the same 222 MHz cap than the morning build.
-Frame generation (plan E) is not applicable at the sustained 10-12.5 fps rate at 160-222 MHz;
-even the F2 cool-start peak of 23.6 fps lasted only a few seconds and was below the 28 fps threshold.
+
+**F3 cool start.** `f3-cool` used the final defaults, starting at 16:50 with thermal status 0,
+skin 37.1 C, battery 37.6 C, pwrlevel 0 and USB charging (1.3 C warmer than `fr-f2-cool`).
+After the title it reached status 1 and pwrlevel 9 (525 MHz), and status 3 by 16:53.
+
+| Clock | Windows | F3 fps | F3 Mcycles/frame | F2 fps (fr-f2-cool) |
+|---|---|---|---|---|
+| 734 MHz | 1 | 29.7 (game cap 30) | 21.3 | 23.6 |
+| 607 MHz | 1 | 27.9 | 19.8 | - |
+| 525 MHz | 5 | 25.0 | 20.5 | 16.9 |
+| 443 MHz | 14 | 23.2 | 18.9 | 15.8 |
+| 389 MHz | 7 | 16.9 | 21.2 | 13.9 |
+| 342 MHz | 24 | 15.8 | 21.4 | 12.8 |
+| 222 MHz | 9 | 12.7 | 17.3 | - |
+
+The median of quiet gameplay windows was 19.5 Mcycles/frame (F2 27.0, morning build 24.2).
+After five minutes the cap settled at 342-222 MHz: 15.8-12.7 fps sustained. Frame generation
+(plan E) does not apply: the current build settles at 12.7-15.8 fps, below the roughly 28 fps
+sustained threshold.
 
 ## What the build adds
 
