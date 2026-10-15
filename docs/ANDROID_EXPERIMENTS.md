@@ -45,17 +45,52 @@ table with every run, its screenshot and its log is in the session's `out\device
   (`missing_textures` now counts only the signed or unsigned view a texture actually uses: 0) and no
   DXT texture is loaded as all zeros. Painting every draw that tests against the scene depth with a
   constant magenta fragment shader (`vulkan_android_depth_experiment = 16`) paints the whole scene
-  except the black region: no scene draw reaches those pixels at all, so the buildings and the sky
-  there are either never drawn or drawn off-screen. A one-frame draw trace
-  (`vulkan_android_trace_frame_after_seconds`) shows plain float positions (format 57) and non-zero
-  vertex data in every draw, and every mesh drawn in the depth prepass also has its base-pass draws
-  (3,093 draws: 109 prepass meshes, all but six 36-vertex boxes drawn again with color). The game
-  data on the phone matches the PC copy file for file. So the missing objects are either absent
-  from both passes or rasterize nowhere in both. Next: an occlusion query around every draw of the
-  traced frame (with the depth test and culling off) to name the draws that produce no samples, then
-  their vertex shaders and constants; or a frame capture (RenderDoc or AGI), and a comparison with
-  the PC on the same checkpoint, to tell a CPU-side difference (culling, streaming) from a vertex
-  shader that places those objects wrongly.
+  except the black region: no scene draw that passes its depth test reaches those pixels (the
+  first reading, that no scene draw reaches them at all, is corrected below). A one-frame draw
+  trace (`vulkan_android_trace_frame_after_seconds`) shows plain float positions (format 57) and
+  non-zero vertex data in every draw, and every mesh drawn in the depth prepass also has its
+  base-pass draws (3,093 draws). The game data on the phone matches the PC copy file for file.
+  Corrections 1-4 below reopen the depth path: the switches named "depth test forced to pass" and
+  "depth prepass skipped" did not test what their names say. The conclusion drawn that night (the
+  missing objects absent from both passes or rasterizing nowhere) therefore does not hold, and the
+  depth path (prepass, mid-frame depth clears, render target transfers) is a suspect again. Next,
+  as planned then: an occlusion query around every draw of the traced frame (with the depth test
+  and culling off) to name the draws that produce no samples, then their vertex shaders and
+  constants; or a frame capture (RenderDoc or AGI), and a comparison with the PC on the same
+  checkpoint, to tell a CPU-side difference (culling, streaming) from a vertex shader that places
+  those objects wrongly. The diagnostic switches added for the next session (bits 128-1024, the
+  color depth bias, the shader and draw skip lists, the extended trace) test the depth path first.
+
+### Corrections to these results
+
+Found while planning the next session (`t1-frametrace-gow2_081.log` is the one-frame trace of
+October 15; the code is patch 0007):
+
+1. **Bit 16 (paint) proves less.** `IsPaintedPipeline` only swaps the fragment shader; the depth
+   compare stays the guest's. A draw rejected by the depth test leaves no magenta either, so "no
+   scene draw reaches the black region" is not established: the scene may be drawn there and fail
+   the depth test.
+2. **Bit 1 (depth test always) never touched the base pass.** It relaxes color draws *without*
+   depth writes (`IsAndroidDepthTestRelaxed`: `!z_write_enable`); all 1,885 base-pass draws
+   (#576-#2460) have a pixel shader, write color and test GEQUAL *with* depth writes, so they kept
+   their depth test.
+3. **Bit 2 (prepass skipped) also skipped the depth clears.** The clears are depth-only rectangle
+   lists (#0, #575, #2731, #2936 and #2953: no pixel shader, prim 8, z ALWAYS with writes), so with
+   bit 2 the depth was never cleared. `d4-no-prepass.png` shows the result: characters as solid
+   black silhouettes and dotted black trails along the swinging cables, stale depth rejecting the
+   base pass. d4 says nothing about the prepass.
+4. **The six 36-vertex boxes are not prepass draws.** #2503, #2513, #2524, #2534, #2540 and #2547
+   are light or shadow volume stencil boxes (no pixel shader, GEQUAL, stencil, after the base pass),
+   each followed by a stencil-tested box with the depth test off (#2507, #2514, ...). Every one of
+   the 103 prepass meshes of #1-#574 (71 vertex buffers) has base-pass draws.
+5. **b3c did not turn ambient occlusion off.** It set `AmbientOcclusion=False`, but the default-on
+   `gow2_ao_upscaling_fix` forces the AO enable flags (`src/gow2_game_patches.cpp`), so AO was
+   probably still on in b3c and is not ruled out.
+6. **Few pixel shaders write a sample mask.** `GetCurrentPixelShaderModification` picks the early
+   depth test hint (`kEarlyHint`: early fragment tests, no sample mask) unless the shader forbids
+   implicit early Z or its coverage depends on alpha; only alpha-test, alpha-to-coverage and kill
+   shaders get `gl_SampleMask`. b9 (depth written by the pixel shader, late Z: 66.6 against 47.8
+   Mcycles per frame) shows what early Z is worth here.
 
 ## What the build adds
 
