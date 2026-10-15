@@ -78,6 +78,9 @@ and [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md), and
 copies them from the repository at build time for every variant, so there is one copy of each in
 git; it stops the build when one of them is missing. `tools/check_android_libs.py` fails an APK
 without `assets/licenses/LICENSE` and `assets/licenses/THIRD_PARTY_NOTICES.md`.
+`THIRD_PARTY_NOTICES.md` has an "Android APK" section with what each of the five libraries
+contains, every component's license, and how to get the FFmpeg and libmspack sources (LGPL 2.1,
+linked statically into `librexruntime.so`) and rebuild and relink them.
 
 ## Install and run
 
@@ -164,11 +167,16 @@ changed FFmpeg's config inside the FFmpeg submodule instead), `GOW2_VFS_OVERRIDE
 into `0007-android-arm64-port.patch` is in [`sdk/patches/README.md`](../sdk/patches/README.md).
 
 `libgow2.so` holds the recompiled code, the port's code from `src/` and the SDK's SDL entry point
-(`windowed_app_main_sdl.cpp`, which exports `SDL_main` on Android). Every file in `src/` is built
-except the Windows-only ones listed in `gamelibs/CMakeLists.txt` (`gow2_xam_input_guard.cpp`,
-`gow2_utf8_guard.cpp`, `gow2_crash_watch.cpp`); `gamelibs/gow2_android_glue.cpp` stands in for
-them: it suppresses the disc-error box itself, logs that the XamInput serialization and the
-non-throwing UTF-8 decoder come from patch 0007, and that there is no crash watch on Android.
+(`windowed_app_main_sdl.cpp`, which exports `SDL_main` on Android). The version script
+`gamelibs/libgow2.map` keeps the recompiled code's ~98,000 symbols local, so the library exports
+only `SDL_main` (which `SDLActivity` finds with `dlsym`). That shrank `libgow2.so` in the APK from
+62.2 MB to 52.0 MB (APK 79.2 MB to 71.6 MB) and its load time from 10-15 ms to 2-7 ms. Every file
+in `src/` is built except the Windows-only ones listed in `gamelibs/CMakeLists.txt`
+(`gow2_xam_input_guard.cpp`, `gow2_utf8_guard.cpp`, `gow2_crash_watch.cpp`);
+`gamelibs/gow2_android_glue.cpp` stands in for them: it suppresses the disc-error box itself, logs
+that the XamInput serialization and the non-throwing UTF-8 decoder (an invalid byte decodes as a
+one-byte code point instead of throwing) come from patch 0007, and that there is no crash watch on
+Android.
 
 Gradle alone, once the libraries are staged:
 
@@ -192,9 +200,32 @@ compressed or not 16 KB aligned in the zip); a `DT_NEEDED` entry is neither pack
 system library; an undefined symbol is not defined by the libraries the linker will search for it
 (the library's own `DT_NEEDED` closure, with the NDK's API-29 stubs for system libraries, which is
 how Android's linker resolves app libraries); a library other than `libSDL3.so` defines `SDL_*` or
-`Java_org_libsdl_app_*` symbols; or `libgow2.so` does not export `SDL_main`; or an APK lacks
+`Java_org_libsdl_app_*` symbols; or `libgow2.so` does not export `SDL_main`; or `libgow2.so` exports
+anything besides `SDL_main` (`--main-exports` lists the allowed names); or an APK lacks
 `assets/licenses/LICENSE` or `assets/licenses/THIRD_PARTY_NOTICES.md` (`--no-notices` skips that
 check).
+
+### Self-test on the phone
+
+`scripts/test-android-device.ps1` (`-Serial`, `-SkipBuild`, `-LowPriority`) builds
+`gow2_runtime_selftest` (`gamelibs/tests/runtime_selftest.cpp`, not part of the APK) in
+`out\android\build` (configured by `scripts\build-android.ps1` first), pushes it with `libSDL3.so`,
+`librexruntime.so` and `libc++_shared.so` to `/data/local/tmp/gow2-selftest` over adb, runs it there
+and exits with its exit code; the app and its data are untouched. It checks patch 0007 through the
+runtime's public API: the UTF-8 helpers (`utf8_count`, `to_utf16`, `utf8_hash_fnv1a`,
+`utf8_lower_ascii`, `utf8_equal_case`, `utf8_starts_with_case`) never throw on invalid, truncated,
+overlong, surrogate and out-of-range sequences and decode each invalid byte as a one-byte code point
+(`0xFF` becomes U+00FF, as in `src/gow2_utf8_guard.cpp`, not U+FFFD, so names hash alike on both
+platforms). 8 threads calling `InputSystem`'s `GetState`, `GetCapabilities`, `SetState` and
+`GetKeystroke` over a counting driver never have more than one thread inside the driver, while the
+same driver called without `InputSystem` does see overlapping threads (so the check can detect the
+race). The guest `XamInputGetState`, `XamInputGetCapabilities(Ex)`, `XamInputSetState` and
+`XamInputGetKeystroke(Ex)` call exactly those four methods. On the S25 Ultra it prints
+`runtime_selftest: 18 checks, 0 failed`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test-android-device.ps1 -LowPriority
+```
 
 ## Native libraries
 
@@ -210,6 +241,14 @@ There is exactly one SDL in the process: the SDK's Android build makes SDL3 a sh
 (`SDL_SHARED`), `librexruntime.so` and `librexgpu-xenos.so` link that `libSDL3.so`, and SDLActivity
 loads it first, so its `JNI_OnLoad` sets up the JNI state the runtime's SDL calls use. A static SDL
 inside the runtime would be a second copy without that state.
+
+## Menu prompts
+
+With `gow2_prompts=auto` the menus show the controller glyphs unless a physical keyboard is attached
+and `mnk_mode` is on, in which case they show the keyboard labels. The keyboard is detected through
+SDL's JNI bridge (`Configuration.keyboard` of the activity), because SDL 3.4.14 keeps no keyboard
+list on Android. The runtime log records the choice in a `PROMPTS` line. On Windows the rule is
+unchanged: keyboard labels unless an XInput controller is connected at launch.
 
 ## Not done yet
 
