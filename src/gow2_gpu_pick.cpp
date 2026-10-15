@@ -15,6 +15,7 @@ REXCVAR_DEFINE_STRING(gow2_gpu, "auto", "UI/D3D12",
 #include <vector>
 
 #include <windows.h>
+#include <d3d12.h>
 #include <dxgi1_6.h>
 
 namespace rex::glue {
@@ -66,29 +67,55 @@ std::vector<Adapter> ListHardwareAdapters(IDXGIFactory1* factory) {
   return adapters;
 }
 
-// Windows' own ranking: the per-app choice in Graphics settings, then the system default
-// high-performance GPU, then discrete over integrated. Shared memory reserved for an
-// integrated GPU counts as dedicated memory in DXGI, so ranking by memory picks it.
-bool HighPerformanceLuid(IDXGIFactory1* factory, LUID* out) {
+// Windows' ranking: the per-app choice in Graphics settings, then the system default
+// high-performance GPU, then its own guess, which ranks by dedicated memory when it does not know a
+// GPU is integrated. A shared-memory reservation for an integrated GPU counts as dedicated memory,
+// so a 16 GB reservation put the integrated Radeon first.
+std::vector<LUID> HighPerformanceOrder(IDXGIFactory1* factory) {
+  std::vector<LUID> order;
   IDXGIFactory6* factory6 = nullptr;
   if (FAILED(factory->QueryInterface(__uuidof(IDXGIFactory6), reinterpret_cast<void**>(&factory6)))) {
-    return false;
+    return order;
   }
-  bool found = false;
   IDXGIAdapter1* adapter = nullptr;
-  for (UINT i = 0; !found && SUCCEEDED(factory6->EnumAdapterByGpuPreference(
-                                 i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, __uuidof(IDXGIAdapter1),
-                                 reinterpret_cast<void**>(&adapter)));
+  for (UINT i = 0; SUCCEEDED(factory6->EnumAdapterByGpuPreference(
+           i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, __uuidof(IDXGIAdapter1),
+           reinterpret_cast<void**>(&adapter)));
        ++i) {
     DXGI_ADAPTER_DESC1 desc{};
     if (SUCCEEDED(adapter->GetDesc1(&desc)) && !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
-      *out = desc.AdapterLuid;
-      found = true;
+      order.push_back(desc.AdapterLuid);
     }
     adapter->Release();
   }
   factory6->Release();
-  return found;
+  return order;
+}
+
+// D3D12 reports UMA for integrated GPUs even when Windows no longer classifies them as integrated.
+bool IsUmaAdapter(IDXGIFactory1* factory, LUID luid) {
+  using CreateDeviceFn = HRESULT(WINAPI*)(IUnknown*, D3D_FEATURE_LEVEL, REFIID, void**);
+  static HMODULE d3d12 = LoadLibraryA("d3d12.dll");
+  auto create = d3d12 ? reinterpret_cast<CreateDeviceFn>(GetProcAddress(d3d12, "D3D12CreateDevice"))
+                      : nullptr;
+  IDXGIFactory4* factory4 = nullptr;
+  if (!create ||
+      FAILED(factory->QueryInterface(__uuidof(IDXGIFactory4), reinterpret_cast<void**>(&factory4)))) {
+    return false;
+  }
+  IDXGIAdapter1* adapter = nullptr;
+  ID3D12Device* device = nullptr;
+  D3D12_FEATURE_DATA_ARCHITECTURE arch{};
+  if (SUCCEEDED(factory4->EnumAdapterByLuid(luid, __uuidof(IDXGIAdapter1),
+                                            reinterpret_cast<void**>(&adapter))) &&
+      SUCCEEDED(create(adapter, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device),
+                       reinterpret_cast<void**>(&device)))) {
+    device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE, &arch, sizeof(arch));
+  }
+  if (device) device->Release();
+  if (adapter) adapter->Release();
+  factory4->Release();
+  return arch.UMA != FALSE;
 }
 
 const Adapter* FindByLuid(const std::vector<Adapter>& adapters, LUID luid) {
@@ -129,9 +156,13 @@ GpuChoice ToChoice(const Adapter* adapter, const char* reason) {
 }
 
 GpuChoice ChooseAuto(IDXGIFactory1* factory, const std::vector<Adapter>& adapters) {
-  LUID luid{};
-  if (HighPerformanceLuid(factory, &luid)) {
-    if (const Adapter* a = FindByLuid(adapters, luid)) return ToChoice(a, "Windows high-performance GPU");
+  const std::vector<LUID> order = HighPerformanceOrder(factory);
+  for (const LUID& luid : order) {
+    const Adapter* a = FindByLuid(adapters, luid);
+    if (a && !IsUmaAdapter(factory, luid)) return ToChoice(a, "first dedicated GPU in Windows' high-performance order");
+  }
+  if (!order.empty()) {
+    if (const Adapter* a = FindByLuid(adapters, order.front())) return ToChoice(a, "Windows high-performance GPU");
   }
   return ToChoice(LargestMemory(adapters), "largest dedicated memory");
 }

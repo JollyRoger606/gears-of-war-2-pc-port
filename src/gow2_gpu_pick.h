@@ -1,8 +1,8 @@
 // gow2 - ReXGlue Recompiled Project
 //
-// Which GPU the game renders on. By default it is the one Windows treats as high performance
-// (Settings > System > Display > Graphics, per app or system-wide), so an integrated GPU with a
-// large shared-memory reservation no longer wins over the graphics card.
+// Which GPU the game renders on. By default it is the first GPU with its own memory in the order
+// Windows uses for high performance (Settings > System > Display > Graphics, per app or system-wide),
+// so an integrated GPU with a large shared-memory reservation no longer wins over the graphics card.
 #pragma once
 
 #include <string>
