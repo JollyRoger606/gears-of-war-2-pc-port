@@ -1,0 +1,185 @@
+<#
+.SYNOPSIS
+  Runs the tests that need no game data, phone or second PC, on this Windows PC.
+
+.DESCRIPTION
+  1. The port's host test targets gow2_test_input_test, gow2_script_patch_test and
+     gow2_save_dir_test in out\build\<config> (configure it with scripts\build.ps1 first).
+  2. android\gamelibs\tests\touch_model_test.cpp: pure C++, so it also runs on the PC.
+  3. The SDK's System Link and session unit tests of 0010 and 0011
+     (tests\unit\system\system_link_test.cpp, tests\unit\kernel\xsession_test.cpp) in the tree
+     scripts\build-sdk.ps1 prepared (out\sdk-build\rexglue-sdk), compiled alone against the SDK's
+     own Catch2: the SDK's whole unit_tests target does not build at 923c1a5 (hash_test.cpp
+     cannot find xxhash.h).
+  4. python -m pytest tools, when pytest is installed.
+
+  Test binaries go to out\host-tests. The exit code is the number of failed steps.
+
+.PARAMETER Config
+  The build folder of step 1: Release (default), RelWithDebInfo or Debug.
+
+.PARAMETER LowPriority
+  Run below normal priority (the compilers and tests inherit it).
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File scripts\test-host.ps1 -LowPriority
+#>
+param(
+    [ValidateSet('Release', 'RelWithDebInfo', 'Debug')][string]$Config = 'Release',
+    [switch]$LowPriority
+)
+
+$ErrorActionPreference = 'Stop'
+if ($LowPriority) { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' }
+$root = Split-Path -Parent $PSScriptRoot
+Set-Location $root
+
+function Fail($msg) { Write-Host "ERROR: $msg" -ForegroundColor Red; exit 1 }
+function Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
+
+function Find-VsWithMsvcHeaders {
+    # Some VS installs ship cl.exe without the toolset headers (excpt.h); pick one that has them.
+    $pf86 = ${env:ProgramFiles(x86)}
+    if (-not $pf86) { return $null }
+    $vswhere = Join-Path $pf86 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) { return $null }
+    $paths = & $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    foreach ($p in $paths) {
+        if (Get-ChildItem -Path (Join-Path $p 'VC\Tools\MSVC\*\include\excpt.h') -ErrorAction SilentlyContinue) { return $p }
+    }
+    return $null
+}
+
+function Import-VcVars($vsPath) {
+    $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+    if (-not (Test-Path $vcvars)) { Fail "vcvars64.bat not found in $vsPath." }
+    cmd /c "`"$vcvars`" >nul 2>nul && set" | ForEach-Object {
+        if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
+    }
+}
+
+function Find-ClangDir($vsPath) {
+    $roots = @()
+    if ($vsPath) { $roots += Join-Path $vsPath 'VC\Tools\Llvm\x64\bin' }
+    if ($env:ProgramFiles) { $roots += Join-Path $env:ProgramFiles 'LLVM\bin' }
+    foreach ($dir in $roots) {
+        if (Test-Path (Join-Path $dir 'clang++.exe')) { return $dir }
+    }
+    $onPath = Get-Command clang++ -ErrorAction SilentlyContinue
+    if ($onPath) { return Split-Path $onPath.Source }
+    return $null
+}
+
+# Native tools write progress to stderr; under 'Stop' Windows PowerShell 5.1 would turn that into
+# an error. The exit code decides.
+function Invoke-Native([scriptblock]$cmd) {
+    $ErrorActionPreference = 'Continue'
+    & $cmd 2>&1 | ForEach-Object { Write-Host "  $_" }
+    return $LASTEXITCODE
+}
+
+function Test-Exe([string]$exe) {
+    $code = Invoke-Native { & $exe }
+    Write-Host "  exit $code"
+    return $code -eq 0
+}
+
+function Test-HostTargets([string]$build) {
+    if (-not (Test-Path (Join-Path $build 'build.ninja'))) {
+        Write-Host "  $build is not configured; run scripts\build.ps1 first."
+        return $false
+    }
+    $targets = 'gow2_test_input_test', 'gow2_script_patch_test', 'gow2_save_dir_test'
+    if ((Invoke-Native { cmake --build $build --target $targets }) -ne 0) { return $false }
+    $ok = $true
+    foreach ($t in $targets) {
+        Write-Host "  $t"
+        if (-not (Test-Exe (Join-Path $build "$t.exe"))) { $ok = $false }
+    }
+    return $ok
+}
+
+function Test-TouchModel([string]$outDir) {
+    $exe = Join-Path $outDir 'touch_model_test.exe'
+    $code = Invoke-Native { clang++ -std=c++23 -O1 -Wall -D_CRT_SECURE_NO_WARNINGS -I src `
+        android\gamelibs\tests\touch_model_test.cpp src\gow2_touch_model.cpp -o $exe }
+    if ($code -ne 0) { return $false }
+    return Test-Exe $exe
+}
+
+function Test-SdkSourcePrepared([string]$sdk) {
+    $marker = Join-Path $root 'out\sdk-build\sdk-patched.txt'
+    $stamp = Get-SdkSourceStamp (Get-SdkPatchFiles (Join-Path $root 'sdk\patches'))
+    return (Test-Path (Join-Path $sdk 'include')) -and (Test-SdkSourceCurrent $marker $stamp)
+}
+
+function Build-Catch2([string]$sdk, [string]$catchBuild) {
+    $code = Invoke-Native { cmake -S (Join-Path $sdk 'thirdparty\catch2') -B $catchBuild -G Ninja `
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ `
+        -DCMAKE_CXX_STANDARD=20 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL }
+    if ($code -ne 0) { return $false }
+    return (Invoke-Native { cmake --build $catchBuild --target Catch2WithMain }) -eq 0
+}
+
+function Test-SdkSystemLink([string]$outDir) {
+    $sdk = Join-Path $root 'out\sdk-build\rexglue-sdk'
+    if (-not (Test-SdkSourcePrepared $sdk)) {
+        Write-Host "  $sdk is missing or older than sdk\patches; run scripts\build-sdk.ps1 first."
+        return $false
+    }
+    $catchBuild = Join-Path $outDir 'catch2'
+    if (-not (Build-Catch2 $sdk $catchBuild)) { return $false }
+    $main = Get-ChildItem $catchBuild -Recurse -Filter 'Catch2Main.lib' | Select-Object -First 1
+    $core = Get-ChildItem $catchBuild -Recurse -Filter 'Catch2.lib' | Select-Object -First 1
+    $exe = Join-Path $outDir 'system_link_tests.exe'
+    $sources = 'src\system\system_link.cpp', 'src\kernel\xam\xam_session.cpp',
+        'tests\unit\system\system_link_test.cpp', 'tests\unit\kernel\xsession_test.cpp'
+    Push-Location $sdk
+    try {
+        $code = Invoke-Native { clang++ -std=c++20 -O1 -fms-runtime-lib=dll -D_CRT_SECURE_NO_WARNINGS -Wall `
+            -I include -I thirdparty\catch2\src -I (Join-Path $catchBuild 'generated-includes') `
+            $sources $main.FullName $core.FullName -o $exe }
+    } finally { Pop-Location }
+    if ($code -ne 0) { return $false }
+    return Test-Exe $exe
+}
+
+function Test-PythonTools {
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $python) { Write-Host '  skipped: python was not found'; return $true }
+    if ((Invoke-Native { python -c 'import pytest' }) -ne 0) { Write-Host '  skipped: pytest is not installed'; return $true }
+    return (Invoke-Native { python -m pytest tools -q -p no:cacheprovider }) -eq 0
+}
+
+# The pinned SDK commit and the patch stamp of the prepared SDK tree.
+. (Join-Path $PSScriptRoot 'sdk-source.ps1')
+
+Step 'Locating the C++ toolchain'
+$vsPath = Find-VsWithMsvcHeaders
+if (-not $vsPath) { Fail 'No Visual Studio / Build Tools install with a complete MSVC toolset (excpt.h) was found.' }
+Import-VcVars $vsPath
+$llvm = Find-ClangDir $vsPath
+if (-not $llvm) { Fail 'clang++ was not found. Install LLVM or the VS "C++ Clang tools for Windows" component.' }
+$env:PATH = "$llvm;$env:PATH"
+$outDir = Join-Path $root 'out\host-tests'
+New-Item -ItemType Directory -Force $outDir | Out-Null
+
+$steps = [ordered]@{
+    'Host test targets'          = { Test-HostTargets (Join-Path $root "out\build\$($Config.ToLower())") }
+    'Touch model test'           = { Test-TouchModel $outDir }
+    'SDK System Link unit tests' = { Test-SdkSystemLink $outDir }
+    'Python tests in tools'      = { Test-PythonTools }
+}
+$failed = @()
+foreach ($name in $steps.Keys) {
+    Step $name
+    if (-not (& $steps[$name])) { $failed += $name }
+}
+
+Write-Host ''
+if ($failed.Count) {
+    Write-Host "FAILED: $($failed -join ', ')" -ForegroundColor Red
+} else {
+    Write-Host "All $($steps.Count) steps passed." -ForegroundColor Green
+}
+exit $failed.Count

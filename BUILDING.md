@@ -60,6 +60,18 @@ addresses and are not supported.
 3. After codegen and before compiling, the post-codegen patcher
    `tools\patch_switch_traps.py` runs over the generated code.
 
+## Tests
+
+`scripts\test-host.ps1` runs the tests that need no game data, phone or second PC: the host
+test targets `gow2_test_input_test`, `gow2_script_patch_test` and `gow2_save_dir_test` (after
+`scripts\build.ps1`), the touch controls model test, the SDK's System Link and session unit tests
+(after `scripts\build-sdk.ps1`) and `python -m pytest tools`. The exit code is the number of
+failed steps.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test-host.ps1 -LowPriority
+```
+
 ## gow2_manifest.toml
 
 The manifest drives code generation. Two sections worth knowing about:
