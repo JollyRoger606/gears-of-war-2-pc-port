@@ -189,7 +189,8 @@ last. The configure step also sets `SOURCE_DATE_EPOCH` to the time of the SDK co
 already set), which CMake uses for the build stamp the SDK writes into `librexruntime.so`, and the
 license files the APK copies are checked out with LF everywhere (`.gitattributes`). Two builds of
 one commit, from checkouts in `C:\personal\gow2-recomp` and `C:\personal\gow2-recomp-repro`, gave
-byte-identical libraries, stripped and unstripped.
+byte-identical libraries, stripped and unstripped, and byte-identical APKs (same SHA-256, both
+signed with the same debug key).
 
 Logs are in `out\android\logs`. A first build took 10 minutes on a busy 24-thread PC, plus the SDK
 clone; a rebuild after a source change takes about a minute.
@@ -302,11 +303,11 @@ same time.
 | Where (landscape) | Control |
 |---|---|
 | Left 40% of the screen, below the top 15% | Floating left stick: it is centred where the finger lands, full tilt at 10% of the screen height |
-| Rest of the right side | Look: the right stick follows the finger's speed between two reads of the pad (its travel since the game's previous read over the time since then), full tilt at one screen height per second (`gow2_touch_look_gain` scales it). The deflection keeps the drag's direction and gets a square root and a minimum of about 0.4 so slow drags get past the game's look dead zone; within 8 degrees of an axis it snaps to the axis, blending back to the drag's angle by 16 degrees. The game's own aim assist stays on |
+| Rest of the right side | Look: the right stick follows the finger's speed between two reads of the pad (its travel since that reader's previous read over the time since then), full tilt at one screen height per second (`gow2_touch_look_gain` scales it). The deflection keeps the drag's direction and gets a square root and a minimum of about 0.4 so slow drags get past the game's look dead zone; within 8 degrees of an axis it snaps to the axis, blending back to the drag's angle by 16 degrees. The game's own aim assist stays on |
 | Right side, large | RT (fire); LT (aim, held, or toggled with `gow2_touch_aim_toggle`). A finger on RT or LT that slides also turns the camera |
 | Bottom right | A (cover, run), B (melee), X (reload, use) |
 | Right side | Y, RB (active reload) |
-| Left of RT | R3 (right-stick click: zoom while aiming, for example the Longshot's scope) |
+| Left of RB, RT and LT | R3 (right-stick click: zoom while aiming, for example the Longshot's scope) |
 | Top left | LB (Tac/Com) |
 | Left, above the stick | D-pad (weapons, menus) |
 | Top centre | Back, Start |
@@ -327,15 +328,17 @@ The controls are a translucent ImGui overlay (`gow2_touch_opacity`, `gow2_touch_
 each game frame, not at the display's refresh rate (patch 0007's
 `ImGuiDialog::WantsContinuousPaint`). While a controller is connected, using it (any button, or an
 axis past about a quarter) hides them until the next touch; unplugging the last controller shows
-them at once. A key or a mouse hides them for `gow2_touch_hide_seconds` (10). The first touch on
-hidden controls only shows them.
+them at once (not yet tried with a real controller on the phone). A key or a mouse hides them for
+`gow2_touch_hide_seconds` (10). The first touch on hidden controls only shows them.
 
-The gear opens the settings overlay, where the `gow2_touch_*` settings are; ImGui takes touches
-like a mouse there, and the game's pad reads neutral while the overlay is open. Its "Save to config"
-writes `gow2.toml` in `Android/data/com.santiquiroz.gow2recomp/files`, beside the `logs` folder.
-A keyboard or mouse found at launch makes `mnk_mode` /
-`mnk_mouse` that launch's default value instead of a changed one, so saving does not keep them
-for a later launch without the device.
+The gear opens the settings overlay, where the `gow2_touch_*` settings are (category `input`, or
+type `gow2_touch` in the search field, which opens the phone's keyboard). ImGui takes touches like a
+mouse there (patch 0007 turns a quick tap into a click), and the game's pad reads neutral while the
+overlay is open. The window is taller than the phone's screen: drag an empty part of it up to reach
+"Save to config", which writes `gow2.toml` in `Android/data/com.santiquiroz.gow2recomp/files`,
+beside the `logs` folder. A keyboard or mouse found at launch makes `mnk_mode` / `mnk_mouse` that
+launch's default value instead of a changed one, so saving does not keep them for a later launch
+without the device.
 
 Patch 0007 makes the SDK's window deliver Android finger events to its listeners and drop the mouse
 events SDL makes up from fingers and pens. On Windows the SDK does not deliver finger events, the
