@@ -61,6 +61,20 @@ def test_pipelines_and_gpustats_attach_to_the_next_window():
     assert windows[1].gpustats == {}
 
 
+GPUSTATS_UPLOADS = ("[2026-10-16 10:00:04.900] [info] [gpu] [t9] GPUSTATS 5.1 s: swaps 23 unpresented 0 "
+                    "| draws 70150 pending 0 | passes 36525 submits 23 drains 0 | pipeline_setup 16.0 ms "
+                    "slow 0 max 0.0 ms | pass_ends barrier 36013 forced 0 switch 512 uploads 42649 "
+                    "upload_kb 496348 | upload_kb_by index 40352 texture 30920 vertex 425076 memexport 0")
+
+
+def test_upload_fields_are_parsed_and_printed():
+    windows, _ = summary.read_windows([GPUSTATS_UPLOADS, FRAMES_NEW])
+    stats = windows[0].gpustats
+    assert (stats["uploads"], stats["upload_kb"], stats["barrier"]) == (42649, 496348, 36013)
+    assert stats["vertex"] == 425076
+    assert "uploads=42649 upload_kb=496348" in summary.format_window(windows[0], quiet_max=4)
+
+
 def test_quiet_summary_uses_only_quiet_windows():
     windows, _ = summary.read_windows([PIPELINE] * 9 + [FRAMES_NEW, FRAMES_NO_KGSL])
     text = summary.quiet_summary(windows, quiet_max=4)

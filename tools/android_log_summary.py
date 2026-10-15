@@ -30,7 +30,7 @@ STORAGE_LOADED = re.compile(r"Created (\d+) graphics pipelines from Vulkan stora
 GPUSTATS = re.compile(r"GPUSTATS [\d.]+ s: (?P<body>.*)$")
 GPUSTATS_FIELD = re.compile(r"([a-z_][a-z0-9_]*) (\d+(?:\.\d+)?)")
 GPUSTATS_COLUMNS = ("draws", "passes", "submits", "drains", "ends", "zero", "pipeline_setup",
-                    "unpresented", "missing_textures")
+                    "unpresented", "missing_textures", "uploads", "upload_kb")
 CLOCK_SAMPLE = re.compile(
     r"^(?P<time>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (?P<hz>\d+) (?P<busy>\d+)\s*%?\s+(?P<pwrlevel>\d+)")
 HZ_PER_MHZ = 1_000_000
