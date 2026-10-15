@@ -35,6 +35,12 @@ Let the phone host:
 1. Start a System Link co-op game on the phone.
 2. Search for System Link games on the PC and join.
 
+To run the PC side from a script, `scripts\run-instances.ps1 -Names pc
+-Lan` starts one windowed copy with `system_link_trace` on and its own
+log, without the loopback settings of "Testing on one PC" below, and
+`scripts\instance-input.ps1` sends it keys. The menu path is the
+client's path from that section.
+
 The phone hosts because the PC's network profile is Public, and inbound
 rules exist only for the main tree's `gow2.exe` path. A `gow2.exe` at any
 other path (for example a worktree build) gets no unsolicited inbound

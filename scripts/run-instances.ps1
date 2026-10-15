@@ -1,5 +1,6 @@
 # Start N gow2.exe instances side by side for a System Link test, then supervise them until stopped.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-instances.ps1 -OutDir out\pcpc-test\run1 [-Names 'host,client']
+# With a phone on the LAN: -Names pc -Lan (one copy, no loopback binding).
 param(
     [Parameter(Mandatory)] [string]$OutDir,
     [string]$Exe = 'out/build/release/gow2.exe',
@@ -13,7 +14,9 @@ param(
     [string]$ClientArgs = '',
     [int]$MaxSeconds = 600,
     [int]$StaggerSeconds = 15,
-    [string]$SeedFrom = (Join-Path $env:LOCALAPPDATA 'GearsOfWar2PC')
+    [string]$SeedFrom = (Join-Path $env:LOCALAPPDATA 'GearsOfWar2PC'),
+    # Real LAN (PC with a phone): no loopback binding, the copy uses its default-route address.
+    [switch]$Lan
 )
 $ErrorActionPreference = 'Stop'
 Add-Type @"
@@ -47,20 +50,23 @@ function Copy-ProfileSeed([string]$seedFrom, [string]$dest) {
     Write-Output "seeded $dest"
 }
 
-function Build-InstanceArgs([string]$gameRoot, [string]$log, [int]$width, [int]$height, [string]$ip, [string]$allIps, [string]$xuid, [string]$tag, [array]$extra, [array]$role) {
+function Get-LoopbackNetArgs([string]$ip, [string]$allIps) {
+    return @("--net_bind_ip=$ip", "--net_broadcast_targets=$allIps")
+}
+
+function Build-InstanceArgs([string]$gameRoot, [string]$log, [int]$width, [int]$height, [array]$net, [string]$xuid, [string]$tag, [array]$extra, [array]$role) {
     $list = @(
         "--game_data_root=`"$gameRoot`"",
         "--log_file=`"$log`"",
         '--fullscreen=false',
         "--window_width=$width",
         "--window_height=$height",
-        "--net_bind_ip=$ip",
-        "--net_broadcast_targets=$allIps",
         "--user_xuid=$xuid",
         "--user_name=$tag",
         '--system_link_trace=true',
         '--mnk_mode=true'
     )
+    $list += $net
     $list += $extra
     $list += $role
     return $list
@@ -136,7 +142,9 @@ try {
         $log = Join-Path $folder 'game.log'
         $roleTokens = $clientTokens
         if ($i -eq 0) { $roleTokens = $hostTokens }
-        $tokens = Build-InstanceArgs $GameRoot $log $Width $Height $ip $allIps $xuid $tag $extraTokens $roleTokens
+        $netTokens = @()
+        if ($Lan) { $ip = 'lan' } else { $netTokens = Get-LoopbackNetArgs $ip $allIps }
+        $tokens = Build-InstanceArgs $GameRoot $log $Width $Height $netTokens $xuid $tag $extraTokens $roleTokens
         $argLine = $tokens -join ' '
         $proc = Start-GameInstance $exePath $argLine $local
         $sec = Get-ElapsedSec $start
@@ -151,7 +159,8 @@ try {
         $procs += $proc
         Write-InstancesFile $instancesPath $records
         $hwnd = Wait-InstanceWindow $proc 120
-        if ($hwnd -ne [IntPtr]::Zero) {
+        # A copy that dies during start-up can leave no handle at all.
+        if ($null -ne $hwnd -and $hwnd -ne [IntPtr]::Zero) {
             $r = Move-InstanceWindow $hwnd $nextX
             $rec.hwnd = $hwnd.ToInt64()
             $rec.x = $nextX
