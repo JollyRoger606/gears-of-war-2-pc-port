@@ -16,19 +16,37 @@ constexpr float kStickRadius = 0.10f;
 constexpr float kStickIdleX = 0.17f;
 constexpr float kStickIdleY = 0.72f;
 constexpr float kHitSlop = 1.2f;
+// A tap stays pressed until the game has read it, and at least this long.
 constexpr int64_t kMinPressMs = 100;
-// The look speed is the finger travel of the last 200 ms. The thread that delivers touches also
-// presents frames and can stall for a whole slow frame, then hand over a burst; a window longer
-// than that keeps the stick steady while the guest polls in between.
-constexpr int64_t kLookWindowMs = 200;
+// Longer than the slowest game frame measured on the phone (1.3 s); an older tap is dropped.
+constexpr int64_t kMaxPendingMs = 2000;
+// A reader that has not polled for this long (a finished thread) is forgotten.
+constexpr int64_t kForgetConsumerMs = 10000;
+// Polls closer than this are one frame reading the pad twice: they get the same look value.
+constexpr int64_t kMinLookIntervalMs = 16;
+constexpr int64_t kMaxLookIntervalMs = 1500;
 constexpr float kLookFullSpeed = 1.0f;
 constexpr float kLookDeadZone = 0.30f;
-constexpr float kLookAxisNoise = 0.02f;
-constexpr float kLookMinorAxisRatio = 0.35f;
+constexpr float kLookNoise = 0.02f;
+constexpr float kLookSnapStartDeg = 8.0f;
+constexpr float kLookSnapEndDeg = 16.0f;
+constexpr float kDragSlop = 0.02f;
+constexpr uint8_t kTriggerPressed = 128;
 
 constexpr int16_t kAxisMax = 32767;
 constexpr uint8_t kTriggerMax = 255;
 constexpr float kMsPerSecond = 1000.0f;
+constexpr float kRightAngleDeg = 90.0f;
+constexpr float kHalfRightAngleDeg = 45.0f;
+constexpr float kDegPerRad = 57.29577951308232f;
+
+uint32_t ControlBit(ControlId id) {
+  return 1u << static_cast<uint32_t>(id);
+}
+
+ControlId ControlAt(size_t index) {
+  return static_cast<ControlId>(index);
+}
 
 uint16_t ButtonMask(ControlId id) {
   switch (id) {
@@ -56,55 +74,74 @@ uint16_t ButtonMask(ControlId id) {
       return button::kStart;
     case ControlId::kBack:
       return button::kBack;
+    case ControlId::kRightThumb:
+      return button::kRightThumb;
     default:
       return 0;
   }
+}
+
+bool IsReportedPressed(const PadState& reported, ControlId id) {
+  switch (id) {
+    case ControlId::kFire:
+      return reported.right_trigger >= kTriggerPressed;
+    case ControlId::kAim:
+      return reported.left_trigger >= kTriggerPressed;
+    default:
+      return (reported.buttons & ButtonMask(id)) != 0;
+  }
+}
+
+bool DragsTheCamera(ControlId id) {
+  return id == ControlId::kFire || id == ControlId::kAim;
 }
 
 int FindNearestButton(float x, float y, float width, float height, float scale) {
   const auto& layout = DefaultLayout();
   int best_index = -1;
   float best_dist_sq = 0.0f;
-  for (size_t i = 0; i < kButtonControlCount; ++i) {
-    float cx = layout[i].x * width;
-    float cy = layout[i].y * height;
-    float r = layout[i].radius * height * scale;
-    float max_dist = r * kHitSlop;
-    float dx = x - cx;
-    float dy = y - cy;
-    float dist_sq = dx * dx + dy * dy;
-    if (dist_sq <= max_dist * max_dist) {
-      if (best_index < 0 || dist_sq < best_dist_sq) {
-        best_dist_sq = dist_sq;
-        best_index = static_cast<int>(i);
-      }
+  for (size_t i = 0; i < kControlCount; ++i) {
+    const float max_dist = layout[i].radius * height * scale * kHitSlop;
+    const float dx = x - layout[i].x * width;
+    const float dy = y - layout[i].y * height;
+    const float dist_sq = dx * dx + dy * dy;
+    if (dist_sq > max_dist * max_dist) continue;
+    if (best_index < 0 || dist_sq < best_dist_sq) {
+      best_dist_sq = dist_sq;
+      best_index = static_cast<int>(i);
     }
   }
   return best_index;
 }
 
-float ShapeLookAxis(float val, float max_raw) {
-  float abs_val = std::abs(val);
-  if (abs_val < kLookAxisNoise || abs_val < kLookMinorAxisRatio * max_raw) {
-    return 0.0f;
-  }
-  float sign = (val > 0.0f) ? 1.0f : -1.0f;
+// 0 near an axis, the drag's own angle further out, and a ramp between them so the direction never
+// jumps; d is the angle to the nearest axis.
+float SnapAngleToAxis(float d) {
+  if (d < kLookSnapStartDeg) return 0.0f;
+  if (d < kLookSnapEndDeg) return 2.0f * (d - kLookSnapStartDeg);
+  return d;
+}
+
+float ShapeLookMagnitude(float magnitude) {
   // The game's look response past its dead zone is convex; the square root keeps slow drags from
   // vanishing in it.
-  float scaled = std::sqrt(std::min(abs_val, 1.0f));
-  return sign * (kLookDeadZone + (1.0f - kLookDeadZone) * scaled);
+  return kLookDeadZone + (1.0f - kLookDeadZone) * std::sqrt(std::min(magnitude, 1.0f));
+}
+
+float SignOf(float value) {
+  return value < 0.0f ? -1.0f : 1.0f;
 }
 
 int16_t QuantizeAxis(float normalized) {
-  float rounded = std::round(normalized * static_cast<float>(kAxisMax));
-  int32_t clamped = std::clamp<int32_t>(static_cast<int32_t>(rounded), -kAxisMax, kAxisMax);
+  const float rounded = std::round(normalized * static_cast<float>(kAxisMax));
+  const int32_t clamped = std::clamp<int32_t>(static_cast<int32_t>(rounded), -kAxisMax, kAxisMax);
   return static_cast<int16_t>(clamped);
 }
 
 }  // namespace
 
-const std::array<ControlSpec, kButtonControlCount>& DefaultLayout() {
-  static constexpr std::array<ControlSpec, kButtonControlCount> kLayout = {{
+const std::array<ControlSpec, kControlCount>& DefaultLayout() {
+  static constexpr std::array<ControlSpec, kControlCount> kLayout = {{
       {ControlId::kFire, 0.90f, 0.60f, 0.085f, "RT"},
       {ControlId::kAim, 0.78f, 0.74f, 0.065f, "LT"},
       {ControlId::kA, 0.93f, 0.84f, 0.060f, "A"},
@@ -119,8 +156,26 @@ const std::array<ControlSpec, kButtonControlCount>& DefaultLayout() {
       {ControlId::kDpadRight, 0.20f, 0.38f, 0.045f, ">"},
       {ControlId::kStart, 0.53f, 0.06f, 0.040f, "Start"},
       {ControlId::kBack, 0.45f, 0.06f, 0.040f, "Back"},
+      {ControlId::kRightThumb, 0.70f, 0.60f, 0.040f, "R3"},
+      {ControlId::kSettings, 0.965f, 0.07f, 0.035f, "Settings"},
   }};
   return kLayout;
+}
+
+void ShapeLook(float raw_x, float raw_y, float* out_x, float* out_y) {
+  const float magnitude = std::hypot(raw_x, raw_y);
+  if (magnitude < kLookNoise) {
+    *out_x = 0.0f;
+    *out_y = 0.0f;
+    return;
+  }
+  const float shaped = ShapeLookMagnitude(magnitude);
+  const float angle = std::atan2(std::abs(raw_y), std::abs(raw_x)) * kDegPerRad;
+  const float to_axis = std::min(angle, kRightAngleDeg - angle);
+  const float snapped = SnapAngleToAxis(to_axis);
+  const float out_angle = angle <= kHalfRightAngleDeg ? snapped : kRightAngleDeg - snapped;
+  *out_x = SignOf(raw_x) * shaped * std::cos(out_angle / kDegPerRad);
+  *out_y = SignOf(raw_y) * shaped * std::sin(out_angle / kDegPerRad);
 }
 
 void TouchModel::SetViewport(float width, float height) {
@@ -132,46 +187,14 @@ void TouchModel::SetSettings(const Settings& settings) {
   settings_ = settings;
 }
 
-void TouchModel::PointerDown(uint32_t pointer, float x, float y, int64_t now_ms) {
-  if (width_ <= 0.0f || height_ <= 0.0f) {
-    return;
-  }
+TouchModel::TrackedPointer* TouchModel::FindPointer(uint32_t pointer) {
   auto it = std::find_if(pointers_.begin(), pointers_.end(),
                          [pointer](const TrackedPointer& p) { return p.id == pointer; });
-  if (it != pointers_.end()) {
-    PointerUp(pointer, now_ms);
-  }
+  return it == pointers_.end() ? nullptr : &*it;
+}
 
-  PointerTarget target = PointerTarget::kNone;
-  ControlId button_id = ControlId::kFire;
-
-  int btn_idx = FindNearestButton(x, y, width_, height_, settings_.scale);
-  if (btn_idx >= 0) {
-    target = PointerTarget::kButton;
-    button_id = DefaultLayout()[static_cast<size_t>(btn_idx)].id;
-    if (button_id == ControlId::kAim && settings_.aim_toggle) {
-      aim_toggle_flag_ = !aim_toggle_flag_;
-    }
-  } else if (x < kStickZoneMaxX * width_ && y > kStickZoneMinY * height_) {
-    if (!stick_active_) {
-      target = PointerTarget::kStick;
-      stick_active_ = true;
-      stick_pointer_id_ = pointer;
-      stick_base_x_ = x;
-      stick_base_y_ = y;
-      stick_curr_x_ = x;
-      stick_curr_y_ = y;
-    }
-  } else if (x >= kStickZoneMaxX * width_) {
-    if (!look_active_) {
-      target = PointerTarget::kLook;
-      look_active_ = true;
-      look_pointer_id_ = pointer;
-      look_last_x_ = x;
-      look_last_y_ = y;
-    }
-  }
-
+void TouchModel::TrackPointer(uint32_t pointer, PointerTarget target, ControlId button_id, float x,
+                              float y, int64_t now_ms) {
   pointers_.push_back(TrackedPointer{
       .id = pointer,
       .target = target,
@@ -179,164 +202,321 @@ void TouchModel::PointerDown(uint32_t pointer, float x, float y, int64_t now_ms)
       .down_x = x,
       .down_y = y,
       .down_ms = now_ms,
+      .last_x = x,
+      .last_y = y,
   });
 }
 
-void TouchModel::PointerMove(uint32_t pointer, float x, float y, int64_t now_ms) {
-  auto it = std::find_if(pointers_.begin(), pointers_.end(),
-                         [pointer](const TrackedPointer& p) { return p.id == pointer; });
-  if (it == pointers_.end()) {
+void TouchModel::PointerDown(uint32_t pointer, float x, float y, int64_t now_ms) {
+  if (width_ <= 0.0f || height_ <= 0.0f) {
     return;
   }
+  if (FindPointer(pointer)) {
+    PointerUp(pointer, now_ms);
+  }
+  const int index = FindNearestButton(x, y, width_, height_, settings_.scale);
+  if (index >= 0) {
+    PressControl(pointer, ControlAt(static_cast<size_t>(index)), x, y, now_ms);
+    return;
+  }
+  TrackPointer(pointer, ClaimStickOrLook(x, y), ControlId::kFire, x, y, now_ms);
+}
 
-  if (it->target == PointerTarget::kStick) {
-    stick_curr_x_ = x;
-    stick_curr_y_ = y;
-  } else if (it->target == PointerTarget::kLook) {
-    ForgetOldLookTravel(now_ms);
-    look_travel_.push_back(LookTravel{now_ms, x - look_last_x_, y - look_last_y_});
-    look_last_x_ = x;
-    look_last_y_ = y;
+void TouchModel::PressControl(uint32_t pointer, ControlId id, float x, float y, int64_t now_ms) {
+  if (id == ControlId::kSettings) {
+    settings_requested_ = true;
+  } else if (id == ControlId::kAim && settings_.aim_toggle) {
+    aim_toggle_flag_ = !aim_toggle_flag_;
+  } else {
+    RegisterPress(id, now_ms);
+  }
+  TrackPointer(pointer, PointerTarget::kButton, id, x, y, now_ms);
+}
+
+// A press every reader has to see once even when the finger lifts before its next poll. A reader
+// that last saw this control pressed first has to see it released.
+void TouchModel::RegisterPress(ControlId id, int64_t now_ms) {
+  const bool was_held = IsHeld(id);
+  const uint32_t bit = ControlBit(id);
+  press_ms_[static_cast<size_t>(id)] = now_ms;
+  for (ConsumerState& consumer : consumers_) {
+    if (now_ms - consumer.last_poll_ms > kMaxPendingMs) continue;
+    if (!was_held && (consumer.last_reported & bit)) consumer.rearm |= bit;
+    consumer.pending |= bit;
   }
 }
 
-void TouchModel::PointerUp(uint32_t pointer, int64_t now_ms) {
-  auto it = std::find_if(pointers_.begin(), pointers_.end(),
-                         [pointer](const TrackedPointer& p) { return p.id == pointer; });
-  if (it == pointers_.end()) {
+TouchModel::PointerTarget TouchModel::ClaimStickOrLook(float x, float y) {
+  if (x < kStickZoneMaxX * width_) {
+    if (y <= kStickZoneMinY * height_ || stick_active_) return PointerTarget::kNone;
+    stick_active_ = true;
+    stick_base_x_ = x;
+    stick_base_y_ = y;
+    stick_curr_x_ = x;
+    stick_curr_y_ = y;
+    return PointerTarget::kStick;
+  }
+  if (look_active_) return PointerTarget::kNone;
+  look_active_ = true;
+  return PointerTarget::kLook;
+}
+
+void TouchModel::IgnorePointer(uint32_t pointer, int64_t now_ms) {
+  if (FindPointer(pointer)) {
+    PointerUp(pointer, now_ms);
+  }
+  TrackPointer(pointer, PointerTarget::kNone, ControlId::kFire, 0.0f, 0.0f, now_ms);
+}
+
+void TouchModel::PointerMove(uint32_t pointer, float x, float y, int64_t now_ms) {
+  TrackedPointer* ptr = FindPointer(pointer);
+  if (!ptr) {
     return;
   }
-
-  if (it->target == PointerTarget::kButton) {
-    int64_t min_until = it->down_ms + kMinPressMs;
-    if (min_until > now_ms) {
-      size_t idx = static_cast<size_t>(it->button_id);
-      button_latch_until_[idx] = std::max(button_latch_until_[idx], min_until);
-    }
-  } else if (it->target == PointerTarget::kStick) {
-    stick_active_ = false;
-    stick_pointer_id_ = 0;
-  } else if (it->target == PointerTarget::kLook) {
-    // Its travel stays in the look window, so a flick shorter than a game frame still turns.
-    look_active_ = false;
-    look_pointer_id_ = 0;
+  if (ptr->target == PointerTarget::kStick) {
+    stick_curr_x_ = x;
+    stick_curr_y_ = y;
+  } else if (ptr->target == PointerTarget::kLook) {
+    AddLookTravel(x - ptr->last_x, y - ptr->last_y, now_ms);
+    ptr->last_x = x;
+    ptr->last_y = y;
+  } else if (ptr->target == PointerTarget::kButton && DragsTheCamera(ptr->button_id)) {
+    MoveDraggableButton(*ptr, x, y, now_ms);
   }
+}
 
-  pointers_.erase(it);
+// A finger on RT or LT that slides past a small slop also turns the camera, as in mobile shooters,
+// so aiming, firing and looking need two fingers on the right side instead of three.
+void TouchModel::MoveDraggableButton(TrackedPointer& ptr, float x, float y, int64_t now_ms) {
+  if (ptr.dragging) {
+    AddLookTravel(x - ptr.last_x, y - ptr.last_y, now_ms);
+  } else if (std::hypot(x - ptr.down_x, y - ptr.down_y) > kDragSlop * height_) {
+    ptr.dragging = true;
+  } else {
+    return;
+  }
+  ptr.last_x = x;
+  ptr.last_y = y;
+}
+
+void TouchModel::AddLookTravel(float dx, float dy, int64_t now_ms) {
+  look_travel_.push_back(LookTravel{++last_look_seq_, now_ms, dx, dy});
+  const int64_t oldest = now_ms - kMaxLookIntervalMs;
+  std::erase_if(look_travel_, [oldest](const LookTravel& step) { return step.ms < oldest; });
+}
+
+void TouchModel::PointerUp(uint32_t pointer, int64_t now_ms) {
+  (void)now_ms;
+  TrackedPointer* ptr = FindPointer(pointer);
+  if (!ptr) {
+    return;
+  }
+  if (ptr->target == PointerTarget::kStick) {
+    stick_active_ = false;
+  } else if (ptr->target == PointerTarget::kLook) {
+    // Its travel stays until each reader's next poll, so a flick between two polls still turns.
+    look_active_ = false;
+  }
+  std::erase_if(pointers_, [pointer](const TrackedPointer& p) { return p.id == pointer; });
 }
 
 void TouchModel::ReleaseAll() {
   pointers_.clear();
-  button_latch_until_.fill(0);
+  for (ConsumerState& consumer : consumers_) {
+    consumer.pending = 0;
+    consumer.rearm = 0;
+    consumer.last_look_rx = 0;
+    consumer.last_look_ry = 0;
+  }
   aim_toggle_flag_ = false;
-
+  settings_requested_ = false;
   stick_active_ = false;
-  stick_pointer_id_ = 0;
   stick_base_x_ = 0.0f;
   stick_base_y_ = 0.0f;
   stick_curr_x_ = 0.0f;
   stick_curr_y_ = 0.0f;
-
   look_active_ = false;
-  look_pointer_id_ = 0;
-  look_last_x_ = 0.0f;
-  look_last_y_ = 0.0f;
   look_travel_.clear();
 }
 
-bool TouchModel::IsButtonPressed(size_t index, ControlId id, int64_t now_ms) const {
-  if (now_ms < button_latch_until_[index]) {
-    return true;
+void TouchModel::DropPendingInput() {
+  for (ConsumerState& consumer : consumers_) {
+    consumer.pending = 0;
+    consumer.rearm = 0;
   }
-  for (const auto& ptr : pointers_) {
-    if (ptr.target == PointerTarget::kButton && ptr.button_id == id) {
-      return true;
-    }
-  }
-  return false;
+  look_travel_.clear();
 }
 
-void TouchModel::ForgetOldLookTravel(int64_t now_ms) {
-  while (!look_travel_.empty() && look_travel_.front().ms <= now_ms - kLookWindowMs) {
-    look_travel_.erase(look_travel_.begin());
+const TouchModel::ConsumerState* TouchModel::FindConsumer(ConsumerId id) const {
+  auto it = std::find_if(consumers_.begin(), consumers_.end(),
+                         [id](const ConsumerState& c) { return c.id == id; });
+  return it == consumers_.end() ? nullptr : &*it;
+}
+
+TouchModel::ConsumerState& TouchModel::ConsumerFor(ConsumerId id) {
+  auto it = std::find_if(consumers_.begin(), consumers_.end(),
+                         [id](const ConsumerState& c) { return c.id == id; });
+  if (it != consumers_.end()) return *it;
+  consumers_.push_back(ConsumerState{.id = id, .look_seq = last_look_seq_});
+  return consumers_.back();
+}
+
+void TouchModel::ForgetIdleConsumers(int64_t now_ms) {
+  std::erase_if(consumers_, [now_ms](const ConsumerState& c) {
+    return now_ms - c.last_poll_ms > kForgetConsumerMs;
+  });
+}
+
+bool TouchModel::IsHeld(ControlId id) const {
+  return std::any_of(pointers_.begin(), pointers_.end(), [id](const TrackedPointer& p) {
+    return p.target == PointerTarget::kButton && p.button_id == id;
+  });
+}
+
+bool TouchModel::IsPending(const ConsumerState& consumer, ControlId id, int64_t now_ms) const {
+  if (!(consumer.pending & ControlBit(id))) return false;
+  return now_ms - press_ms_[static_cast<size_t>(id)] <= kMaxPendingMs;
+}
+
+bool TouchModel::IsPendingForAnyone(ControlId id, int64_t now_ms) const {
+  return std::any_of(consumers_.begin(), consumers_.end(), [&](const ConsumerState& consumer) {
+    return IsPending(consumer, id, now_ms);
+  });
+}
+
+bool TouchModel::IsPressedFor(const ConsumerState& consumer, ControlId id, int64_t now_ms) const {
+  if (consumer.rearm & ControlBit(id)) return false;
+  return IsHeld(id) || IsPending(consumer, id, now_ms);
+}
+
+void TouchModel::AddControl(PadState& state, ControlId id, bool pressed) const {
+  if (id == ControlId::kFire) {
+    if (pressed) state.right_trigger = kTriggerMax;
+  } else if (id == ControlId::kAim) {
+    const bool aiming = settings_.aim_toggle ? aim_toggle_flag_ : pressed;
+    if (aiming) state.left_trigger = kTriggerMax;
+  } else if (pressed) {
+    state.buttons |= ButtonMask(id);
   }
 }
 
-void TouchModel::LookStick(int64_t now_ms, int16_t* rx, int16_t* ry) const {
+void TouchModel::LeftStick(PadState& state) const {
+  const float r = kStickRadius * height_ * settings_.scale;
+  if (!stick_active_ || r <= 0.0f) {
+    return;
+  }
+  float dx = (stick_curr_x_ - stick_base_x_) / r;
+  float dy = (stick_curr_y_ - stick_base_y_) / r;
+  const float len = std::hypot(dx, dy);
+  if (len > 1.0f) {
+    dx /= len;
+    dy /= len;
+  }
+  state.thumb_lx = QuantizeAxis(dx);
+  state.thumb_ly = QuantizeAxis(-dy);
+}
+
+// The look speed is the travel since the previous poll over the time since that poll, so every
+// poll of a steady drag turns the camera however long the game's frames take.
+void TouchModel::LookStick(const ConsumerState& consumer, int64_t now_ms, int16_t* rx,
+                           int16_t* ry) const {
+  if (now_ms - consumer.last_look_poll_ms < kMinLookIntervalMs) {
+    *rx = consumer.last_look_rx;
+    *ry = consumer.last_look_ry;
+    return;
+  }
   float travel_x = 0.0f;
   float travel_y = 0.0f;
   for (const LookTravel& step : look_travel_) {
-    if (step.ms > now_ms - kLookWindowMs) {
-      travel_x += step.dx;
-      travel_y += step.dy;
-    }
+    if (step.seq <= consumer.look_seq) continue;
+    travel_x += step.dx;
+    travel_y += step.dy;
   }
-  const float window_sec = static_cast<float>(kLookWindowMs) / kMsPerSecond;
-  const float raw_x = travel_x / height_ / window_sec / kLookFullSpeed * settings_.look_gain;
-  const float raw_y = -travel_y / height_ / window_sec / kLookFullSpeed * settings_.look_gain;
-  const float max_raw = std::max(std::abs(raw_x), std::abs(raw_y));
-  *rx = QuantizeAxis(ShapeLookAxis(raw_x, max_raw));
-  *ry = QuantizeAxis(ShapeLookAxis(raw_y, max_raw));
+  const int64_t interval =
+      std::clamp(now_ms - consumer.last_look_poll_ms, kMinLookIntervalMs, kMaxLookIntervalMs);
+  const float seconds = static_cast<float>(interval) / kMsPerSecond;
+  const float scale = settings_.look_gain / (height_ * seconds * kLookFullSpeed);
+  float shaped_x = 0.0f;
+  float shaped_y = 0.0f;
+  ShapeLook(travel_x * scale, -travel_y * scale, &shaped_x, &shaped_y);
+  *rx = QuantizeAxis(shaped_x);
+  *ry = QuantizeAxis(shaped_y);
 }
 
-PadState TouchModel::Sample(int64_t now_ms) const {
+PadState TouchModel::Sample(ConsumerId consumer_id, int64_t now_ms) const {
   PadState state{};
   if (width_ <= 0.0f || height_ <= 0.0f) {
     return state;
   }
-  const auto& layout = DefaultLayout();
-
-  for (size_t i = 0; i < kButtonControlCount; ++i) {
-    ControlId id = layout[i].id;
-    if (id == ControlId::kFire) {
-      if (IsButtonPressed(i, id, now_ms)) {
-        state.right_trigger = kTriggerMax;
-      }
-    } else if (id == ControlId::kAim) {
-      if (settings_.aim_toggle) {
-        if (aim_toggle_flag_) {
-          state.left_trigger = kTriggerMax;
-        }
-      } else if (IsButtonPressed(i, id, now_ms)) {
-        state.left_trigger = kTriggerMax;
-      }
-    } else if (IsButtonPressed(i, id, now_ms)) {
-      state.buttons |= ButtonMask(id);
-    }
+  const ConsumerState* known = FindConsumer(consumer_id);
+  // A reader's first poll: it has seen no press and no travel yet.
+  const ConsumerState fresh{.id = consumer_id, .look_seq = last_look_seq_};
+  const ConsumerState& consumer = known ? *known : fresh;
+  for (size_t i = 0; i < kControlCount; ++i) {
+    const ControlId id = ControlAt(i);
+    if (id == ControlId::kSettings) continue;
+    AddControl(state, id, IsPressedFor(consumer, id, now_ms));
   }
-
-  if (stick_active_) {
-    float r = kStickRadius * height_ * settings_.scale;
-    if (r > 0.0f) {
-      float dx = (stick_curr_x_ - stick_base_x_) / r;
-      float dy = (stick_curr_y_ - stick_base_y_) / r;
-      float len = std::hypot(dx, dy);
-      if (len > 1.0f) {
-        dx /= len;
-        dy /= len;
-      }
-      state.thumb_lx = QuantizeAxis(dx);
-      state.thumb_ly = QuantizeAxis(-dy);
-    }
-  }
-
-  LookStick(now_ms, &state.thumb_rx, &state.thumb_ry);
-
+  LeftStick(state);
+  LookStick(consumer, now_ms, &state.thumb_rx, &state.thumb_ry);
   return state;
+}
+
+uint32_t TouchModel::ReportedBits(const PadState& reported) const {
+  uint32_t bits = 0;
+  for (size_t i = 0; i < kControlCount; ++i) {
+    const ControlId id = ControlAt(i);
+    if (id != ControlId::kSettings && IsReportedPressed(reported, id)) bits |= ControlBit(id);
+  }
+  return bits;
+}
+
+void TouchModel::ClearAcknowledgedPresses(ConsumerState& consumer, uint32_t reported_bits,
+                                          int64_t now_ms) {
+  for (size_t i = 0; i < kControlCount; ++i) {
+    const uint32_t bit = ControlBit(ControlAt(i));
+    if (!(consumer.pending & bit)) continue;
+    const int64_t age = now_ms - press_ms_[i];
+    const bool seen_long_enough = (reported_bits & bit) && age >= kMinPressMs;
+    if (seen_long_enough || age > kMaxPendingMs) consumer.pending &= ~bit;
+  }
+}
+
+void TouchModel::MarkLookRead(ConsumerState& consumer, const PadState& reported, int64_t now_ms) {
+  if (now_ms - consumer.last_look_poll_ms < kMinLookIntervalMs) {
+    return;
+  }
+  consumer.look_seq = last_look_seq_;
+  consumer.last_look_poll_ms = now_ms;
+  consumer.last_look_rx = reported.thumb_rx;
+  consumer.last_look_ry = reported.thumb_ry;
+}
+
+void TouchModel::Acknowledge(ConsumerId consumer_id, const PadState& reported, int64_t now_ms) {
+  ForgetIdleConsumers(now_ms);
+  ConsumerState& consumer = ConsumerFor(consumer_id);
+  const uint32_t reported_bits = ReportedBits(reported);
+  consumer.rearm &= reported_bits;
+  ClearAcknowledgedPresses(consumer, reported_bits, now_ms);
+  consumer.last_reported = reported_bits;
+  consumer.last_poll_ms = now_ms;
+  MarkLookRead(consumer, reported, now_ms);
+}
+
+bool TouchModel::TakeSettingsRequest() {
+  const bool requested = settings_requested_;
+  settings_requested_ = false;
+  return requested;
 }
 
 std::vector<ControlView> TouchModel::Controls(int64_t now_ms) const {
   const auto& layout = DefaultLayout();
   std::vector<ControlView> views;
-  views.reserve(kButtonControlCount);
-  for (size_t i = 0; i < kButtonControlCount; ++i) {
-    const auto& spec = layout[i];
-    bool pressed = false;
-    if (spec.id == ControlId::kAim && settings_.aim_toggle) {
-      pressed = aim_toggle_flag_;
-    } else {
-      pressed = IsButtonPressed(i, spec.id, now_ms);
-    }
+  views.reserve(kControlCount);
+  for (const ControlSpec& spec : layout) {
+    const bool toggled_aim = spec.id == ControlId::kAim && settings_.aim_toggle;
+    const bool pressed = toggled_aim ? aim_toggle_flag_
+                                     : IsHeld(spec.id) || IsPendingForAnyone(spec.id, now_ms);
     views.push_back(ControlView{
         .id = spec.id,
         .x = spec.x * width_,
@@ -350,10 +530,10 @@ std::vector<ControlView> TouchModel::Controls(int64_t now_ms) const {
 }
 
 StickView TouchModel::Stick() const {
-  float r = kStickRadius * height_ * settings_.scale;
+  const float r = kStickRadius * height_ * settings_.scale;
   if (!stick_active_) {
-    float idle_x = kStickIdleX * width_;
-    float idle_y = kStickIdleY * height_;
+    const float idle_x = kStickIdleX * width_;
+    const float idle_y = kStickIdleY * height_;
     return StickView{
         .active = false,
         .base_x = idle_x,
@@ -369,7 +549,7 @@ StickView TouchModel::Stick() const {
   if (r > 0.0f) {
     dx = (stick_curr_x_ - stick_base_x_) / r;
     dy = (stick_curr_y_ - stick_base_y_) / r;
-    float len = std::hypot(dx, dy);
+    const float len = std::hypot(dx, dy);
     if (len > 1.0f) {
       dx /= len;
       dy /= len;
