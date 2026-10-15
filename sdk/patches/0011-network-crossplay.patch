@@ -1,5 +1,5 @@
 diff --git a/include/rex/system/system_link.h b/include/rex/system/system_link.h
-index 68ce93a..3104375 100644
+index 68ce93a..bccc299 100644
 --- a/include/rex/system/system_link.h
 +++ b/include/rex/system/system_link.h
 @@ -5,6 +5,8 @@
@@ -11,7 +11,7 @@ index 68ce93a..3104375 100644
  #include <optional>
  #include <span>
  #include <string>
-@@ -29,11 +31,176 @@ constexpr size_t kXnKeySize = 16;
+@@ -29,11 +31,178 @@ constexpr size_t kXnKeySize = 16;
  constexpr size_t kSessionInfoSize = kXnKidSize + kXnAddrSize + kXnKeySize;
  constexpr const char* kInstallXuidFileName = "system_link_xuid.txt";
  
@@ -71,7 +71,9 @@ index 68ce93a..3104375 100644
 +enum class GuestSocketOption {
 +  kUnknown,
 +  kReuseAddr,
++  kKeepAlive,
 +  kBroadcast,
++  kOobInline,
 +  kLinger,
 +  kSendBuffer,
 +  kReceiveBuffer,
@@ -188,7 +190,7 @@ index 68ce93a..3104375 100644
  std::optional<uint32_t> ParseIpv4(std::string_view text);
  std::vector<uint32_t> ParseIpv4List(std::string_view text);
  std::string FormatIpv4(uint32_t ip);
-@@ -47,20 +214,86 @@ uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t
+@@ -47,20 +216,86 @@ uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t
  XuidSource ChooseXuidSource(bool xuid_setting_usable, bool link_active);
  uint64_t SplitMix64(uint64_t& state);
  MacAddress MakeInstanceMac(uint64_t xuid, uint32_t local_ip);
@@ -277,7 +279,7 @@ index 68ce93a..3104375 100644
  uint64_t ResolveXuid(const std::filesystem::path& user_data_root);
  std::optional<uint32_t> DetectRoutedIpv4();
 diff --git a/include/rex/system/xsocket.h b/include/rex/system/xsocket.h
-index 578e38b..aa8a381 100644
+index e0b7ae3..aa8a381 100644
 --- a/include/rex/system/xsocket.h
 +++ b/include/rex/system/xsocket.h
 @@ -11,9 +11,11 @@
@@ -302,7 +304,7 @@ index 578e38b..aa8a381 100644
  
    uint64_t native_handle() const { return native_handle_; }
    uint16_t bound_port() const { return bound_port_; }
-@@ -105,6 +110,9 @@ class XSocket : public XObject {
+@@ -105,10 +110,11 @@ class XSocket : public XObject {
    X_STATUS SetOption(uint32_t level, uint32_t optname, void* optval_ptr, uint32_t optlen);
    X_STATUS IOControl(uint32_t cmd, uint8_t* arg_ptr);
  
@@ -311,8 +313,12 @@ index 578e38b..aa8a381 100644
 +
    X_STATUS Connect(N_XSOCKADDR* name, int name_len);
    X_STATUS Bind(N_XSOCKADDR_IN* name, int name_len);
+-  // The address the host gave the socket (a port-0 bind gets its real port here).
+-  X_STATUS GetSockName(N_XSOCKADDR_IN* name);
    X_STATUS Listen(int backlog);
-@@ -134,6 +142,16 @@ class XSocket : public XObject {
+   object_ref<XSocket> Accept(N_XSOCKADDR* name, int* name_len);
+   int Shutdown(int how);
+@@ -136,6 +142,16 @@ class XSocket : public XObject {
    XSocket(KernelState* kernel_state, uint64_t native_handle);
    int SendCopy(const uint8_t* buf, uint32_t buf_len, uint32_t flags, uint32_t ip, uint16_t port);
    int SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags, uint16_t port);
@@ -329,7 +335,7 @@ index 578e38b..aa8a381 100644
  
    uint64_t native_handle_ = -1;
  
-@@ -147,6 +165,14 @@ class XSocket : public XObject {
+@@ -149,6 +165,14 @@ class XSocket : public XObject {
  
    bool broadcast_socket_ = false;
  
@@ -345,7 +351,7 @@ index 578e38b..aa8a381 100644
    std::mutex incoming_packet_mutex_;
    std::queue<uint8_t*> incoming_packets_;
 diff --git a/src/kernel/xam/xam_net.cpp b/src/kernel/xam/xam_net.cpp
-index cd6a5b8..e93472b 100644
+index 90c5f6a..e93472b 100644
 --- a/src/kernel/xam/xam_net.cpp
 +++ b/src/kernel/xam/xam_net.cpp
 @@ -60,6 +60,10 @@ using namespace rex::system;
@@ -500,7 +506,53 @@ index cd6a5b8..e93472b 100644
      return -1;
    }
  
-@@ -990,7 +974,7 @@ u32 NetDll_connect_entry(u32 caller, u32 socket_handle, ppc_ptr_t<XSOCKADDR> nam
+@@ -974,45 +958,6 @@ u32 NetDll_bind_entry(u32 caller, u32 socket_handle, ppc_ptr_t<XSOCKADDR_IN> nam
+   return trace_ret;
+ }
+ 
+-// The engine binds its game socket to port 0 and reads the port the host chose from here; without
+-// it a System Link join fails with "LiveSock: binding to port 0 failed".
+-u32 NetDll_getsockname_entry(u32 caller, u32 socket_handle, ppc_ptr_t<XSOCKADDR_IN> name_ptr,
+-                             mapped_u32 namelen_ptr) {
+-  auto socket = REX_KERNEL_OBJECTS()->LookupObject<XSocket>(socket_handle);
+-  if (!socket) {
+-    // WSAENOTSOCK
+-    XThread::SetLastError(0x2736);
+-    return -1;
+-  }
+-  if (!name_ptr || !namelen_ptr || namelen_ptr.value() < sizeof(XSOCKADDR_IN)) {
+-    // WSAEFAULT
+-    XThread::SetLastError(0x271E);
+-    return -1;
+-  }
+-  N_XSOCKADDR_IN native_name;
+-  int trace_ret = 0;
+-  if (XFAILED(socket->GetSockName(&native_name))) {
+-    XThread::SetLastError(XSocket::LastHostError());
+-    trace_ret = -1;
+-  } else {
+-    name_ptr->sin_family = native_name.sin_family;
+-    name_ptr->sin_port = native_name.sin_port;
+-    name_ptr->sin_addr = native_name.sin_addr;
+-    std::memset(name_ptr->x_sin_zero, 0, sizeof(name_ptr->x_sin_zero));
+-    *namelen_ptr = sizeof(XSOCKADDR_IN);
+-  }
+-  static std::atomic<uint64_t> netlink_trace_count{0};
+-  if (REXCVAR_GET(system_link_trace) && NetLinkTraceAllow(&netlink_trace_count)) {
+-    uint32_t trace_ip;
+-    uint16_t trace_port;
+-    NetLinkSplitAddrIn(name_ptr, &trace_ip, &trace_port);
+-    REXLOG_INFO("[netlink] getsockname s={:#010x} addr={}.{}.{}.{}:{} ret={}", socket_handle,
+-                (trace_ip >> 24) & 0xFF, (trace_ip >> 16) & 0xFF, (trace_ip >> 8) & 0xFF,
+-                trace_ip & 0xFF, trace_port, trace_ret);
+-  }
+-  return trace_ret;
+-}
+-
+ u32 NetDll_connect_entry(u32 caller, u32 socket_handle, ppc_ptr_t<XSOCKADDR> name, u32 namelen) {
+   auto socket = REX_KERNEL_OBJECTS()->LookupObject<XSocket>(socket_handle);
+   if (!socket) {
+@@ -1029,7 +974,7 @@ u32 NetDll_connect_entry(u32 caller, u32 socket_handle, ppc_ptr_t<XSOCKADDR> nam
    X_STATUS status = socket->Connect(&native_name, namelen);
    int trace_ret;
    if (XFAILED(status)) {
@@ -509,7 +561,7 @@ index cd6a5b8..e93472b 100644
      trace_ret = -1;
    } else {
      trace_ret = 0;
-@@ -1018,7 +1002,7 @@ u32 NetDll_listen_entry(u32 caller, u32 socket_handle, i32 backlog) {
+@@ -1057,7 +1002,7 @@ u32 NetDll_listen_entry(u32 caller, u32 socket_handle, i32 backlog) {
  
    X_STATUS status = socket->Listen(backlog);
    if (XFAILED(status)) {
@@ -518,7 +570,7 @@ index cd6a5b8..e93472b 100644
      return -1;
    }
  
-@@ -1050,10 +1034,84 @@ u32 NetDll_accept_entry(u32 caller, u32 socket_handle, ppc_ptr_t<XSOCKADDR> addr
+@@ -1089,10 +1034,84 @@ u32 NetDll_accept_entry(u32 caller, u32 socket_handle, ppc_ptr_t<XSOCKADDR> addr
  
      return new_socket->handle();
    } else {
@@ -603,7 +655,7 @@ index cd6a5b8..e93472b 100644
  struct x_fd_set {
    rex::be<uint32_t> fd_count;
    rex::be<uint32_t> fd_array[64];
-@@ -1107,8 +1165,35 @@ struct host_set {
+@@ -1146,8 +1165,35 @@ struct host_set {
      }
      this->count = new_count;
    }
@@ -639,7 +691,7 @@ index cd6a5b8..e93472b 100644
  i32 NetDll_select_entry(i32 caller, i32 nfds, ppc_ptr_t<x_fd_set> readfds,
                          ppc_ptr_t<x_fd_set> writefds, ppc_ptr_t<x_fd_set> exceptfds,
                          mapped_void timeout_ptr) {
-@@ -1160,8 +1245,22 @@ i32 NetDll_select_entry(i32 caller, i32 nfds, ppc_ptr_t<x_fd_set> readfds,
+@@ -1199,8 +1245,22 @@ i32 NetDll_select_entry(i32 caller, i32 nfds, ppc_ptr_t<x_fd_set> readfds,
                                               reinterpret_cast<int32_t*>(&timeout.tv_usec));
      timeout_in = &timeout;
    }
@@ -663,7 +715,7 @@ index cd6a5b8..e93472b 100644
    if (readfds) {
      host_readfds.UpdateFrom(&native_readfds);
      host_readfds.Store(readfds);
-@@ -1179,9 +1278,10 @@ i32 NetDll_select_entry(i32 caller, i32 nfds, ppc_ptr_t<x_fd_set> readfds,
+@@ -1218,9 +1278,10 @@ i32 NetDll_select_entry(i32 caller, i32 nfds, ppc_ptr_t<x_fd_set> readfds,
    static std::atomic<uint64_t> netlink_trace_count{0};
    if (trace_link && NetLinkTraceAllow(&netlink_trace_count)) {
      // No timeout pointer means block; shown as -1.000000.
@@ -677,7 +729,7 @@ index cd6a5b8..e93472b 100644
    }
    return ret;
  }
-@@ -1194,7 +1294,11 @@ u32 NetDll_recv_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 bu
+@@ -1233,7 +1294,11 @@ u32 NetDll_recv_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 bu
      return -1;
    }
  
@@ -690,7 +742,7 @@ index cd6a5b8..e93472b 100644
  }
  
  u32 NetDll_recvfrom_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 buf_len,
-@@ -1219,27 +1323,21 @@ u32 NetDll_recvfrom_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u3
+@@ -1258,27 +1323,21 @@ u32 NetDll_recvfrom_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u3
        socket->RecvFrom(buf_ptr, buf_len, flags, &native_from, fromlen_ptr ? &native_fromlen : 0);
  
    if (ret >= 0 && from_ptr) {
@@ -725,7 +777,7 @@ index cd6a5b8..e93472b 100644
      uint32_t trace_ip;
      uint16_t trace_port;
      NetLinkSplitAddrIn(from_ptr, &trace_ip, &trace_port);
-@@ -1262,7 +1360,11 @@ u32 NetDll_send_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 bu
+@@ -1301,7 +1360,11 @@ u32 NetDll_send_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 bu
      return -1;
    }
  
@@ -738,7 +790,7 @@ index cd6a5b8..e93472b 100644
  }
  
  u32 NetDll_sendto_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 buf_len, u32 flags,
-@@ -1286,8 +1388,11 @@ u32 NetDll_sendto_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32
+@@ -1325,8 +1388,11 @@ u32 NetDll_sendto_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32
    if (ret < 0) {
      XThread::SetLastError(XSocket::LastHostError());
    }
@@ -752,7 +804,11 @@ index cd6a5b8..e93472b 100644
      uint32_t trace_ip;
      uint16_t trace_port;
      NetLinkSplitAddrIn(to_ptr, &trace_ip, &trace_port);
-@@ -1360,6 +1465,8 @@ REX_EXPORT(__imp__NetDll_bind, rex::kernel::xam::NetDll_bind_entry)
+@@ -1396,10 +1462,11 @@ REX_EXPORT(__imp__NetDll_shutdown, rex::kernel::xam::NetDll_shutdown_entry)
+ REX_EXPORT(__imp__NetDll_setsockopt, rex::kernel::xam::NetDll_setsockopt_entry)
+ REX_EXPORT(__imp__NetDll_ioctlsocket, rex::kernel::xam::NetDll_ioctlsocket_entry)
+ REX_EXPORT(__imp__NetDll_bind, rex::kernel::xam::NetDll_bind_entry)
+-REX_EXPORT(__imp__NetDll_getsockname, rex::kernel::xam::NetDll_getsockname_entry)
  REX_EXPORT(__imp__NetDll_connect, rex::kernel::xam::NetDll_connect_entry)
  REX_EXPORT(__imp__NetDll_listen, rex::kernel::xam::NetDll_listen_entry)
  REX_EXPORT(__imp__NetDll_accept, rex::kernel::xam::NetDll_accept_entry)
@@ -761,18 +817,17 @@ index cd6a5b8..e93472b 100644
  REX_EXPORT(__imp__NetDll_select, rex::kernel::xam::NetDll_select_entry)
  REX_EXPORT(__imp__NetDll_recv, rex::kernel::xam::NetDll_recv_entry)
  REX_EXPORT(__imp__NetDll_recvfrom, rex::kernel::xam::NetDll_recvfrom_entry)
-@@ -1529,6 +1636,4 @@ REX_EXPORT_STUB(__imp__NetDll_XnpToolIpProxyInject);
+@@ -1569,5 +1636,4 @@ REX_EXPORT_STUB(__imp__NetDll_XnpToolIpProxyInject);
  REX_EXPORT_STUB(__imp__NetDll_XnpToolSetCallbacks);
  REX_EXPORT_STUB(__imp__NetDll_XnpUnregisterKeyForCallerType);
  REX_EXPORT_STUB(__imp__NetDll_XnpUpdateConfigParams);
 -NETLINK_STUB_WSA(__imp__NetDll_getpeername, -1);
--NETLINK_STUB_WSA(__imp__NetDll_getsockname, -1);
  REX_EXPORT(__imp__NetDll_getsockopt, rex::kernel::xam::NetDll_getsockopt_entry)
 diff --git a/src/system/system_link.cpp b/src/system/system_link.cpp
-index 4b1eadd..72d438f 100644
+index 4b1eadd..03a4f9c 100644
 --- a/src/system/system_link.cpp
 +++ b/src/system/system_link.cpp
-@@ -159,6 +159,324 @@ std::optional<uint32_t> ParseIpv4Field(std::string_view token) {
+@@ -159,6 +159,328 @@ std::optional<uint32_t> ParseIpv4Field(std::string_view token) {
    return value;
  }
  
@@ -1061,7 +1116,9 @@ index 4b1eadd..72d438f 100644
 +
 +constexpr uint32_t kGuestSolSocket = 0xFFFF;
 +constexpr uint32_t kGuestSoReuseAddr = 0x0004;
++constexpr uint32_t kGuestSoKeepAlive = 0x0008;
 +constexpr uint32_t kGuestSoBroadcast = 0x0020;
++constexpr uint32_t kGuestSoOobInline = 0x0100;
 +constexpr uint32_t kGuestSoLinger = 0x0080;
 +constexpr uint32_t kGuestSoSndBuf = 0x1001;
 +constexpr uint32_t kGuestSoRcvBuf = 0x1002;
@@ -1075,7 +1132,9 @@ index 4b1eadd..72d438f 100644
 +
 +constexpr GuestSocketOptionEntry kGuestSocketOptionTable[] = {
 +    {kGuestSoReuseAddr, GuestSocketOption::kReuseAddr},
++    {kGuestSoKeepAlive, GuestSocketOption::kKeepAlive},
 +    {kGuestSoBroadcast, GuestSocketOption::kBroadcast},
++    {kGuestSoOobInline, GuestSocketOption::kOobInline},
 +    {kGuestSoLinger, GuestSocketOption::kLinger},
 +    {kGuestSoSndBuf, GuestSocketOption::kSendBuffer},
 +    {kGuestSoRcvBuf, GuestSocketOption::kReceiveBuffer},
@@ -1097,7 +1156,7 @@ index 4b1eadd..72d438f 100644
  }  // namespace
  
  std::optional<uint32_t> ParseIpv4(std::string_view text) {
-@@ -333,12 +651,12 @@ MacAddress MakeInstanceMac(uint64_t xuid, uint32_t local_ip) {
+@@ -333,12 +655,12 @@ MacAddress MakeInstanceMac(uint64_t xuid, uint32_t local_ip) {
    return mac;
  }
  
@@ -1115,7 +1174,7 @@ index 4b1eadd..72d438f 100644
    for (size_t i = 0; i < kMacSize; ++i) {
      out[kXnAddrMacOffset + i] = mac[i];
    }
-@@ -385,4 +703,560 @@ uint32_t WsaErrorFromErrno(int error) {
+@@ -385,4 +707,560 @@ uint32_t WsaErrorFromErrno(int error) {
    return kWsaEInval;
  }
  
@@ -2255,7 +2314,7 @@ index 9cabf47..91c5a02 100644
  
  void FillRandom(std::span<uint8_t> out) {
 diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
-index 11c3fbc..25e14f0 100644
+index 1576617..42a6ae1 100644
 --- a/src/system/xsocket.cpp
 +++ b/src/system/xsocket.cpp
 @@ -12,6 +12,8 @@
@@ -2267,7 +2326,21 @@ index 11c3fbc..25e14f0 100644
  
  #include <rex/kernel/xam/module.h>
  #include <rex/logging.h>
-@@ -37,11 +39,33 @@
+@@ -23,13 +25,6 @@
+ // #include <rex/system/xnet.h>
+ 
+ #include <rex/net/socket.h>
+-#if REX_PLATFORM_ANDROID
+-#include <sys/ioctl.h>
+-
+-#include <atomic>
+-
+-#include <rex/logging.h>
+-#endif
+ 
+ // Standard socket types used by Xbox API emulation
+ #if REX_PLATFORM_WIN32
+@@ -44,11 +39,33 @@
  #include <sys/socket.h>
  
  #include <cerrno>
@@ -2301,7 +2374,7 @@ index 11c3fbc..25e14f0 100644
  sockaddr_in MakeHostSockaddr(uint32_t ip, uint16_t port) {
    sockaddr_in addr = {};
    addr.sin_family = AF_INET;
-@@ -66,19 +90,248 @@ void LogBindRewrite(uint32_t requested_ip, uint32_t effective_ip, uint16_t port)
+@@ -73,110 +90,251 @@ void LogBindRewrite(uint32_t requested_ip, uint32_t effective_ip, uint16_t port)
                port, system_link::FormatIpv4(effective_ip), port);
  }
  
@@ -2318,11 +2391,11 @@ index 11c3fbc..25e14f0 100644
 +    return;
 +  }
 +  if (host_level == static_cast<int>(guest_level) && host_opt == static_cast<int>(guest_opt)) {
-+    return;
-+  }
-+  if (!ShouldLogSetsockoptRemap()) {
      return;
    }
++  if (!ShouldLogSetsockoptRemap()) {
++    return;
++  }
 +  REXLOG_INFO("[netlink] setsockopt level {:#x} opt {:#x} -> host level {} opt {}", guest_level,
 +              guest_opt, host_level, host_opt);
 +}
@@ -2373,8 +2446,9 @@ index 11c3fbc..25e14f0 100644
 -      "(net_broadcast_targets)",
 -      port, list);
 +  return list;
-+}
-+
+ }
+ 
+-}  // namespace
 +bool IsPlainLanBroadcast(uint16_t port, const std::vector<uint32_t>& lan_ips,
 +                         const std::vector<system_link::Endpoint>& endpoints) {
 +  if (endpoints.size() != lan_ips.size()) {
@@ -2387,7 +2461,9 @@ index 11c3fbc..25e14f0 100644
 +  }
 +  return true;
 +}
-+
+ 
+-#if REX_PLATFORM_ANDROID
+-namespace {
 +void LogBroadcastFanOut(uint16_t port, const std::vector<uint32_t>& lan_ips,
 +                        const std::vector<system_link::Endpoint>& endpoints) {
 +  if (!endpoints.empty() && !IsPlainLanBroadcast(port, lan_ips, endpoints)) {
@@ -2406,7 +2482,11 @@ index 11c3fbc..25e14f0 100644
 +  REXLOG_INFO("[netlink] broadcasts to port {} go out to [{}]", port,
 +              FormatEndpointList(endpoints));
 +}
-+
+ 
+-// Apps may not bind ports below 1024 on Android, and the guest binds its VDP socket to port 1000.
+-constexpr uint16_t kFirstUnprivilegedPort = 1024;
+-constexpr uint16_t kPrivilegedPortShift = 30000;
+-constexpr uint32_t kGuestSolSocket = 0xFFFF;
 +bool IsFirstContact(uint64_t socket_key, const system_link::Endpoint& peer) {
 +  static std::mutex mutex;
 +  static system_link::FirstContacts contacts{system_link::kFirstContactCapacity};
@@ -2415,7 +2495,10 @@ index 11c3fbc..25e14f0 100644
 +}
 +
 +uint64_t ReceiveContactKey(uint64_t handle) { return handle * 2; }
-+
+ 
+-uint16_t HostBindPort(uint16_t guest_port) {
+-  if (guest_port == 0 || guest_port >= kFirstUnprivilegedPort) {
+-    return guest_port;
 +uint64_t SendContactKey(uint64_t handle) { return handle * 2 + 1; }
 +
 +uint16_t LocalHostPort(uint64_t handle) {
@@ -2423,22 +2506,73 @@ index 11c3fbc..25e14f0 100644
 +  socklen_t len = sizeof(addr);
 +  if (getsockname(handle, reinterpret_cast<sockaddr*>(&addr), &len) < 0) {
 +    return 0;
-+  }
+   }
+-  return static_cast<uint16_t>(guest_port + kPrivilegedPortShift);
 +  return ntohs(addr.sin_port);
-+}
-+
+ }
+ 
+-void LogShiftedPortOnce(uint16_t guest_port, uint16_t host_port) {
+-  static std::atomic<bool> logged{false};
+-  if (guest_port != host_port && !logged.exchange(true)) {
+-    REXLOG_INFO("XSocket: guest port {} bound as host port {} (Android reserves ports below {})",
+-                guest_port, host_port, kFirstUnprivilegedPort);
 +void LogFirstReceive(uint64_t handle, const system_link::Endpoint& source, int len) {
 +  if (!system_link::TraceEnabled() || !IsFirstContact(ReceiveContactKey(handle), source)) {
 +    return;
-+  }
+   }
 +  REXLOG_INFO("[netlink] first datagram from {} on local port {} ({} bytes)",
 +              system_link::FormatEndpoint(source), LocalHostPort(handle), len);
-+}
-+
+ }
+ 
+-// The guest numbers SOL_SOCKET and its options the Winsock way; Linux numbers them differently.
+-// Options without a Linux twin keep the guest's numbers and fail as before.
+-void TranslateSocketOption(uint32_t& level, uint32_t& optname) {
+-  if (level != kGuestSolSocket) {
 +void LogFirstSend(uint64_t handle, const system_link::Endpoint& destination, int len) {
 +  if (!system_link::TraceEnabled() || !IsFirstContact(SendContactKey(handle), destination)) {
-+    return;
-+  }
+     return;
+   }
+-  switch (optname) {
+-    case 0x0004:
+-      optname = SO_REUSEADDR;
+-      break;
+-    case 0x0008:
+-      optname = SO_KEEPALIVE;
+-      break;
+-    case 0x0020:
+-      optname = SO_BROADCAST;
+-      break;
+-    case 0x0100:
+-      optname = SO_OOBINLINE;
+-      break;
+-    case 0x1001:
+-      optname = SO_SNDBUF;
+-      break;
+-    case 0x1002:
+-      optname = SO_RCVBUF;
+-      break;
+-    default:
+-      return;
+-  }
+-  level = SOL_SOCKET;
+-}
+-
+-// Winsock's FIONBIO and FIONREAD with a big-endian u_long; Linux numbers both differently and
+-// takes a host int, so the guest's non-blocking request never reached the socket and the main
+-// thread blocked in its first recvfrom.
+-constexpr uint32_t kGuestFionbio = 0x8004667E;
+-constexpr uint32_t kGuestFionread = 0x4004667F;
+-
+-int SetNonBlocking(int fd, const uint8_t* guest_arg) {
+-  int enable = memory::load_and_swap<uint32_t>(guest_arg) != 0 ? 1 : 0;
+-  return ioctl(fd, FIONBIO, &enable);
+-}
+-
+-int ReadAvailableBytes(int fd, uint8_t* guest_arg) {
+-  int available = 0;
+-  const int ret = ioctl(fd, FIONREAD, &available);
+-  if (ret == 0) {
+-    memory::store_and_swap<uint32_t>(guest_arg, static_cast<uint32_t>(available));
 +  REXLOG_INFO("[netlink] first datagram to {} from local port {} ({} bytes)",
 +              system_link::FormatEndpoint(destination), LocalHostPort(handle), len);
 +}
@@ -2460,7 +2594,8 @@ index 11c3fbc..25e14f0 100644
 +                      socklen_t nfromlen) {
 +  if (from) {
 +    FillGuestSockaddrIn(from, nfrom);
-+  }
+   }
+-  return ret;
 +  if (from_len) {
 +    *from_len = nfromlen;
 +  }
@@ -2473,8 +2608,12 @@ index 11c3fbc..25e14f0 100644
 +    std::memcpy(buf, data, count);
 +  }
 +  return length <= buf_len;
-+}
-+
+ }
+ 
+-int GuestSocketIoctl(uint64_t handle, uint32_t cmd, uint8_t* arg) {
+-  const int fd = static_cast<int>(handle);
+-  if (cmd == kGuestFionbio) {
+-    return SetNonBlocking(fd, arg);
 +uint16_t ReadInetSockaddrPort(const N_XSOCKADDR& addr) {
 +  uint8_t hi = static_cast<uint8_t>(addr.sa_data[0]);
 +  uint8_t lo = static_cast<uint8_t>(addr.sa_data[1]);
@@ -2519,19 +2658,23 @@ index 11c3fbc..25e14f0 100644
 +  int flags = fcntl(fd, F_GETFL, 0);
 +  if (flags < 0) {
 +    return IoctlOutcome::kHostError;
-+  }
+   }
+-  if (cmd == kGuestFionread) {
+-    return ReadAvailableBytes(fd, arg);
 +  if (enabled != 0) {
 +    flags |= O_NONBLOCK;
 +  } else {
 +    flags &= ~O_NONBLOCK;
-+  }
+   }
+-  return rex::net::socket_ioctl(handle, cmd, arg);
 +  if (fcntl(fd, F_SETFL, flags) != 0) {
 +    return IoctlOutcome::kHostError;
 +  }
 +#endif
 +  return IoctlOutcome::kOk;
-+}
-+
+ }
+ 
+-}  // namespace
 +IoctlOutcome QueryGuestAvailableBytes(uint64_t handle, uint8_t* arg_ptr) {
 +  if (arg_ptr == nullptr) {
 +    return IoctlOutcome::kNullArg;
@@ -2550,16 +2693,19 @@ index 11c3fbc..25e14f0 100644
 +  }
 +  system_link::WriteBigEndian32(std::span<uint8_t, 4>(arg_ptr, 4),
 +                                static_cast<uint32_t>(count));
-+#endif
+ #endif
 +  return IoctlOutcome::kOk;
 +}
 +
 +int PassthroughGuestIoctl(uint64_t handle, uint32_t cmd, uint8_t* arg_ptr) {
 +  return rex::net::socket_ioctl(handle, cmd, arg_ptr);
- }
++}
++
++}  // namespace
  
- }  // namespace
-@@ -92,6 +345,64 @@ XSocket::~XSocket() {
+ XSocket::XSocket(KernelState* kernel_state) : XObject(kernel_state, kObjectType) {}
+ 
+@@ -187,6 +345,72 @@ XSocket::~XSocket() {
    Close();
  }
  
@@ -2587,9 +2733,17 @@ index 11c3fbc..25e14f0 100644
 +      *native_level = SOL_SOCKET;
 +      *native_optname = SO_REUSEADDR;
 +      return true;
++    case GuestSocketOption::kKeepAlive:
++      *native_level = SOL_SOCKET;
++      *native_optname = SO_KEEPALIVE;
++      return true;
 +    case GuestSocketOption::kBroadcast:
 +      *native_level = SOL_SOCKET;
 +      *native_optname = SO_BROADCAST;
++      return true;
++    case GuestSocketOption::kOobInline:
++      *native_level = SOL_SOCKET;
++      *native_optname = SO_OOBINLINE;
 +      return true;
 +    case GuestSocketOption::kLinger:
 +      *native_level = SOL_SOCKET;
@@ -2624,7 +2778,7 @@ index 11c3fbc..25e14f0 100644
  X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
    af_ = af;
    type_ = type;
-@@ -104,6 +415,7 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
+@@ -199,6 +423,7 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
  
    native_handle_ = socket(af, type, proto);
    if (native_handle_ == -1) {
@@ -2632,7 +2786,7 @@ index 11c3fbc..25e14f0 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  #if REX_PLATFORM_WIN32
-@@ -115,14 +427,6 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
+@@ -210,14 +435,6 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
    return X_STATUS_SUCCESS;
  }
  
@@ -2647,7 +2801,7 @@ index 11c3fbc..25e14f0 100644
  X_STATUS XSocket::Close() {
    if (native_handle_ == uint64_t(-1)) {
      return X_STATUS_SUCCESS;
-@@ -131,6 +435,7 @@ X_STATUS XSocket::Close() {
+@@ -226,6 +443,7 @@ X_STATUS XSocket::Close() {
    int ret = rex::net::socket_close(native_handle_);
    native_handle_ = -1;
    if (ret != 0) {
@@ -2655,7 +2809,7 @@ index 11c3fbc..25e14f0 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -138,46 +443,129 @@ X_STATUS XSocket::Close() {
+@@ -233,55 +451,129 @@ X_STATUS XSocket::Close() {
  }
  
  X_STATUS XSocket::SetOption(uint32_t level, uint32_t optname, void* optval_ptr, uint32_t optlen) {
@@ -2685,7 +2839,12 @@ index 11c3fbc..25e14f0 100644
      host_value = memory::load_and_swap<uint32_t>(optval_ptr);
      value = reinterpret_cast<char*>(&host_value);
    }
--  int ret = setsockopt(native_handle_, level, optname, value, optlen);
+-  uint32_t host_level = level;
+-  uint32_t host_optname = optname;
+-#if REX_PLATFORM_ANDROID
+-  TranslateSocketOption(host_level, host_optname);
+-#endif
+-  int ret = setsockopt(native_handle_, host_level, host_optname, value, optlen);
 +  LogSetsockoptRemap(level, optname, native_level, native_optname);
 +  int ret = setsockopt(native_handle_, native_level, native_optname, value, optlen);
    if (ret < 0) {
@@ -2704,7 +2863,8 @@ index 11c3fbc..25e14f0 100644
  }
  
 -X_STATUS XSocket::IOControl(uint32_t cmd, uint8_t* arg_ptr) {
--  int ret = rex::net::socket_ioctl(native_handle_, cmd, arg_ptr);
+-#if REX_PLATFORM_ANDROID
+-  int ret = GuestSocketIoctl(native_handle_, cmd, arg_ptr);
 +X_STATUS XSocket::SetLingerOption(const uint8_t* guest_value) {
 +  if (guest_value == nullptr) {
 +    SetHostError(kWsaEFault);
@@ -2716,11 +2876,12 @@ index 11c3fbc..25e14f0 100644
 +  linger value{};
 +  value.l_onoff = static_cast<u_short>(parsed.on);
 +  value.l_linger = static_cast<u_short>(parsed.seconds);
-+#else
+ #else
+-  int ret = rex::net::socket_ioctl(native_handle_, cmd, arg_ptr);
 +  linger value{};
 +  value.l_onoff = static_cast<int>(parsed.on);
 +  value.l_linger = static_cast<int>(parsed.seconds);
-+#endif
+ #endif
 +  int ret = setsockopt(native_handle_, SOL_SOCKET, SO_LINGER,
 +                       reinterpret_cast<const char*>(&value), sizeof(value));
    if (ret < 0) {
@@ -2795,14 +2956,18 @@ index 11c3fbc..25e14f0 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -188,19 +576,25 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
+@@ -292,49 +584,33 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
    uint32_t requested_ip = name->sin_addr;
    uint32_t effective_ip =
        system_link::RewriteBindAddress(requested_ip, system_link::BindIp().value_or(0));
--  sockaddr_in addr = MakeHostSockaddr(effective_ip, name->sin_port);
+-  // sin_port is a be<> field, so it reads in host byte order.
+-  uint16_t host_port = name->sin_port;
+-#if REX_PLATFORM_ANDROID
+-  host_port = HostBindPort(name->sin_port);
+-#endif
 +  uint16_t guest_port = name->sin_port;
 +  uint16_t host_port = system_link::GuestToHostPort(guest_port, system_link::PortOffset());
-+  sockaddr_in addr = MakeHostSockaddr(effective_ip, host_port);
+   sockaddr_in addr = MakeHostSockaddr(effective_ip, host_port);
    addr.sin_family = name->sin_family;
    if (effective_ip != requested_ip) {
 -    LogBindRewrite(requested_ip, effective_ip, name->sin_port);
@@ -2813,6 +2978,11 @@ index 11c3fbc..25e14f0 100644
    }
    int ret = bind(native_handle_, reinterpret_cast<sockaddr*>(&addr),
                   std::min(name_len, static_cast<int>(sizeof(addr))));
+-#if REX_PLATFORM_ANDROID
+-  if (ret >= 0) {
+-    LogShiftedPortOnce(name->sin_port, host_port);
+-  }
+-#endif
    if (ret < 0) {
 +    CaptureHostError();
      return X_STATUS_UNSUCCESSFUL;
@@ -2824,7 +2994,20 @@ index 11c3fbc..25e14f0 100644
  
    return X_STATUS_SUCCESS;
  }
-@@ -208,6 +602,7 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
+ 
+-X_STATUS XSocket::GetSockName(N_XSOCKADDR_IN* name) {
+-  sockaddr_in addr{};
+-  socklen_t addr_len = sizeof(addr);
+-  if (getsockname(native_handle_, reinterpret_cast<sockaddr*>(&addr), &addr_len) < 0) {
+-    return X_STATUS_UNSUCCESSFUL;
+-  }
+-  name->sin_family = addr.sin_family;
+-  name->sin_addr = ntohl(addr.sin_addr.s_addr);
+-  name->sin_port = ntohs(addr.sin_port);
+-  std::memset(name->x_sin_zero, 0, sizeof(name->x_sin_zero));
+-  return X_STATUS_SUCCESS;
+-}
+-
  X_STATUS XSocket::Listen(int backlog) {
    int ret = listen(native_handle_, backlog);
    if (ret < 0) {
@@ -2832,7 +3015,7 @@ index 11c3fbc..25e14f0 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -215,15 +610,21 @@ X_STATUS XSocket::Listen(int backlog) {
+@@ -342,15 +618,21 @@ X_STATUS XSocket::Listen(int backlog) {
  }
  
  object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
@@ -2856,7 +3039,7 @@ index 11c3fbc..25e14f0 100644
    std::memcpy(name, &n_sockaddr, n_name_len);
    *name_len = n_name_len;
  
-@@ -238,11 +639,19 @@ object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
+@@ -365,11 +647,19 @@ object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
  }
  
  int XSocket::Shutdown(int how) {
@@ -2878,7 +3061,7 @@ index 11c3fbc..25e14f0 100644
  }
  
  int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* from,
-@@ -270,29 +679,79 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
+@@ -397,29 +687,79 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
    }
    */
  
@@ -2971,7 +3154,7 @@ index 11c3fbc..25e14f0 100644
  }
  
  int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* to,
-@@ -309,34 +768,55 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
+@@ -436,34 +776,55 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
    */
  
    if (!to) {
@@ -3042,7 +3225,7 @@ index 11c3fbc..25e14f0 100644
      if (ret >= 0) {
        any_sent = true;
        result = ret;
-@@ -345,6 +825,70 @@ int XSocket::SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags,
+@@ -472,6 +833,70 @@ int XSocket::SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags,
    return any_sent ? result : -1;
  }
  
@@ -3114,7 +3297,7 @@ index 11c3fbc..25e14f0 100644
    packet* pkt = reinterpret_cast<packet*>(new uint8_t[sizeof(packet) + len]);
    pkt->src_ip = src_ip;
 diff --git a/tests/unit/system/system_link_test.cpp b/tests/unit/system/system_link_test.cpp
-index 4d7592c..4641a7d 100644
+index 4d7592c..5957988 100644
 --- a/tests/unit/system/system_link_test.cpp
 +++ b/tests/unit/system/system_link_test.cpp
 @@ -3,6 +3,7 @@
@@ -3136,7 +3319,7 @@ index 4d7592c..4641a7d 100644
  TEST_CASE("system_link: ParseIpv4 parses valid addresses and rejects malformed ones",
            "[system][system_link]") {
    CHECK(ParseIpv4("127.0.0.1") == 0x7F000001u);
-@@ -264,3 +269,768 @@ TEST_CASE("system_link: WsaErrorFromErrno maps errnos", "[system][system_link]")
+@@ -264,3 +269,770 @@ TEST_CASE("system_link: WsaErrorFromErrno maps errnos", "[system][system_link]")
  #endif
    CHECK(WsaErrorFromErrno(999999) == 10022u);
  }
@@ -3478,7 +3661,9 @@ index 4d7592c..4641a7d 100644
 +TEST_CASE("system_link: ClassifyGuestSocketOption classifies socket options",
 +          "[system][system_link]") {
 +  CHECK(ClassifyGuestSocketOption(0xFFFF, 4) == GuestSocketOption::kReuseAddr);
++  CHECK(ClassifyGuestSocketOption(0xFFFF, 0x0008) == GuestSocketOption::kKeepAlive);
 +  CHECK(ClassifyGuestSocketOption(0xFFFF, 0x20) == GuestSocketOption::kBroadcast);
++  CHECK(ClassifyGuestSocketOption(0xFFFF, 0x0100) == GuestSocketOption::kOobInline);
 +  CHECK(ClassifyGuestSocketOption(0xFFFF, 0x80) == GuestSocketOption::kLinger);
 +  CHECK(ClassifyGuestSocketOption(0xFFFF, 0x1001) == GuestSocketOption::kSendBuffer);
 +  CHECK(ClassifyGuestSocketOption(0xFFFF, 0x1002) == GuestSocketOption::kReceiveBuffer);

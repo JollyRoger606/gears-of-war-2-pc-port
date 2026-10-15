@@ -2136,7 +2136,7 @@ index a77f5e6..68996cf 100644
    Setting* previous_setting = setting.get();
    std::swap(settings_[setting->setting_id], previous_setting);
 diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
-index 6b1f6b9..7a2ad1c 100644
+index 117a1f2..1576617 100644
 --- a/src/system/xsocket.cpp
 +++ b/src/system/xsocket.cpp
 @@ -9,12 +9,16 @@
@@ -2156,7 +2156,7 @@ index 6b1f6b9..7a2ad1c 100644
  #include <rex/system/xsocket.h>
  // #include <rex/system/xnet.h>
  
-@@ -25,14 +29,59 @@
+@@ -32,14 +36,59 @@
  #include <WinSock2.h>
  
  #include <WS2tcpip.h>
@@ -2214,9 +2214,9 @@ index 6b1f6b9..7a2ad1c 100644
 +
 +}  // namespace
  
- XSocket::XSocket(KernelState* kernel_state) : XObject(kernel_state, kObjectType) {}
- 
-@@ -57,10 +106,23 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
+ #if REX_PLATFORM_ANDROID
+ namespace {
+@@ -152,10 +201,23 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
    if (native_handle_ == -1) {
      return X_STATUS_UNSUCCESSFUL;
    }
@@ -2240,25 +2240,40 @@ index 6b1f6b9..7a2ad1c 100644
  X_STATUS XSocket::Close() {
    if (native_handle_ == uint64_t(-1)) {
      return X_STATUS_SUCCESS;
-@@ -123,7 +185,16 @@ X_STATUS XSocket::Connect(N_XSOCKADDR* name, int name_len) {
+@@ -227,16 +289,25 @@ X_STATUS XSocket::Connect(N_XSOCKADDR* name, int name_len) {
  }
  
  X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
--  int ret = bind(native_handle_, (sockaddr*)name, name_len);
 +  uint32_t requested_ip = name->sin_addr;
 +  uint32_t effective_ip =
 +      system_link::RewriteBindAddress(requested_ip, system_link::BindIp().value_or(0));
-+  sockaddr_in addr = MakeHostSockaddr(effective_ip, name->sin_port);
++  // sin_port is a be<> field, so it reads in host byte order.
++  uint16_t host_port = name->sin_port;
++#if REX_PLATFORM_ANDROID
++  host_port = HostBindPort(name->sin_port);
++#endif
++  sockaddr_in addr = MakeHostSockaddr(effective_ip, host_port);
 +  addr.sin_family = name->sin_family;
 +  if (effective_ip != requested_ip) {
 +    LogBindRewrite(requested_ip, effective_ip, name->sin_port);
 +  }
 +  int ret = bind(native_handle_, reinterpret_cast<sockaddr*>(&addr),
 +                 std::min(name_len, static_cast<int>(sizeof(addr))));
+ #if REX_PLATFORM_ANDROID
+-  N_XSOCKADDR_IN host_name = *name;
+-  // sin_port is a be<> field, so it reads and writes in host byte order.
+-  host_name.sin_port = HostBindPort(name->sin_port);
+-  int ret = bind(native_handle_, (sockaddr*)&host_name, name_len);
+   if (ret >= 0) {
+-    LogShiftedPortOnce(name->sin_port, host_name.sin_port);
++    LogShiftedPortOnce(name->sin_port, host_port);
+   }
+-#else
+-  int ret = bind(native_handle_, (sockaddr*)name, name_len);
+ #endif
    if (ret < 0) {
      return X_STATUS_UNSUCCESSFUL;
-   }
-@@ -134,6 +205,19 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
+@@ -248,6 +319,19 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
    return X_STATUS_SUCCESS;
  }
  
@@ -2278,7 +2293,7 @@ index 6b1f6b9..7a2ad1c 100644
  X_STATUS XSocket::Listen(int backlog) {
    int ret = listen(native_handle_, backlog);
    if (ret < 0) {
-@@ -203,10 +287,13 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
+@@ -317,10 +401,13 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
    socklen_t nfromlen = sizeof(sockaddr_in);
    int ret = recvfrom(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,
                       (sockaddr*)&nfrom, &nfromlen);
@@ -2294,7 +2309,7 @@ index 6b1f6b9..7a2ad1c 100644
      std::memset(from->x_sin_zero, 0, sizeof(from->x_sin_zero));
    }
  
-@@ -234,15 +321,41 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
+@@ -348,15 +435,41 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
    }
    */
  

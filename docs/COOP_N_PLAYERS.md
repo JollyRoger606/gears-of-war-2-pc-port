@@ -17,13 +17,13 @@ this 0010, and `scripts/build-android.ps1` has built and linked 0002-0011 there.
 crossplay build have joined each other's campaign over loopback on one PC; PC with phone has not
 run yet. See [NETWORK_PLAY.md](NETWORK_PLAY.md).
 
-Merge order: this 0010 first, then 0011. Master's 0007 (6fe0d18, 2026-10-15) now shifts Android
-guest ports 1-1023 by 30000 and translates socket options and FIONBIO/FIONREAD on Android; neither
-this 0010 nor 0011 applies on that 0007 yet (`src/system/xsocket.cpp`, checked with
-`git apply --cached` on a temporary index). When they are rebased onto it, keep one port mapping
-for both platforms: a phone that binds 31000 and a PC that sends to 41000 never meet. 0011's
-`net_port_offset` covers Android, Windows and Linux alike, so 0007's Android-only shift and option
-table should give way to it.
+Merge order: this 0010 first, then 0011. Master's 0007 (6fe0d18, 2026-10-15) shifts Android
+guest ports 1-1023 by 30000 and translates socket options and FIONBIO/FIONREAD on Android. On
+`crossplay` both later patches are rebased onto it: 0010 keeps that shift inside its own `Bind`
+rewrite, and 0011 removes 0007's Android shift, option table and ioctl code from
+`src/system/xsocket.cpp`, so `net_port_offset` is the one port mapping on Android, Windows and
+Linux (a phone that bound 31000 and a PC that sent to 41000 would never meet). 0011's option table
+gained SO_KEEPALIVE and SO_OOBINLINE, the two 0007 options it lacked.
 
 This document condenses four read-only investigations from 2026-10-14 (join and spawn path,
 campaign systems, patch mechanism, network). A second pass re-checked each one, and the corrections
