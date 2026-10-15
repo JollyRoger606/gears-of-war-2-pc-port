@@ -4,6 +4,7 @@
 // native script packages, by replacing the recompiled FStartupPackages::LoadAll.
 
 #include "gow2_script_patches.h"
+#include "gow2_coop_network.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -17,6 +18,7 @@
 #include <rex/ppc.h>
 #include <rex/runtime.h>
 #include <rex/system/function_dispatcher.h>
+#include <rex/system/xmemory.h>
 
 #include "gow2_guest.h"
 
@@ -32,6 +34,12 @@ REXCVAR_DEFINE_BOOL(gow2_coop_patch_fail_test, false, "Coop",
                     "then be skipped and the game stays retail");
 
 namespace rex::glue {
+
+static_assert(guest::PhysicalHostOffset(0xDFFFFFFFu) ==
+                      rex::memory::detail::PhysicalHostOffset(0xDFFFFFFFu) &&
+                  guest::PhysicalHostOffset(0xE0000000u) ==
+                      rex::memory::detail::PhysicalHostOffset(0xE0000000u),
+              "gow2_guest.h must place the 0xE0000000 heap where the runtime maps it");
 
 namespace {
 
@@ -134,6 +142,15 @@ void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
 }
 
 }  // namespace
+
+void EnableSystemLinkForCoop() {
+  const int players = REXCVAR_GET(gow2_coop_players);
+  if (players < kFirstCoopCount) return;
+  if (rex::cvar::GetFlagSource("net_link_active") != rex::cvar::Source::kDefault) return;
+  if (rex::cvar::SetFlagByName("net_link_active", "true"))
+    REXLOG_INFO("SCRIPTPATCH coop: gow2_coop_players={} turns System Link on (net_link_active=true)",
+                players);
+}
 
 }  // namespace rex::glue
 

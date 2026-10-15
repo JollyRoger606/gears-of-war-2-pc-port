@@ -15,6 +15,7 @@
 #include <rex/rex_app.h>
 
 #include "gow2_coalesced.h"
+#include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
 #include "gow2_gpu_pick.h"
 #include "gow2_mouse_aim.h"
@@ -254,6 +255,7 @@ class Gow2App : public rex::ReXApp {
     PrepareCoalesced();
     PickRenderGpu();
     SetUpscaleTarget();
+    rex::glue::EnableSystemLinkForCoop();
     config.gpu_plugin = "xenos";
     // Guest content names are raw bytes; the runtime's UTF-8 decoder throws on a bad lead byte.
     rex::glue::InstallUtf8Guard();

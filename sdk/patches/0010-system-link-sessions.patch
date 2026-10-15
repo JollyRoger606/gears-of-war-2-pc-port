@@ -84,10 +84,10 @@ index 0000000..6aeb60b
 +}  // namespace rex::kernel::xam
 diff --git a/include/rex/system/system_link.h b/include/rex/system/system_link.h
 new file mode 100644
-index 0000000..cae697b
+index 0000000..68ce93a
 --- /dev/null
 +++ b/include/rex/system/system_link.h
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,71 @@
 +#pragma once
 +// Every IPv4 address here is a host-order uint32_t (127.0.0.1 = 0x7F000001).
 +
@@ -105,6 +105,8 @@ index 0000000..cae697b
 +
 +constexpr uint32_t kLoopbackIp = 0x7F000001;
 +constexpr uint32_t kBroadcastIp = 0xFFFFFFFF;
++// What the game saw before System Link existed in the port; still used while the link is off.
++constexpr uint64_t kOfflineXuid = 0xB13EBABEBABEBABEull;
 +// 58410A1F refuses XUIDs with either of these bits set (see UserProfile).
 +constexpr uint64_t kXuidForbiddenBits = 0x00C0000000000000ull;
 +constexpr uint64_t kInstallXuidPrefix = 0xB13E000000000000ull;
@@ -120,6 +122,8 @@ index 0000000..cae697b
 +using MacAddress = std::array<uint8_t, kMacSize>;
 +using XnAddrBytes = std::array<uint8_t, kXnAddrSize>;
 +
++enum class XuidSource { kSetting, kOffline, kInstall };
++
 +std::optional<uint32_t> ParseIpv4(std::string_view text);
 +std::vector<uint32_t> ParseIpv4List(std::string_view text);
 +std::string FormatIpv4(uint32_t ip);
@@ -127,7 +131,10 @@ index 0000000..cae697b
 +bool IsUsableXuid(uint64_t xuid);
 +uint64_t MakeInstallXuid(uint64_t random_bits);
 +std::string FormatXuid(uint64_t xuid);
-+uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t> bind_ip);
++bool IsLanAddress(uint32_t ip);
++uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t> bind_ip,
++                        std::optional<uint32_t> detected_ip);
++XuidSource ChooseXuidSource(bool xuid_setting_usable, bool link_active);
 +uint64_t SplitMix64(uint64_t& state);
 +MacAddress MakeInstanceMac(uint64_t xuid, uint32_t local_ip);
 +XnAddrBytes BuildXnAddr(uint32_t local_ip, const MacAddress& mac);
@@ -146,6 +153,7 @@ index 0000000..cae697b
 +std::vector<uint32_t> BroadcastTargets();
 +std::string Gamertag();
 +uint64_t ResolveXuid(const std::filesystem::path& user_data_root);
++std::optional<uint32_t> DetectRoutedIpv4();
 +XnAddrBytes TitleXnAddr(uint64_t xuid);
 +void FillRandom(std::span<uint8_t> out);
 +uint64_t RandomNonZero64();
@@ -1254,10 +1262,10 @@ index 697399c..c8709c4 100644
      REXSYS_ERROR("KernelState constructed but shared_kernel_state_ already set");
 diff --git a/src/system/system_link.cpp b/src/system/system_link.cpp
 new file mode 100644
-index 0000000..2cc9af7
+index 0000000..4b1eadd
 --- /dev/null
 +++ b/src/system/system_link.cpp
-@@ -0,0 +1,368 @@
+@@ -0,0 +1,388 @@
 +#include <rex/system/system_link.h>
 +
 +#include <algorithm>
@@ -1541,14 +1549,34 @@ index 0000000..2cc9af7
 +  return result;
 +}
 +
-+uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t> bind_ip) {
++bool IsLanAddress(uint32_t ip) {
++  constexpr uint32_t kLoopbackNet = 0x7F000000;
++  constexpr uint32_t kLoopbackMask = 0xFF000000;
++  constexpr uint32_t kMulticastNet = 0xE0000000;
++  constexpr uint32_t kMulticastMask = 0xF0000000;
++  return ip != kAnyIp && ip != kBroadcastIp && (ip & kLoopbackMask) != kLoopbackNet &&
++         (ip & kMulticastMask) != kMulticastNet;
++}
++
++uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t> bind_ip,
++                        std::optional<uint32_t> detected_ip) {
 +  if (local_ip.has_value()) {
 +    return *local_ip;
 +  }
 +  if (bind_ip.has_value()) {
 +    return *bind_ip;
 +  }
++  if (detected_ip.has_value() && IsLanAddress(*detected_ip)) {
++    return *detected_ip;
++  }
 +  return kLoopbackIp;
++}
++
++XuidSource ChooseXuidSource(bool xuid_setting_usable, bool link_active) {
++  if (xuid_setting_usable) {
++    return XuidSource::kSetting;
++  }
++  return link_active ? XuidSource::kInstall : XuidSource::kOffline;
 +}
 +
 +uint64_t SplitMix64(uint64_t& state) {
@@ -1628,29 +1656,43 @@ index 0000000..2cc9af7
 +}  // namespace rex::system::system_link
 diff --git a/src/system/system_link_settings.cpp b/src/system/system_link_settings.cpp
 new file mode 100644
-index 0000000..636fc5f
+index 0000000..9cabf47
 --- /dev/null
 +++ b/src/system/system_link_settings.cpp
-@@ -0,0 +1,233 @@
+@@ -0,0 +1,371 @@
 +#include <algorithm>
 +#include <cstring>
 +#include <fstream>
 +#include <mutex>
 +#include <random>
-+#include <set>
 +#include <string>
 +#include <system_error>
 +
 +#include <rex/cvar.h>
 +#include <rex/logging.h>
++#include <rex/platform.h>
 +#include <rex/system/system_link.h>
 +
-+REXCVAR_DEFINE_BOOL(net_link_active, true, "Network",
-+                    "Report an active 100 Mbps Ethernet link to the game. false reports an "
-+                    "unplugged cable, which also turns campaign co-op (System Link) off");
++#if REX_PLATFORM_WIN32
++#include <WinSock2.h>
++
++#include <WS2tcpip.h>
++#else
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <unistd.h>
++#endif
++
++REXCVAR_DEFINE_BOOL(net_link_active, false, "Network",
++                    "Report an active 100 Mbps Ethernet link to the game, which turns System Link "
++                    "(LAN play, campaign co-op) on. false: an unplugged cable, as on a 360 without "
++                    "one; the game opens no LAN session and sees the fixed offline XUID")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +REXCVAR_DEFINE_STRING(net_local_ip, "", "Network",
 +                      "IPv4 address this instance advertises to System Link peers (its XNADDR). "
-+                      "Empty: net_bind_ip when set, else 127.0.0.1")
++                      "Empty: net_bind_ip when set, else the address of the network adapter that "
++                      "holds the default route, else 127.0.0.1")
 +    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +REXCVAR_DEFINE_STRING(net_bind_ip, "", "Network",
 +                      "Bind the game's sockets to this IPv4 address instead of 0.0.0.0, so several "
@@ -1660,7 +1702,8 @@ index 0000000..636fc5f
 +    net_broadcast_targets, "", "Network",
 +    "Comma-separated IPv4 addresses. Each broadcast the game sends goes out as one "
 +    "unicast copy per address, skipping this instance's own. Needed with "
-+    "net_bind_ip. Empty: broadcasts go out unchanged");
++    "net_bind_ip. Empty: broadcasts go out unchanged")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +REXCVAR_DEFINE_UINT64(net_random_seed, 0, "Network",
 +                      "Non-zero: XNetRandom, session keys and nonces come from a deterministic "
 +                      "stream with this seed (tests). 0: real randomness")
@@ -1668,8 +1711,9 @@ index 0000000..636fc5f
 +REXCVAR_DEFINE_STRING(
 +    user_xuid, "", "Kernel",
 +    "XUID the game sees for the signed-in player, 1-16 hex digits with bits 54-55 "
-+    "clear. Empty: a random XUID made once per install and kept in "
-+    "system_link_xuid.txt in the user data folder")
++    "clear. Empty: with net_link_active, a random XUID made once per install and kept "
++    "in system_link_xuid.txt in the user data folder; without it, the fixed offline "
++    "XUID B13EBABEBABEBABE")
 +    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +REXCVAR_DEFINE_STRING(user_name, "User", "Kernel",
 +                      "Gamertag the game shows for the signed-in player (up to 15 characters)")
@@ -1681,15 +1725,20 @@ index 0000000..636fc5f
 +constexpr size_t kMaxGamertagLength = 15;
 +constexpr const char* kDefaultGamertag = "User";
 +constexpr size_t kRandomWordSize = sizeof(uint64_t);
++// Any address off the local networks makes the routing table pick the default-route adapter;
++// connect() on UDP sends nothing. 192.0.2.1 is TEST-NET-1 (RFC 5737).
++constexpr uint32_t kRouteProbeIp = 0xC0000201;
++constexpr uint16_t kRouteProbePort = 9;
 +
-+void WarnOnce(const std::string& message) {
-+  static std::mutex mutex;
-+  static std::set<std::string> warned;
-+  std::lock_guard lock(mutex);
-+  if (warned.insert(message).second) {
-+    REXLOG_WARN("{}", message);
-+  }
-+}
++// The settings are read once, when the kernel starts: the network functions run on game threads
++// while the settings panel can rewrite the cvars, and the advertised address must not move.
++struct NetworkSettings {
++  bool link_active = false;
++  std::optional<uint32_t> bind_ip;
++  uint32_t local_ip = kLoopbackIp;
++  std::vector<uint32_t> broadcast_targets;
++  uint64_t random_seed = 0;
++};
 +
 +std::optional<uint32_t> ParseIpSetting(std::string_view setting_name, const std::string& value) {
 +  if (value.empty()) {
@@ -1697,13 +1746,83 @@ index 0000000..636fc5f
 +  }
 +  auto ip = ParseIpv4(value);
 +  if (!ip) {
-+    WarnOnce(fmt::format("{} '{}' is not an IPv4 address; ignored", setting_name, value));
++    REXLOG_WARN("{} '{}' is not an IPv4 address; ignored", setting_name, value);
 +  }
 +  return ip;
 +}
 +
-+std::optional<uint32_t> ConfiguredLocalIp() {
-+  return ParseIpSetting("net_local_ip", REXCVAR_GET(net_local_ip));
++std::optional<uint32_t> ReadBindIp() {
++  auto ip = ParseIpSetting("net_bind_ip", REXCVAR_GET(net_bind_ip));
++  if (ip && *ip == 0) {
++    return std::nullopt;
++  }
++  return ip;
++}
++
++std::vector<uint32_t> ReadBroadcastTargets() {
++  std::string value = REXCVAR_GET(net_broadcast_targets);
++  auto targets = ParseIpv4List(value);
++  if (targets.empty() && !value.empty()) {
++    REXLOG_WARN("net_broadcast_targets '{}' holds no IPv4 address; ignored", value);
++  }
++  return targets;
++}
++
++std::optional<uint32_t> DetectedIpWhenNeeded(bool link_active, std::optional<uint32_t> local_ip,
++                                             std::optional<uint32_t> bind_ip) {
++  if (!link_active || local_ip || bind_ip) {
++    return std::nullopt;
++  }
++  return DetectRoutedIpv4();
++}
++
++const char* LocalIpOrigin(const NetworkSettings& s, std::optional<uint32_t> configured) {
++  if (configured) {
++    return "net_local_ip";
++  }
++  if (s.bind_ip) {
++    return "net_bind_ip";
++  }
++  return s.local_ip == kLoopbackIp ? "no network adapter found" : "default-route adapter";
++}
++
++void WarnIfPeersCannotReach(const NetworkSettings& s) {
++  if (!s.link_active || s.local_ip != kLoopbackIp || !s.broadcast_targets.empty()) {
++    return;
++  }
++  REXLOG_WARN(
++      "[netlink] System Link advertises 127.0.0.1: players on other PCs cannot join. Set "
++      "net_local_ip to this PC's LAN address");
++}
++
++void LogNetworkSettings(const NetworkSettings& s, std::optional<uint32_t> configured_local) {
++  if (!s.link_active) {
++    REXLOG_INFO("[netlink] link reported down (net_link_active=false): no System Link");
++    return;
++  }
++  REXLOG_INFO("[netlink] link active: local {} ({}), bind {}, {} broadcast target(s)",
++              FormatIpv4(s.local_ip), LocalIpOrigin(s, configured_local),
++              s.bind_ip ? FormatIpv4(*s.bind_ip) : std::string("0.0.0.0"),
++              s.broadcast_targets.size());
++  WarnIfPeersCannotReach(s);
++}
++
++NetworkSettings ReadNetworkSettings() {
++  NetworkSettings s;
++  s.link_active = REXCVAR_GET(net_link_active);
++  s.bind_ip = ReadBindIp();
++  auto configured_local = ParseIpSetting("net_local_ip", REXCVAR_GET(net_local_ip));
++  s.local_ip = ResolveLocalIp(configured_local, s.bind_ip,
++                              DetectedIpWhenNeeded(s.link_active, configured_local, s.bind_ip));
++  s.broadcast_targets = ReadBroadcastTargets();
++  s.random_seed = REXCVAR_GET(net_random_seed);
++  LogNetworkSettings(s, configured_local);
++  return s;
++}
++
++const NetworkSettings& Settings() {
++  static const NetworkSettings settings = ReadNetworkSettings();
++  return settings;
 +}
 +
 +std::optional<uint64_t> ConfiguredXuid() {
@@ -1714,8 +1833,7 @@ index 0000000..636fc5f
 +  auto xuid = ParseXuid(value);
 +  if (!xuid) {
 +    REXLOG_ERROR(
-+        "user_xuid '{}' is not a usable XUID (1-16 hex digits, bits 54-55 clear); using the "
-+        "install XUID",
++        "user_xuid '{}' is not a usable XUID (1-16 hex digits, bits 54-55 clear); ignored",
 +        value);
 +  }
 +  return xuid;
@@ -1758,6 +1876,15 @@ index 0000000..636fc5f
 +  }
 +}
 +
++uint64_t InstallXuid(const std::filesystem::path& user_data_root) {
++  if (auto stored = ReadInstallXuid(user_data_root)) {
++    return *stored;
++  }
++  uint64_t created = MakeInstallXuid(RandomNonZero64());
++  WriteInstallXuid(user_data_root, created);
++  return created;
++}
++
 +void CopyWord(std::span<uint8_t> out, size_t offset, uint64_t word) {
 +  size_t count = std::min(kRandomWordSize, out.size() - offset);
 +  std::memcpy(out.data() + offset, &word, count);
@@ -1765,13 +1892,8 @@ index 0000000..636fc5f
 +
 +void FillFromSeededStream(std::span<uint8_t> out, uint64_t seed) {
 +  static std::mutex mutex;
-+  static uint64_t stream_seed = 0;
-+  static uint64_t stream_state = 0;
++  static uint64_t stream_state = seed;
 +  std::lock_guard lock(mutex);
-+  if (stream_seed != seed) {
-+    stream_seed = seed;
-+    stream_state = seed;
-+  }
 +  for (size_t offset = 0; offset < out.size(); offset += kRandomWordSize) {
 +    CopyWord(out, offset, SplitMix64(stream_state));
 +  }
@@ -1787,10 +1909,62 @@ index 0000000..636fc5f
 +  }
 +}
 +
++#if REX_PLATFORM_WIN32
++using ProbeSocket = SOCKET;
++constexpr ProbeSocket kNoProbeSocket = INVALID_SOCKET;
++void CloseProbeSocket(ProbeSocket s) {
++  closesocket(s);
++}
++#else
++using ProbeSocket = int;
++constexpr ProbeSocket kNoProbeSocket = -1;
++void CloseProbeSocket(ProbeSocket s) {
++  close(s);
++}
++#endif
++
++std::optional<uint32_t> SourceIpTowards(uint32_t destination_ip, uint16_t port) {
++  ProbeSocket s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
++  if (s == kNoProbeSocket) {
++    return std::nullopt;
++  }
++  sockaddr_in destination = {};
++  destination.sin_family = AF_INET;
++  destination.sin_port = htons(port);
++  destination.sin_addr.s_addr = htonl(destination_ip);
++  sockaddr_in source = {};
++  socklen_t source_size = sizeof(source);
++  bool routed =
++      connect(s, reinterpret_cast<sockaddr*>(&destination), sizeof(destination)) == 0 &&
++      getsockname(s, reinterpret_cast<sockaddr*>(&source), &source_size) == 0;
++  CloseProbeSocket(s);
++  if (!routed) {
++    return std::nullopt;
++  }
++  return ntohl(source.sin_addr.s_addr);
++}
++
 +}  // namespace
 +
++std::optional<uint32_t> DetectRoutedIpv4() {
++#if REX_PLATFORM_WIN32
++  WSADATA wsa_data;
++  if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
++    return std::nullopt;
++  }
++#endif
++  auto ip = SourceIpTowards(kRouteProbeIp, kRouteProbePort);
++#if REX_PLATFORM_WIN32
++  WSACleanup();
++#endif
++  if (ip && !IsLanAddress(*ip)) {
++    return std::nullopt;
++  }
++  return ip;
++}
++
 +bool LinkActive() {
-+  return REXCVAR_GET(net_link_active);
++  return Settings().link_active;
 +}
 +
 +uint32_t EthernetLinkStatus() {
@@ -1798,15 +1972,11 @@ index 0000000..636fc5f
 +}
 +
 +std::optional<uint32_t> BindIp() {
-+  auto ip = ParseIpSetting("net_bind_ip", REXCVAR_GET(net_bind_ip));
-+  if (ip && *ip == 0) {
-+    return std::nullopt;
-+  }
-+  return ip;
++  return Settings().bind_ip;
 +}
 +
 +uint32_t LocalIp() {
-+  return ResolveLocalIp(ConfiguredLocalIp(), BindIp());
++  return Settings().local_ip;
 +}
 +
 +uint32_t SelfIp() {
@@ -1814,12 +1984,7 @@ index 0000000..636fc5f
 +}
 +
 +std::vector<uint32_t> BroadcastTargets() {
-+  std::string value = REXCVAR_GET(net_broadcast_targets);
-+  auto targets = ParseIpv4List(value);
-+  if (targets.empty() && !value.empty()) {
-+    WarnOnce(fmt::format("net_broadcast_targets '{}' holds no IPv4 address; ignored", value));
-+  }
-+  return targets;
++  return Settings().broadcast_targets;
 +}
 +
 +std::string Gamertag() {
@@ -1831,15 +1996,16 @@ index 0000000..636fc5f
 +}
 +
 +uint64_t ResolveXuid(const std::filesystem::path& user_data_root) {
-+  if (auto configured = ConfiguredXuid()) {
-+    return *configured;
++  auto configured = ConfiguredXuid();
++  switch (ChooseXuidSource(configured.has_value(), LinkActive())) {
++    case XuidSource::kSetting:
++      return *configured;
++    case XuidSource::kInstall:
++      return InstallXuid(user_data_root);
++    case XuidSource::kOffline:
++      break;
 +  }
-+  if (auto stored = ReadInstallXuid(user_data_root)) {
-+    return *stored;
-+  }
-+  uint64_t created = MakeInstallXuid(RandomNonZero64());
-+  WriteInstallXuid(user_data_root, created);
-+  return created;
++  return kOfflineXuid;
 +}
 +
 +XnAddrBytes TitleXnAddr(uint64_t xuid) {
@@ -1848,7 +2014,7 @@ index 0000000..636fc5f
 +}
 +
 +void FillRandom(std::span<uint8_t> out) {
-+  uint64_t seed = REXCVAR_GET(net_random_seed);
++  uint64_t seed = Settings().random_seed;
 +  if (seed != 0) {
 +    FillFromSeededStream(out, seed);
 +  } else {
@@ -2341,10 +2507,10 @@ index 0000000..6249a4e
 +}
 diff --git a/tests/unit/system/system_link_test.cpp b/tests/unit/system/system_link_test.cpp
 new file mode 100644
-index 0000000..54fc84f
+index 0000000..4d7592c
 --- /dev/null
 +++ b/tests/unit/system/system_link_test.cpp
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,266 @@
 +#include <catch2/catch_test_macros.hpp>
 +
 +#include <array>
@@ -2430,10 +2596,39 @@ index 0000000..54fc84f
 +}
 +
 +TEST_CASE("system_link: ResolveLocalIp selects local address", "[system][system_link]") {
-+  CHECK(ResolveLocalIp(0x0A000001u, 0x0A000002u) == 0x0A000001u);
-+  CHECK(ResolveLocalIp(0x0A000001u, std::nullopt) == 0x0A000001u);
-+  CHECK(ResolveLocalIp(std::nullopt, 0x0A000002u) == 0x0A000002u);
-+  CHECK(ResolveLocalIp(std::nullopt, std::nullopt) == kLoopbackIp);
++  CHECK(ResolveLocalIp(0x0A000001u, 0x0A000002u, std::nullopt) == 0x0A000001u);
++  CHECK(ResolveLocalIp(0x0A000001u, std::nullopt, std::nullopt) == 0x0A000001u);
++  CHECK(ResolveLocalIp(std::nullopt, 0x0A000002u, std::nullopt) == 0x0A000002u);
++  CHECK(ResolveLocalIp(std::nullopt, std::nullopt, std::nullopt) == kLoopbackIp);
++  CHECK(ResolveLocalIp(std::nullopt, std::nullopt, 0xC0A80114u) == 0xC0A80114u);
++  CHECK(ResolveLocalIp(0x0A000001u, std::nullopt, 0xC0A80114u) == 0x0A000001u);
++  CHECK(ResolveLocalIp(std::nullopt, 0x0A000002u, 0xC0A80114u) == 0x0A000002u);
++  CHECK(ResolveLocalIp(std::nullopt, std::nullopt, 0x7F000001u) == kLoopbackIp);
++  CHECK(ResolveLocalIp(std::nullopt, std::nullopt, 0u) == kLoopbackIp);
++  CHECK(ResolveLocalIp(std::nullopt, std::nullopt, kBroadcastIp) == kLoopbackIp);
++  CHECK(ResolveLocalIp(std::nullopt, std::nullopt, 0xE0000001u) == kLoopbackIp);
++}
++
++TEST_CASE("system_link: IsLanAddress accepts unicast LAN addresses",
++          "[system][system_link]") {
++  CHECK(!IsLanAddress(0u));
++  CHECK(!IsLanAddress(kBroadcastIp));
++  CHECK(!IsLanAddress(0x7F000001u));
++  CHECK(!IsLanAddress(0x7F000002u));
++  CHECK(!IsLanAddress(0xE0000001u));
++  CHECK(IsLanAddress(0xC0A80114u));
++  CHECK(IsLanAddress(0x0A000005u));
++  CHECK(IsLanAddress(0xAC100001u));
++  CHECK(IsLanAddress(0xA9FE0304u));
++}
++
++TEST_CASE("system_link: ChooseXuidSource keeps the offline XUID while the link is off",
++          "[system][system_link]") {
++  CHECK(ChooseXuidSource(true, true) == XuidSource::kSetting);
++  CHECK(ChooseXuidSource(true, false) == XuidSource::kSetting);
++  CHECK(ChooseXuidSource(false, true) == XuidSource::kInstall);
++  CHECK(ChooseXuidSource(false, false) == XuidSource::kOffline);
++  CHECK(IsUsableXuid(kOfflineXuid));
 +}
 +
 +TEST_CASE("system_link: SplitMix64 mixes state", "[system][system_link]") {
