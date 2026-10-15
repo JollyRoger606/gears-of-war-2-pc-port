@@ -18,6 +18,7 @@
 #include <rex/system.h>
 
 #include "gow2_coalesced.h"
+#include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
 #include "gow2_gpu_pick.h"
 #include "gow2_mouse_aim.h"
@@ -206,10 +207,12 @@ class Gow2App : public rex::ReXApp {
 #endif
   }
 
+  static bool IsSetByPlayer(const char* name) {
+    return rex::cvar::GetFlagSource(name) != rex::cvar::Source::kDefault;
+  }
+
   static bool SetIfUnset(const char* name, const std::string& value) {
-    if (rex::cvar::GetFlagSource(name) != rex::cvar::Source::kDefault) {
-      return false;
-    }
+    if (IsSetByPlayer(name)) return false;
     return rex::cvar::SetFlagByName(name, value);
   }
 
@@ -298,6 +301,7 @@ class Gow2App : public rex::ReXApp {
     PrepareCoalesced();
     PickRenderGpu();
     SetUpscaleTarget();
+    rex::glue::EnableSystemLinkForCoop();
     config.gpu_plugin = "xenos";
     // Guest content names are raw bytes; the runtime's UTF-8 decoder throws on a bad lead byte.
     rex::glue::InstallUtf8Guard();
@@ -312,10 +316,13 @@ class Gow2App : public rex::ReXApp {
     paths.game_data_root = ResolveContentRoot(paths.game_data_root);
     paths.update_data_root = paths.game_data_root / "$SystemUpdate";
 #ifdef _WIN32
+    // An explicit --user_data_root (cache then defaults to its cache folder) or --cache_root wins:
+    // one PC can run several instances, each with its own saves, profile and shader cache.
     if (wchar_t local[MAX_PATH]{}; GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH)) {
       const std::filesystem::path base = std::filesystem::path(local) / L"GearsOfWar2PC";
-      paths.cache_root = base / "cache";
-      paths.user_data_root = base / "user";
+      const bool own_user_root = IsSetByPlayer("user_data_root");
+      if (!own_user_root) paths.user_data_root = base / "user";
+      if (!own_user_root && !IsSetByPlayer("cache_root")) paths.cache_root = base / "cache";
       std::error_code ec;
       std::filesystem::create_directories(paths.cache_root, ec);
       std::filesystem::create_directories(paths.user_data_root, ec);

@@ -23,6 +23,7 @@
 #include <iterator>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <vector>
 
 #if defined(__ANDROID__)
@@ -41,7 +42,7 @@ namespace rex::glue {
 
 namespace {
 
-constexpr int kVersion = 4;  // bump when the edit definitions change (invalidates cached copies)
+constexpr int kVersion = 5;  // bump when the edit definitions change (invalidates cached copies)
 
 // Bundle layout: BE u32 file count; per file a name, BE u32 section count; per section a name and
 // BE u32 key count; per key a key and a value. Strings are a BE int32 length, negative = UTF-16LE
@@ -154,16 +155,42 @@ std::vector<uint8_t> Serialize(const std::vector<IniFile>& files) {
       }
     }
   }
-  // Trailing zero padding: the game's parser reads past the end of the file image it loaded. With
-  // an edited bundle shorter than the original that read failed and the game stopped at boot with
-  // a disc read error; 4 KiB of zeros fixes it (measured). The reader is count driven, so the
-  // padding is never read as data. GOW2_COALESCED_PAD overrides the amount.
-  {
-    size_t n = 4096;
-    if (const char* pad = std::getenv("GOW2_COALESCED_PAD")) n = size_t(std::atoi(pad));
-    o.resize(o.size() + n, 0);
-  }
   return o;
+}
+
+std::string LowerA(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+  return s;
+}
+
+// Xbox360TOC.txt lines are "FileSize UncompressedSize StartSector Path MD5"; lower-case file name
+// -> FileSize. The first entry for a name wins, as in the game's own parser.
+std::unordered_map<std::string, uint64_t> ReadTocFileSizes(const std::filesystem::path& toc) {
+  std::unordered_map<std::string, uint64_t> sizes;
+  std::ifstream in(toc, std::ios::binary);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    const size_t a = line.find(' ');
+    const size_t b = a == std::string::npos ? a : line.find(' ', a + 1);
+    const size_t c = b == std::string::npos ? b : line.find(' ', b + 1);
+    if (c == std::string::npos) continue;
+    std::string path = line.substr(c + 1, line.find(' ', c + 1) - c - 1);
+    const size_t slash = path.find_last_of("\\/");
+    if (slash != std::string::npos) path.erase(0, slash + 1);
+    sizes.emplace(LowerA(path), std::strtoull(line.c_str(), nullptr, 10));
+  }
+  return sizes;
+}
+
+// The game reads a bundle at its TOC FileSize (the file reader takes its size from the TOC,
+// sub_827F5508) and checks the SHA-1 of exactly those bytes against HashSec (sub_82225018 wraps them
+// in FBufferReaderWithSHA). A served file of that exact size keeps the read and the hash right; the
+// parser is count driven, so the zero padding is never read as data. A longer edit cannot be served.
+bool PadToSize(std::vector<uint8_t>* bytes, uint64_t size) {
+  if (bytes->size() > size) return false;
+  bytes->resize(size_t(size), 0);
+  return true;
 }
 
 std::u16string W(const std::string& s) {
@@ -325,7 +352,9 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   const std::filesystem::path dir = game_root / "GearGame" / "CookedXenon";
   const std::filesystem::path out_dir = cache_dir / "coalesced";
   std::filesystem::create_directories(out_dir, ec);
-  int files_done = 0, values = 0, reused = 0, unreadable = 0, unmatched = 0;
+  const std::unordered_map<std::string, uint64_t> toc_sizes =
+      ReadTocFileSizes(game_root / "GearGame" / "Xbox360TOC.txt");
+  int files_done = 0, values = 0, reused = 0, unreadable = 0, unmatched = 0, too_long = 0;
   for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
     const std::filesystem::path src = it->path();
     const std::string name = src.filename().string();
@@ -364,7 +393,12 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
         ++unmatched;
         continue;
       }
-      const std::vector<uint8_t> patched = Serialize(files);
+      std::vector<uint8_t> patched = Serialize(files);
+      const auto toc = toc_sizes.find(LowerA(name));
+      if (!PadToSize(&patched, toc != toc_sizes.end() ? toc->second : uint64_t(size))) {
+        ++too_long;
+        continue;
+      }
       {
         std::ofstream of(dst, std::ios::binary | std::ios::trunc);
         if (!of) continue;
@@ -392,7 +426,8 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   }
   if (files_done == 0) {
     res.summary = "COALESCED: no bundle could be prepared (" + std::to_string(unreadable) +
-                  " unreadable, " + std::to_string(unmatched) +
+                  " unreadable, " + std::to_string(too_long) + " longer than their TOC size, " +
+                  std::to_string(unmatched) +
                   " without the edited settings); the game files are used unchanged";
   } else {
     res.summary = "COALESCED: " + groups + "applied to " + std::to_string(files_done) + " file(s) (" +

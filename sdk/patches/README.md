@@ -13,6 +13,7 @@ Both SDK builds apply every patch here in file-name order on top of ReXGlue comm
 | `0005-pad-deadzone-and-file-overrides.patch` | `GOW2_VFS_OVERRIDES` lets the game read individual files from elsewhere (a cached, edited copy of the player's own Coalesced bundles) without touching the game folder, and `pad_right_stick_deadzone` gives physical controllers a radial right-stick dead zone, so the game's own look dead zone can be turned off for the mouse. |
 | `0006-mnk-mouse-stick-switch.patch` | `mnk_mouse_stick` (on by default) lets the game stop the keyboard/mouse driver from turning mouse motion into right-stick deflection while it keeps the mouse captured, so the port can hand the mouse to the game's own PC mouse path instead. |
 | `0007-android-arm64-port.patch` | The Android arm64 port of the runtime (NDK r29+, API 29). Build: an `android-arm64` platform, no `-march=armv8-a` that would lower the game's `armv8.2-a`, SDL3 as the shared `libSDL3.so` SDLActivity loads (no X11/Wayland/ALSA), `SDL_main` from `windowed_app_main_sdl.cpp`, Vulkan from the system `libvulkan`, the SDK version read from the SDK's own git history under `add_subdirectory`. Core: `GetAndroidApiLevel()` (`main_android`), guest memory through `ASharedMemory` with a `memfd_create` fallback (no `/dev/ashmem`), Bionic fixes (64-bit `off_t`, no robust mutexes, `clock_cast`), an AArch64 fiber switch (Bionic has no `ucontext`), unclaimed `SIGSEGV`/`SIGBUS`/`SIGILL` chained to the previous handler instead of looping, `REX_EXECUTABLE_FOLDER` for config and logs, `content://` stubs. UI: an `ANativeWindow` surface from the SDL window. The GPU plugin is loaded by name from the APK. Input: one recursive lock across the `InputSystem` entry points and a non-throwing `utf8::next` (the Windows build gets both from the port's own guards). `XnAddrStatus` constants get definitions. Guest sockets: ports 1-1023 bind 30000 higher (apps may not bind them), and `SOL_SOCKET` options and `FIONBIO`/`FIONREAD` with Winsock numbers are translated. Touch: the SDL window delivers finger events as `TouchEvent` and drops the mouse events SDL synthesizes from fingers and pens, an `ImGuiDialog` can say it does not need repainting at the display's refresh rate (`WantsContinuousPaint`), and the ImGui drawer releases a touch whose lift arrived before any frame saw the press one frame later, so a quick tap on the settings overlay is a click. FFmpeg runs its C code: `thirdparty/ffmpeg-android/config.h` comes before FFmpeg's own `config.h` and turns the aarch64 assembly off, so the FFmpeg submodule is not modified. Every change is behind `ANDROID` / `REX_PLATFORM_ANDROID` / `__ANDROID__`, so Windows behaves as before. |
+| `0010-system-link-sessions.patch` | System Link milestone M2a (`docs/COOP_N_PLAYERS.md`, Stage 1, item 2). Sockets: `sendto`/`recvfrom` addresses in network order (port 1000 no longer leaves as 59395), `from` written only on success, guest WSA error codes from `sendto`, `setsockopt` and `bind`, `SIO_UDP_CONNRESET` off on Windows UDP sockets, `getsockname` implemented (the engine binds its game socket to port 0 and reads the port back; without it every join failed), and `net_traffic_log_sec` logs bytes and packets per peer. XNet: System Link is opt-in: `net_link_active` (off by default, so a solo game sees an unplugged cable as before; `gow2_coop_players` 3+ turns it on) makes the link report active, `XNetGetTitleXnAddr` gives `net_local_ip` (default: the default-route adapter's address) and a locally administered MAC per instance, `XNetXnAddrToInAddr` returns the peer's own address, `XNetRegisterKey`/`UnregisterKey`/`UnregisterInAddr` succeed, `XNetRandom` is random (`net_random_seed` makes it a fixed stream). Sessions (`include/rex/kernel/xam/xsession.h`): one handle and object per session, a host's `XSessionCreate` fills `XSESSION_INFO` (system-link XNKID, XNADDR, XNKEY) and the nonce, joins and leaves keep members, `XSessionGetDetails` is filled. Identity: the game sees `user_xuid` (default with the link on: random per install, kept in `system_link_xuid.txt` in the user data folder; with the link off: the fixed offline XUID) and `user_name`, while saves stay under the old fixed XUID and name. One PC, several instances: `net_bind_ip` and `net_broadcast_targets`. The network settings are read once at kernel start and need a restart. Unit tests in `tests/unit/system/system_link_test.cpp` and `tests/unit/kernel/xsession_test.cpp`. Android: only an NDK arm64 `-fsyntax-only` check so far; not built or linked there yet. On Android its `Bind` keeps 0007's +30000 shift for guest ports below 1024. |
 
 ## Working on a patch
 
@@ -21,10 +22,12 @@ After editing, `scripts/verify-sdk-patch.ps1 -Worktree <worktree>` applies the w
 the prepared build tree and compiles both DLLs in seconds; then regenerate the patch with
 `git diff --binary HEAD > sdk/patches/<name>.patch` and run `scripts/build-sdk.ps1`.
 
-The Android port is worked on in a worktree of `923c1a5` with the whole series applied (committed
-or not; only the files count). Build it with `scripts/build-android.ps1 -SdkSource <worktree>`, then regenerate
+The Android port is worked on in a worktree of `923c1a5` with 0002-0007 applied and nothing after
+them (committed or not; only the files count). Build it with `scripts/build-android.ps1 -SdkSource <worktree>`, then regenerate
 0007 as the difference between `923c1a5` plus 0002-0006 and the worktree, using a temporary index so
-the worktree's own index and commits stay as they are (Git Bash, from the worktree):
+the worktree's own index and commits stay as they are. A worktree that also carries 0008 or later
+would fold those patches into 0007, and applying them after it would then fail; the recipe takes
+them back out of `$port` first (Git Bash, from the worktree):
 
 ```sh
 patches=/c/path/to/gow2-recomp/sdk/patches
@@ -32,12 +35,18 @@ export GIT_INDEX_FILE=$(mktemp -u)
 git read-tree 923c1a5
 for p in "$patches"/000[2-6]-*.patch; do git apply --cached "$p"; done
 base=$(git write-tree)
-git read-tree HEAD && git add -A && port=$(git write-tree)
+git read-tree HEAD && git add -A
+for p in $(ls "$patches"/*.patch | sort -r); do   # 0008 and later, newest first
+  case $(basename "$p") in 000[2-7]-*) continue ;; esac
+  git apply --cached -R --check "$p" 2>/dev/null && git apply --cached -R "$p"
+done
+port=$(git write-tree)
 rm -f "$GIT_INDEX_FILE"; unset GIT_INDEX_FILE
 git diff --binary "$base" "$port" > "$patches/0007-android-arm64-port.patch"
 ```
 
 `scripts/build-android.ps1` runs this comparison itself before every build, for `-SdkSource` and for its own clone, and lists the paths that differ. Check that the series still reproduces the worktree: applying 0002-0007 with `git apply --cached`
 to a temporary index read from `923c1a5` must give the same `git write-tree` as `$port`.
+Then check the whole series: every patch from 0002 to the last one must apply in order on that index.
 
 `scripts/build-sdk-android.ps1` builds the SDK alone for Android (bring-up); see `docs/ANDROID.md`.

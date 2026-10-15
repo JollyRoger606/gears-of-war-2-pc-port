@@ -1,0 +1,80 @@
+// gow2 - ReXGlue Recompiled Project
+//
+// Reads the gow2_test_input file and merges it into guest user 0's pad (gow2_test_input.h).
+
+#include "gow2_test_input.h"
+
+#include <chrono>
+#include <cstdint>
+#include <fstream>
+#include <mutex>
+#include <string>
+
+#include <rex/cvar.h>
+#include <rex/logging.h>
+
+#include "gow2_guest.h"
+
+REXCVAR_DEFINE_STRING(gow2_test_input, "", "Testing",
+                      "Path of a text file whose first line names the pad buttons and stick values "
+                      "to hold for guest user 0 (format in src/gow2_test_input.h). Read even when the "
+                      "window has no focus; for automated tests. Empty = off");
+
+namespace rex::glue {
+namespace {
+
+using test_input::PadState;
+
+// The guest polls about 125 times a second from several threads; one read per frame is enough.
+constexpr auto kRereadEvery = std::chrono::milliseconds(15);
+
+struct PadFile {
+  std::mutex lock;
+  std::chrono::steady_clock::time_point next_read{};
+  PadState pad;
+  uint32_t packet_bump = 0;
+  bool logged = false;
+};
+
+PadFile& TheFile() {
+  static PadFile file;
+  return file;
+}
+
+bool ReadFirstLine(const std::string& path, std::string* line) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return false;
+  std::getline(in, *line);
+  return true;
+}
+
+void Refresh(PadFile* file, const std::string& path) {
+  std::string line;
+  const bool read = ReadFirstLine(path, &line);
+  const PadState pad = read ? test_input::ParsePadLine(line) : PadState{};
+  if (read && !file->logged) {
+    file->logged = true;
+    REXLOG_INFO("TESTINPUT pad state for user 0 from {}", path);
+  }
+  if (!(pad == file->pad)) ++file->packet_bump;
+  file->pad = pad;
+}
+
+}  // namespace
+
+void ApplyTestInput(uint8_t* base, uint32_t user_index, uint32_t state_addr, uint32_t* result) {
+  if (user_index != 0) return;
+  const std::string path = REXCVAR_GET(gow2_test_input);
+  if (path.empty()) return;
+  PadFile& file = TheFile();
+  std::lock_guard<std::mutex> hold(file.lock);
+  const auto now = std::chrono::steady_clock::now();
+  if (now >= file.next_read) {
+    Refresh(&file, path);
+    file.next_read = now + kRereadEvery;
+  }
+  if (test_input::IsNeutral(file.pad)) return;
+  test_input::OverlayPad(guest::HostPtr(base, state_addr), file.pad, file.packet_bump, result);
+}
+
+}  // namespace rex::glue
