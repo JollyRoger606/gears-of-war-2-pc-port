@@ -1,6 +1,8 @@
 # Start N gow2.exe instances side by side for a System Link test, then supervise them until stopped.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-instances.ps1 -OutDir out\pcpc-test\run1 [-Names 'host,client']
-# With a phone on the LAN: -Names pc -Lan (one copy, no loopback binding).
+# With a phone on the LAN: -Names pc -Lan -Peers <phone IP> (one copy, no loopback binding; the
+# query then also goes to the phone as a unicast, whatever adapter Windows picks for broadcasts).
+# Every copy runs with System Link on and keeps its saves in <run>\<name>\saves.
 param(
     [Parameter(Mandatory)] [string]$OutDir,
     [string]$Exe = 'out/build/release/gow2.exe',
@@ -16,7 +18,9 @@ param(
     [int]$StaggerSeconds = 15,
     [string]$SeedFrom = (Join-Path $env:LOCALAPPDATA 'GearsOfWar2PC'),
     # Real LAN (PC with a phone): no loopback binding, the copy uses its default-route address.
-    [switch]$Lan
+    [switch]$Lan,
+    # net_peers for every copy: host[:port] list, for example the phone's address with -Lan.
+    [string]$Peers = ''
 )
 $ErrorActionPreference = 'Stop'
 Add-Type @"
@@ -54,6 +58,17 @@ function Get-LoopbackNetArgs([string]$ip, [string]$allIps) {
     return @("--net_bind_ip=$ip", "--net_broadcast_targets=$allIps")
 }
 
+function Get-PeerArgs([string]$peers) {
+    if ([string]::IsNullOrWhiteSpace($peers)) { return @() }
+    return @("--net_peers=$peers")
+}
+
+# A build without gow2_save_dir only warns about the unknown setting; one with it would otherwise
+# write the save folder named in gow2.toml (the real, cloud-synced one) from every copy at once.
+function Get-SaveDirArgs([string]$saveDir) {
+    return @("--gow2_save_dir=`"$saveDir`"")
+}
+
 function Build-InstanceArgs([string]$gameRoot, [string]$log, [int]$width, [int]$height, [array]$net, [string]$xuid, [string]$tag, [array]$extra, [array]$role) {
     $list = @(
         "--game_data_root=`"$gameRoot`"",
@@ -63,6 +78,7 @@ function Build-InstanceArgs([string]$gameRoot, [string]$log, [int]$width, [int]$
         "--window_height=$height",
         "--user_xuid=$xuid",
         "--user_name=$tag",
+        '--net_link_active=true',
         '--system_link_trace=true',
         '--mnk_mode=true'
     )
@@ -144,6 +160,8 @@ try {
         if ($i -eq 0) { $roleTokens = $hostTokens }
         $netTokens = @()
         if ($Lan) { $ip = 'lan' } else { $netTokens = Get-LoopbackNetArgs $ip $allIps }
+        $netTokens += Get-PeerArgs $Peers
+        $netTokens += Get-SaveDirArgs (Join-Path $folder 'saves')
         $tokens = Build-InstanceArgs $GameRoot $log $Width $Height $netTokens $xuid $tag $extraTokens $roleTokens
         $argLine = $tokens -join ' '
         $proc = Start-GameInstance $exePath $argLine $local

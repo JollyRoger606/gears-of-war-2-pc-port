@@ -75,8 +75,14 @@ function Invoke-FocusStep([IntPtr]$hwnd) {
     foreach ($o in $out) { if ($o -is [string]) { Write-Output $o } }
 }
 
+function Test-InstanceFocus([IntPtr]$hwnd) {
+    $result = @(Set-InstanceFocus $hwnd) | Where-Object { $_ -is [bool] } | Select-Object -Last 1
+    return [bool]$result
+}
+
 function Send-InstanceKey([IntPtr]$hwnd, [string]$instance, [string]$name, [int]$holdMs, [datetime]$start) {
-    Set-InstanceFocus $hwnd | Out-Null
+    # A key sent without focus lands in whatever window has it, such as a Windows Security prompt.
+    if (-not (Test-InstanceFocus $hwnd)) { throw "instance '$instance' has no focus; key '$name' not sent" }
     try { $parsed = [Enum]::Parse([System.Windows.Forms.Keys], $name, $true) }
     catch { throw "unknown key '$name'" }
     if ([int]$parsed -gt 255) { throw "key '$name' has no virtual-key code" }
