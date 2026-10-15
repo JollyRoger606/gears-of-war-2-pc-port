@@ -4,6 +4,8 @@ A release that only fails on the phone, with UnsatisfiedLinkError, a
 missing symbol or a 16 KB page-alignment crash, is slow to debug, so this
 script verifies the packaged .so files beforehand with the NDK's
 llvm-readelf and llvm-nm, resolving symbols the way Android's linker does.
+It also fails when libgow2.so exports a symbol other than SDL_main
+(--main-exports lists the allowed ones).
 
 It takes either a folder holding .so files (for example
 out/android/jniLibs/arm64-v8a) or an .apk file, in which case the
@@ -14,8 +16,8 @@ assets/licenses/LICENSE, unless --no-notices is given):
 
   python tools/check_android_libs.py <folder-or-apk> [--ndk <ndk folder>]
       [--api 29] [--expect NAME ...] [--main libgow2.so]
-      [--main-symbol SDL_main] [--sdl libSDL3.so] [--allow-system NAME ...]
-      [--no-notices]
+      [--main-symbol SDL_main] [--main-exports <name> ...] [--sdl libSDL3.so]
+      [--allow-system NAME ...] [--no-notices]
 
 Without --ndk the NDK matching android/app/build.gradle is preferred. The
 search order is: <sdk>/ndk/<ndkVersion> for each SDK root, then the
@@ -443,6 +445,14 @@ def check_main_library(libraries: dict, main: str, main_symbol: str) -> list[str
     return [f"{main}: {problem}" for problem in check_main_symbol(libraries[main].nm_text, main_symbol)]
 
 
+def check_main_exports(main: str, defined: set[str], allowed: set[str]) -> list[str]:
+    extra = sorted(defined - allowed)
+    if not extra:
+        return []
+    return [f"{main}: exports {len(extra)} symbol(s) besides {', '.join(sorted(allowed))} "
+            f"(first: {', '.join(extra[:5])}); android/gamelibs/libgow2.map should keep them local"]
+
+
 def check_sdl_reachable(libraries: dict, sdl: str) -> list[str]:
     needed_by = {name: library.needed for name, library in libraries.items()}
     errors = []
@@ -471,6 +481,8 @@ def check_libraries(lib_paths: list, tools: Tools, stub_dir: Path, options) -> l
     defined_by = {name: library.defined for name, library in libraries.items()}
     errors.extend(check_single_sdl(defined_by, options.sdl, options.main, options.main_symbol))
     errors.extend(check_main_library(libraries, options.main, options.main_symbol))
+    if options.main in libraries:
+        errors.extend(check_main_exports(options.main, libraries[options.main].defined, options.main_exports))
     errors.extend(check_sdl_reachable(libraries, options.sdl))
     return errors
 
@@ -525,12 +537,14 @@ def parse_options(argv: list[str]):
     parser.add_argument("--expect", nargs="*", default=None)
     parser.add_argument("--main", default="libgow2.so")
     parser.add_argument("--main-symbol", default="SDL_main")
+    parser.add_argument("--main-exports", nargs="*", default=None)
     parser.add_argument("--sdl", default="libSDL3.so")
     parser.add_argument("--allow-system", nargs="*", default=None)
     parser.add_argument("--no-notices", action="store_true")
     options = parser.parse_args(argv)
     options.expect = list(_DEFAULT_EXPECT) if options.expect is None else options.expect
     options.allowed = set(_DEFAULT_ALLOW_SYSTEM if options.allow_system is None else options.allow_system)
+    options.main_exports = set([options.main_symbol] if options.main_exports is None else options.main_exports)
     return options
 
 
