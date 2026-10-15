@@ -499,6 +499,113 @@ index 0000000..9b44b47
 +}  // namespace rex
 +
 +#endif  // REX_PLATFORM_ANDROID
+diff --git a/include/rex/platform/fpscr.h b/include/rex/platform/fpscr.h
+index c2c4fd4..14c1635 100644
+--- a/include/rex/platform/fpscr.h
++++ b/include/rex/platform/fpscr.h
+@@ -24,12 +24,50 @@
+ 
+ namespace rex::platform {
+ 
++// The rounding field of each host's FP control register, mapped both ways to the guest's
++// FPSCR[RN] (0 nearest, 1 toward zero, 2 toward +infinity, 3 toward -infinity). MXCSR.RC and
++// FPCR.RMode order the two infinities differently, so each host has its own read-back table.
++// Both are defined on every host, so a unit test on the PC checks the ARM one too.
++struct FPSCRRoundingX64 {
++  static constexpr size_t RoundShift = 13;
++  static constexpr size_t RoundMaskVal = SIMDE_MM_ROUND_MASK;
++  static constexpr size_t GuestToHost[] = {SIMDE_MM_ROUND_NEAREST, SIMDE_MM_ROUND_TOWARD_ZERO,
++                                           SIMDE_MM_ROUND_UP, SIMDE_MM_ROUND_DOWN};
++  // MXCSR.RC: 0 nearest, 1 toward -infinity, 2 toward +infinity, 3 toward zero.
++  static constexpr u32 HostToGuest[] = {0, 3, 2, 1};
++};
++
++struct FPSCRRoundingArm64 {
++  // RMode
++  static constexpr size_t RoundShift = 22;
++  static constexpr size_t RoundMaskVal = size_t(3) << RoundShift;
++  // Nearest, Zero, +Infinity, -Infinity
++  static constexpr size_t GuestToHost[] = {size_t(0) << RoundShift, size_t(3) << RoundShift,
++                                           size_t(1) << RoundShift, size_t(2) << RoundShift};
++  // FPCR.RMode: 0 nearest, 1 toward +infinity, 2 toward -infinity, 3 toward zero.
++  static constexpr u32 HostToGuest[] = {0, 2, 3, 1};
++};
++
++template <typename Rounding>
++constexpr u32 GuestRoundingFromHost(u32 csr) noexcept {
++  return Rounding::HostToGuest[(csr & Rounding::RoundMaskVal) >> Rounding::RoundShift];
++}
++
++template <typename Rounding>
++constexpr bool RoundingTablesRoundTrip() noexcept {
++  for (u32 mode = 0; mode < 4; ++mode) {
++    if (GuestRoundingFromHost<Rounding>(u32(Rounding::GuestToHost[mode])) != mode) return false;
++  }
++  return true;
++}
++
++static_assert(RoundingTablesRoundTrip<FPSCRRoundingX64>());
++static_assert(RoundingTablesRoundTrip<FPSCRRoundingArm64>());
++
+ // simde does not handle denormal flags, so we need to implement per-arch.
+ #if defined(__x86_64__) || defined(_M_X64)
+ 
+-struct FPSCRPlatform {
+-  static constexpr size_t RoundShift = 13;
+-  static constexpr size_t RoundMaskVal = SIMDE_MM_ROUND_MASK;
++struct FPSCRPlatform : FPSCRRoundingX64 {
+   static constexpr size_t FlushMask = SIMDE_MM_FLUSH_ZERO_MASK | _MM_DENORMALS_ZERO_MASK;
+   // Exception mask bits (1 = exception masked/disabled)
+   static constexpr u32 ExceptionMask = (1 << 7) |   // IM - Invalid operation
+@@ -38,8 +76,6 @@ struct FPSCRPlatform {
+                                        (1 << 10) |  // OM - Overflow
+                                        (1 << 11) |  // UM - Underflow
+                                        (1 << 12);   // PM - Precision (Inexact)
+-  static constexpr size_t GuestToHost[] = {SIMDE_MM_ROUND_NEAREST, SIMDE_MM_ROUND_TOWARD_ZERO,
+-                                           SIMDE_MM_ROUND_UP, SIMDE_MM_ROUND_DOWN};
+ 
+   static inline u32 getcsr() noexcept { return simde_mm_getcsr(); }
+ 
+@@ -52,15 +88,9 @@ struct FPSCRPlatform {
+ 
+ #elif defined(__aarch64__) || defined(_M_ARM64)
+ 
+-struct FPSCRPlatform {
+-  // RMode
+-  static constexpr size_t RoundShift = 22;
+-  static constexpr size_t RoundMaskVal = 3 << RoundShift;
++struct FPSCRPlatform : FPSCRRoundingArm64 {
+   // FZ and FZ16
+   static constexpr size_t FlushMask = (1 << 19) | (1 << 24);
+-  // Nearest, Zero, -Infinity, -Infinity
+-  static constexpr size_t GuestToHost[] = {0 << RoundShift, 3 << RoundShift, 1 << RoundShift,
+-                                           2 << RoundShift};
+   // Exception enable bits (0 = exception disabled, ARM defaults to 0)
+   static constexpr u32 ExceptionMask = (1 << 8) |   // IOE - Invalid Operation
+                                        (1 << 9) |   // DZE - Division by Zero
+diff --git a/include/rex/ppc/context.h b/include/rex/ppc/context.h
+index 0ede542..39c4dea 100644
+--- a/include/rex/ppc/context.h
++++ b/include/rex/ppc/context.h
+@@ -147,8 +147,6 @@ constexpr uint32_t kRoundMask = 0x03;
+ struct FPSCRRegister {
+   uint32_t csr;
+ 
+-  static constexpr size_t HostToGuest[] = {kRoundNearest, kRoundDown, kRoundUp, kRoundTowardZero};
+-
+   using Platform = platform::FPSCRPlatform;
+   static constexpr size_t RoundShift = Platform::RoundShift;
+   static constexpr size_t RoundMaskVal = Platform::RoundMaskVal;
+@@ -168,7 +166,8 @@ struct FPSCRRegister {
+ 
+   inline uint32_t loadFromHost() noexcept {
+     csr = getcsr();
+-    return HostToGuest[(csr & RoundMaskVal) >> RoundShift];
++    // Each host's own table: FPCR.RMode is not ordered like MXCSR.RC.
++    return platform::GuestRoundingFromHost<Platform>(csr);
+   }
+ 
+   inline void storeFromGuest(uint32_t value) noexcept {
 diff --git a/include/rex/thread/fiber.h b/include/rex/thread/fiber.h
 index 352af67..849db20 100644
 --- a/include/rex/thread/fiber.h
@@ -3402,6 +3509,137 @@ index 77bb1dc..b34d440 100644
  namespace {
  
  int RunWindowedApp(int argc, char** argv) {
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+index 7bda2ad..55b854d 100644
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -20,6 +20,7 @@ add_executable(unit_tests
+     codegen/codegen_writer_test.cpp
+     codegen/output_partition_test.cpp
+     codegen/output_stamp_test.cpp
++    ppc/fpscr_rounding_test.cpp
+ )
+ 
+ target_sources(unit_tests PRIVATE
+diff --git a/tests/unit/ppc/fpscr_rounding_test.cpp b/tests/unit/ppc/fpscr_rounding_test.cpp
+new file mode 100644
+index 0000000..3eddabb
+--- /dev/null
++++ b/tests/unit/ppc/fpscr_rounding_test.cpp
+@@ -0,0 +1,113 @@
++// The guest's FPSCR rounding mode as mtfsf writes it and mffs reads it back, on x64 and arm64.
++
++#include <catch2/catch_test_macros.hpp>
++
++#include <atomic>
++#include <cstdint>
++
++#include <rex/platform/fpscr.h>
++#include <rex/ppc/context.h>
++
++using rex::platform::FPSCRRoundingArm64;
++using rex::platform::FPSCRRoundingX64;
++using rex::platform::GuestRoundingFromHost;
++
++namespace {
++
++// One IEEE rounding direction as each register encodes it: MXCSR.RC (Intel SDM vol. 1, 10.2.3),
++// FPCR.RMode (Arm ARM, FPCR) and the guest's FPSCR[RN] (PowerPC UISA, 4.2.2).
++struct Direction {
++  const char* name;
++  uint32_t mxcsr_rc;
++  uint32_t fpcr_rmode;
++  uint32_t guest_rn;
++};
++
++constexpr Direction kDirections[] = {
++    {"to nearest", 0, 0, rex::ppc::kRoundNearest},
++    {"toward zero", 3, 3, rex::ppc::kRoundTowardZero},
++    {"toward +infinity", 2, 1, rex::ppc::kRoundUp},
++    {"toward -infinity", 1, 2, rex::ppc::kRoundDown},
++};
++
++// Bits outside the rounding field that a live control register carries (MXCSR: masks and
++// FTZ/DAZ; FPCR: FZ, FZ16 and an exception enable).
++constexpr uint32_t kOtherMxcsrBits = 0x9FC0;
++constexpr uint32_t kOtherFpcrBits = (1u << 19) | (1u << 24) | (1u << 8);
++
++template <typename Rounding>
++uint32_t HostFieldOf(uint32_t guest_mode) {
++  return uint32_t(Rounding::GuestToHost[guest_mode] >> Rounding::RoundShift);
++}
++
++// 1/3 in the guest's rounding mode, with the division kept between the mode switches.
++float DivideInGuestMode(PPCFPSCRRegister& fpscr, uint32_t mode, float numerator) {
++  fpscr.storeFromGuest(mode);
++  std::atomic_signal_fence(std::memory_order_seq_cst);
++  volatile float n = numerator;
++  volatile float d = 3.0f;
++  volatile float quotient = n / d;
++  std::atomic_signal_fence(std::memory_order_seq_cst);
++  return quotient;
++}
++
++}  // namespace
++
++TEST_CASE("mffs reads each host rounding direction as the mode the PC reads", "[ppc][fpscr]") {
++  for (const Direction& d : kDirections) {
++    INFO(d.name);
++    CHECK(GuestRoundingFromHost<FPSCRRoundingX64>(d.mxcsr_rc << FPSCRRoundingX64::RoundShift) ==
++          d.guest_rn);
++    CHECK(GuestRoundingFromHost<FPSCRRoundingArm64>(d.fpcr_rmode << FPSCRRoundingArm64::RoundShift) ==
++          d.guest_rn);
++  }
++}
++
++TEST_CASE("mtfsf selects the host direction the guest mode names", "[ppc][fpscr]") {
++  for (const Direction& d : kDirections) {
++    INFO(d.name);
++    CHECK(HostFieldOf<FPSCRRoundingX64>(d.guest_rn) == d.mxcsr_rc);
++    CHECK(HostFieldOf<FPSCRRoundingArm64>(d.guest_rn) == d.fpcr_rmode);
++  }
++}
++
++TEST_CASE("a guest mode written and read back is unchanged on both hosts", "[ppc][fpscr]") {
++  for (uint32_t mode = 0; mode < 4; ++mode) {
++    INFO("guest mode " << mode);
++    const uint32_t mxcsr = kOtherMxcsrBits | uint32_t(FPSCRRoundingX64::GuestToHost[mode]);
++    const uint32_t fpcr = kOtherFpcrBits | uint32_t(FPSCRRoundingArm64::GuestToHost[mode]);
++    CHECK(GuestRoundingFromHost<FPSCRRoundingX64>(mxcsr) == mode);
++    CHECK(GuestRoundingFromHost<FPSCRRoundingArm64>(fpcr) == mode);
++  }
++}
++
++TEST_CASE("this host's FPSCR register reads back what the guest wrote", "[ppc][fpscr]") {
++  PPCFPSCRRegister fpscr{};
++  fpscr.InitHost();
++  const uint32_t saved = fpscr.getcsr();
++  uint32_t read_back[4] = {};
++  for (uint32_t mode = 0; mode < 4; ++mode) {
++    fpscr.storeFromGuest(mode);
++    read_back[mode] = fpscr.loadFromHost();
++  }
++  fpscr.setcsr(saved);
++  for (uint32_t mode = 0; mode < 4; ++mode) {
++    INFO("guest mode " << mode);
++    CHECK(read_back[mode] == mode);
++  }
++}
++
++TEST_CASE("this host rounds in the direction the guest mode names", "[ppc][fpscr]") {
++  PPCFPSCRRegister fpscr{};
++  fpscr.InitHost();
++  const uint32_t saved = fpscr.getcsr();
++  const float up = DivideInGuestMode(fpscr, rex::ppc::kRoundUp, 1.0f);
++  const float down = DivideInGuestMode(fpscr, rex::ppc::kRoundDown, 1.0f);
++  const float nearest = DivideInGuestMode(fpscr, rex::ppc::kRoundNearest, 1.0f);
++  const float negative_toward_zero = DivideInGuestMode(fpscr, rex::ppc::kRoundTowardZero, -1.0f);
++  const float negative_down = DivideInGuestMode(fpscr, rex::ppc::kRoundDown, -1.0f);
++  fpscr.setcsr(saved);
++  CHECK(up > down);
++  CHECK((nearest == up || nearest == down));
++  CHECK(negative_toward_zero > negative_down);
++}
 diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
 index f102b56..f2d6bb2 100644
 --- a/thirdparty/CMakeLists.txt

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026 Santiago Quiroz Upegui and the gow2-recomp contributors
-// On-device checks of the Android runtime's UTF-8 decoder and input lock (patch 0007); run by
-// scripts/test-android-device.ps1.
+// On-device checks of the Android runtime's UTF-8 decoder, input lock, fiber switch and FPSCR
+// rounding mode (patch 0007); run by scripts/test-android-device.ps1.
 
 #include <rex/input/device_assignment.h>
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
+#include <rex/ppc/context.h>
 #include <rex/string/utf8.h>
 #include <rex/system/xtypes.h>
 #include <rex/thread/fiber.h>
@@ -375,6 +376,49 @@ void CheckFiberSwitchKeepsFpRegisters() {
   });
 }
 
+// 1/3 in the guest's rounding mode, with the division kept between the mode switches.
+float DivideInGuestMode(PPCFPSCRRegister& fpscr, uint32_t mode, float numerator) {
+  fpscr.storeFromGuest(mode);
+  std::atomic_signal_fence(std::memory_order_seq_cst);
+  volatile float n = numerator;
+  volatile float d = 3.0f;
+  volatile float quotient = n / d;
+  std::atomic_signal_fence(std::memory_order_seq_cst);
+  return quotient;
+}
+
+bool GuestRoundingModesReadBack() {
+  PPCFPSCRRegister fpscr{};
+  fpscr.InitHost();
+  const uint32_t saved = fpscr.getcsr();
+  bool all_equal = true;
+  for (uint32_t mode = 0; mode < 4; ++mode) {
+    fpscr.storeFromGuest(mode);
+    all_equal = all_equal && fpscr.loadFromHost() == mode;
+  }
+  fpscr.setcsr(saved);
+  return all_equal;
+}
+
+bool GuestRoundingModesRoundTheirWay() {
+  PPCFPSCRRegister fpscr{};
+  fpscr.InitHost();
+  const uint32_t saved = fpscr.getcsr();
+  const float up = DivideInGuestMode(fpscr, rex::ppc::kRoundUp, 1.0f);
+  const float down = DivideInGuestMode(fpscr, rex::ppc::kRoundDown, 1.0f);
+  const float negative_toward_zero = DivideInGuestMode(fpscr, rex::ppc::kRoundTowardZero, -1.0f);
+  const float negative_down = DivideInGuestMode(fpscr, rex::ppc::kRoundDown, -1.0f);
+  fpscr.setcsr(saved);
+  return up > down && negative_toward_zero > negative_down;
+}
+
+// FPCR.RMode orders +infinity and -infinity unlike MXCSR.RC; mffs after mtfsf must read the mode
+// the guest wrote, as on the PC.
+void CheckFpscrRounding() {
+  Check("fpscr: each guest rounding mode reads back as written", GuestRoundingModesReadBack);
+  Check("fpscr: guest Up, Down and toward-zero round their way", GuestRoundingModesRoundTheirWay);
+}
+
 }  // namespace
 
 int main() {
@@ -385,6 +429,7 @@ int main() {
   CheckInstrumentSeesOverlap();
   CheckInputLock();
   CheckFiberSwitchKeepsFpRegisters();
+  CheckFpscrRounding();
   std::printf("runtime_selftest: %d checks, %d failed\n", g_checks, g_failures);
   std::fflush(stdout);
   return g_failures == 0 ? 0 : 1;

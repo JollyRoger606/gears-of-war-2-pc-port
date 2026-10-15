@@ -205,10 +205,12 @@ Measure-Black 'b0-first-gameplay'
 `install -r` keeps the copied game, the saves and the config. If the `shareable` folder is not
 there, `adb -s $s shell find /sdcard/Android/data/$pkg -name '*.xpso'` finds it.
 
-Pass: the self-test prints `runtime_selftest: 19 checks, 0 failed` (the 19th, new, is the fiber
-switch keeping d8-d15) and `touch_model_test: 105 checks, 0 failed`; `4D53082D.fbo.vk.xpso` and
-`4D53082D.xsh` are larger than their 12- and 8-byte headers after the first launch; the second
-launch logs `Created N graphics pipelines from Vulkan storage` with N above 0. The
+Pass: the self-test prints `runtime_selftest: 21 checks, 0 failed` (the 19th is the fiber switch
+keeping d8-d15; the 20th and 21st, added later on October 15, write each guest rounding mode, read
+it back as `mffs` does and round 1/3 with it) and `touch_model_test: 105 checks, 0 failed`;
+`4D53082D.fbo.vk.xpso` and `4D53082D.xsh` are larger than their 12- and 8-byte headers after the
+first launch; the second launch logs `Created N graphics pipelines from Vulkan storage` with N
+above 0. The
 `b0-first-gameplay` run is the first gameplay since the install: it fills the storage with the
 gameplay pipelines and is the reference picture for experiment 6. Keep its `GPUSTATS`, `TEXFMT`
 and `TEXFAIL` lines; they say which of the black-scene experiments to run first (see there).

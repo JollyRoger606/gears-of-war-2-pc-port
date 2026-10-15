@@ -11,7 +11,9 @@
      scripts\build-sdk.ps1 prepared (out\sdk-build\rexglue-sdk), compiled alone against the SDK's
      own Catch2: the SDK's whole unit_tests target does not build at 923c1a5 (hash_test.cpp
      cannot find xxhash.h).
-  4. python -m pytest tools, when pytest is installed.
+  4. The SDK's header-only unit tests of 0007, each compiled alone: the guest FPSCR rounding mode
+     on x64 and arm64 (tests\unit\ppc\fpscr_rounding_test.cpp).
+  5. python -m pytest tools, when pytest is installed.
 
   Test binaries go to out\host-tests. The exit code is the number of failed steps.
 
@@ -129,8 +131,6 @@ function Test-SdkSystemLink([string]$outDir) {
     }
     $catchBuild = Join-Path $outDir 'catch2'
     if (-not (Build-Catch2 $sdk $catchBuild)) { return $false }
-    $main = Get-ChildItem $catchBuild -Recurse -Filter 'Catch2Main.lib' | Select-Object -First 1
-    $core = Get-ChildItem $catchBuild -Recurse -Filter 'Catch2.lib' | Select-Object -First 1
     $exe = Join-Path $outDir 'system_link_tests.exe'
     $sources = 'src\system\system_link.cpp', 'src\kernel\xam\xam_session.cpp',
         'tests\unit\system\system_link_test.cpp', 'tests\unit\kernel\xsession_test.cpp'
@@ -138,10 +138,47 @@ function Test-SdkSystemLink([string]$outDir) {
     try {
         $code = Invoke-Native { clang++ -std=c++20 -O1 -fms-runtime-lib=dll -D_CRT_SECURE_NO_WARNINGS -Wall `
             -I include -I thirdparty\catch2\src -I (Join-Path $catchBuild 'generated-includes') `
-            $sources $main.FullName $core.FullName -o $exe }
+            $sources (Get-Catch2Libraries $catchBuild) -o $exe }
     } finally { Pop-Location }
     if ($code -ne 0) { return $false }
     return Test-Exe $exe
+}
+
+function Get-Catch2Libraries([string]$catchBuild) {
+    $main = Get-ChildItem $catchBuild -Recurse -Filter 'Catch2Main.lib' | Select-Object -First 1
+    $core = Get-ChildItem $catchBuild -Recurse -Filter 'Catch2.lib' | Select-Object -First 1
+    return @($main.FullName, $core.FullName)
+}
+
+# Header-only: the SDK headers and simde, no SDK library. -O2 so the FPSCR test's divisions run
+# under the rounding mode it sets, not folded at compile time.
+function Test-SdkHeaderUnit([string]$sdk, [string]$catchBuild, [string]$test, [string]$outDir) {
+    Write-Host "  $test"
+    $exe = Join-Path $outDir ([IO.Path]::GetFileNameWithoutExtension($test) + '.exe')
+    Push-Location $sdk
+    try {
+        $code = Invoke-Native { clang++ -std=c++23 -O2 -fms-runtime-lib=dll -D_CRT_SECURE_NO_WARNINGS -Wall `
+            -I include -I thirdparty\simde -I thirdparty\catch2\src -I (Join-Path $catchBuild 'generated-includes') `
+            $test (Get-Catch2Libraries $catchBuild) -o $exe }
+    } finally { Pop-Location }
+    if ($code -ne 0) { return $false }
+    return Test-Exe $exe
+}
+
+function Test-SdkHeaderUnits([string]$outDir) {
+    $sdk = Join-Path $root 'out\sdk-build\rexglue-sdk'
+    if (-not (Test-SdkSourcePrepared $sdk)) {
+        Write-Host "  $sdk is missing or older than sdk\patches; run scripts\build-sdk.ps1 first."
+        return $false
+    }
+    $catchBuild = Join-Path $outDir 'catch2'
+    if (-not (Build-Catch2 $sdk $catchBuild)) { return $false }
+    $tests = @('tests\unit\ppc\fpscr_rounding_test.cpp')
+    $ok = $true
+    foreach ($test in $tests) {
+        if (-not (Test-SdkHeaderUnit $sdk $catchBuild $test $outDir)) { $ok = $false }
+    }
+    return $ok
 }
 
 function Test-PythonTools {
@@ -168,6 +205,7 @@ $steps = [ordered]@{
     'Host test targets'          = { Test-HostTargets (Join-Path $root "out\build\$($Config.ToLower())") }
     'Touch model test'           = { Test-TouchModel $outDir }
     'SDK System Link unit tests' = { Test-SdkSystemLink $outDir }
+    'SDK header unit tests'      = { Test-SdkHeaderUnits $outDir }
     'Python tests in tools'      = { Test-PythonTools }
 }
 $failed = @()

@@ -271,7 +271,10 @@ race). The guest `XamInputGetState`, `XamInputGetCapabilities(Ex)`, `XamInputSet
 `runtime_selftest: 18 checks, 0 failed`. A 19th check (October 15) sets d8-d15 to known values,
 switches to a fiber that overwrites them and back, and expects them unchanged: AAPCS64 makes them
 callee-saved, and patch 0007's fiber switch did not keep them before. On the phone:
-`runtime_selftest: 19 checks, 0 failed`.
+`runtime_selftest: 19 checks, 0 failed`. The 20th and 21st (added later on October 15) write each
+guest FPSCR rounding mode, read it back as `mffs` does and round 1/3 with it: FPCR.RMode orders
++infinity and -infinity unlike the PC's MXCSR.RC, and the runtime used to read Up as Down and Down
+as Up on ARM.
 The script then runs `gow2_touch_model_test`
 (`gamelibs/tests/touch_model_test.cpp`, pure C++): the touch layout, finger ownership, the stick,
 taps held until each reader has seen them (also while a second reader polls every 16 ms), look
