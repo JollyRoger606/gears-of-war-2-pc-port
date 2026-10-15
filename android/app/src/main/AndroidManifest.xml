@@ -29,6 +29,12 @@
          permission socket() fails and the campaign stops at "Error initializing network layer". -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- System Link: the Wi-Fi address and LAN broadcasts. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <application
         android:allowBackup="false"
         android:appCategory="game"

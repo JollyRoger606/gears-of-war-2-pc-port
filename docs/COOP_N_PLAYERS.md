@@ -15,6 +15,20 @@ Before this branch merges: rebase on master, check that 0002-0010 still apply in
 on the merged tree. After the merge, the Android build applies every `sdk/patches/*.patch` and globs
 `src/*.cpp`, so it is the first build to see this code.
 
+On the `crossplay` branch, SDK patch 0011-network-crossplay (Stage 4 networking) sits on top of
+this 0010, and `scripts/build-android.ps1` has built and linked 0002-0011 there. Two copies of the
+crossplay build have joined each other's campaign over loopback on one PC, and on 2026-10-15 a PC
+and a Galaxy S25 Ultra joined each other's campaign on one Wi-Fi network, with either one hosting.
+See [NETWORK_PLAY.md](NETWORK_PLAY.md).
+
+Merge order: this 0010 first, then 0011. Master's 0007 (6fe0d18, 2026-10-15) shifts Android
+guest ports 1-1023 by 30000 and translates socket options and FIONBIO/FIONREAD on Android. On
+`crossplay` both later patches are rebased onto it: 0010 keeps that shift inside its own `Bind`
+rewrite, and 0011 removes 0007's Android shift, option table and ioctl code from
+`src/system/xsocket.cpp`, so `net_port_offset` is the one port mapping on Android, Windows and
+Linux (a phone that bound 31000 and a PC that sent to 41000 would never meet). 0011's option table
+gained SO_KEEPALIVE and SO_OOBINLINE, the two 0007 options it lacked.
+
 This document condenses four read-only investigations from 2026-10-14 (join and spawn path,
 campaign systems, patch mechanism, network). A second pass re-checked each one, and the corrections
 from that pass are already applied here. The target is 4 players first, then 8-10, then PC-Android
@@ -483,6 +497,12 @@ Network (needs SDK patch 0010):
    --system_link_trace=true`,
    and a different XUID per instance (`--user_xuid=...`, or a separate `--user_data_root`, which also
    separates the saves).
+
+   Done 2026-10-14 [V] with the crossplay build (patches 0010 and 0011): the client found the host in
+   the System Link Browser, joined the lobby, loaded chapter 2 with the host and spawned as Dom on
+   Right Trigger. Harness: scripts/run-instances.ps1 and scripts/instance-input.ps1; steps and log
+   lines in docs/NETWORK_PLAY.md, "Testing on one PC". Separate user data comes from a per-copy
+   LOCALAPPDATA, because the app sets user_data_root from %LOCALAPPDATA% and ignores --user_data_root.
 7. Host and player 2 play into Act 1 chapter 2. One way to get there is to play chapter 1 first; a
    profile with chapter 2 unlocked also works. `GearGameSP_Base.InitGame+0x0063` reads `?chapter=`,
    but nobody has tested passing it.
@@ -692,6 +712,84 @@ broadcast and `net_bind_ip` off.
 Pass when there is no rubber-banding at 8 players and nobody else is refused below N.
 
 ### Stage 4: PC-Android cross-play over System Link
+
+Status (2026-10-15): SDK patch 0011-network-crossplay implements the Stage 4 networking.
+It now sits on the opt-in 0010 (6a8e519): System Link needs `net_link_active=true` on every
+copy, PC and phone (docs/NETWORK_PLAY.md). It builds for Windows and passes its unit tests
+(70 System Link cases: "All tests passed (1439 assertions in 70 test cases)",
+out/logs/unit-tests-4.log). The loopback run below used the 0011 before this rebase. The
+Android app adds the INTERNET, ACCESS_NETWORK_STATE,
+ACCESS_WIFI_STATE, CHANGE_WIFI_MULTICAST_STATE and WAKE_LOCK permissions, holds a Wi-Fi
+MulticastLock and a low-latency WifiLock (WIFI_MODE_FULL_LOW_LATENCY) from onCreate to
+onDestroy, and sets REX_DETECTED_LOCAL_IP to the Wi-Fi or hotspot address. For setup,
+see docs/NETWORK_PLAY.md. On 2026-10-14 two PC copies on loopback played chapter 2
+together with 0011 (docs/NETWORK_PLAY.md, "Testing on one PC"). On 2026-10-15 the PC
+(192.168.10.10, Ethernet) and the phone (192.168.10.114, Wi-Fi) joined in both directions:
+phone host with PC client in Act 1 chapter 1, PC host with phone client in chapter 2, each
+player seeing the other move (docs/NETWORK_PLAY.md, "Tested on 2026-10-15"). The text below
+the table is the original design; it is unchanged.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `net_port_offset` | 40000 | Guest ports below 1024 use port + offset on the host (the game's UDP 1000 becomes 41000; beacon port 14001 is unchanged). Every peer uses the same value. |
+| `net_local_ip` | empty (new meaning) | a.b.c.d or a.b.c.d/prefix (prefix 24 by default; the prefix defines the local subnet). Empty means REX_DETECTED_LOCAL_IP, then `net_bind_ip`, then the default-route address, then 127.0.0.1. |
+| `net_peers` | empty | Comma-separated host[:port] list (IPv4 or DNS names). Every broadcast the game sends also goes to each peer as a unicast copy. |
+| `net_public_address` | empty | host[:port] (IPv4 or DNS name) advertised as XNADDR inaOnline / wPortOnline. Set `net_allow_peers` with it. |
+| `net_allow_peers` | empty | IPv4 addresses, a.b.c.d/n ranges or DNS names. When set, datagrams from any other address are dropped before the game sees them; loopback and the local subnet always pass. When empty and `net_peers` or `net_public_address` is set, only the peers and the local subnet pass (fail closed, also while a name is still unresolved). When all three are empty, everyone is allowed, as on a 360 LAN. |
+
+All five are read once at the first use after the kernel starts and need a restart, like the
+0010 settings: the game threads read an immutable snapshot, never the cvar strings.
+
+Decisions taken while implementing:
+
+- The guest's beacon reply is a broadcast, not a reply to the sender [V]:
+  sub_828294A0 (LAN response builder) sends with sub_827E3548
+  (out/re-coop/sub_828294A0.txt line 98), and sub_827E3548 passes the beacon object
+  itself as the destination address (generated/default/gow2_recomp.41.cpp:15762,
+  `mr r7,r3`), which holds the 255.255.255.255:14001 address set at beacon init
+  (sub_827E33C0).
+- A broadcast from the beacon socket (guest port 14001, UE3's LanAnnouncePort) also
+  goes, as a unicast copy, to the senders heard on that socket in the last second:
+  at most 4 per broadcast (the player cap), newest first, and at most 2 copies per
+  second to any one sender (a token bucket). That reaches a client behind NAT and a
+  Windows PC on a Public network (Windows Firewall lets a unicast reply to its own
+  broadcast through for about 3 seconds, but drops a broadcast reply). The caps keep
+  an internet host from becoming a UDP reflector: one spoofed 16-byte query would
+  otherwise send the 190-byte beacon to up to 32 addresses. Other sockets get no
+  copies.
+- A datagram identical to one from the same source in the last 250 ms is dropped, so
+  a client that also hears the broadcast does not see the reply twice.
+- On Android and Linux the runtime sends 255.255.255.255 as the subnet's directed
+  broadcast, because Android routes the limited broadcast through the default
+  network, which can be mobile data. Windows sends both the directed broadcast and
+  255.255.255.255, because it sends the limited broadcast out of one adapter only, and
+  on this PC that is not Ethernet: `Find-NetRoute -RemoteIPAddress 255.255.255.255`
+  gave "Ethernet 3" (192.168.56.1, a VirtualBox host-only adapter, metric 25 like
+  Ethernet) on 2026-10-15 and the Hyper-V Default Switch in an earlier check, while
+  192.168.10.255 routes through Ethernet. A loopback or unknown subnet keeps
+  255.255.255.255 alone.
+- Datagram sockets receive into a 64 KiB host buffer. The allow list runs first, so a
+  blocked sender's bytes never reach guest memory, and a datagram larger than the
+  guest buffer cannot raise WSAEMSGSIZE before its source is checked; an allowed one
+  is truncated and fails with WSAEMSGSIZE, as Winsock does. Stream sockets skip the
+  allow list and the duplicate filter (TCP bytes are not datagrams).
+- DNS: each name keeps its last good addresses when a lookup fails (logged as
+  "cannot resolve <name>; keeping ..."); a name that never resolved contributes
+  nothing, and the allow list stays closed rather than open. Lookups run on one
+  background thread every 5 minutes, only while the link is on.
+- The Android app uses REX_DETECTED_LOCAL_IP instead of REX_NET_LOCAL_IP, because
+  REX_NET_LOCAL_IP would set the cvar itself and outrank the config file.
+- `XNetXnAddrToInAddr` counts a peer as local when its ina is loopback, or when its
+  ina is on our subnet and (it has no inaOnline, or a datagram arrived from that ina
+  in the last 10 minutes). Local peers get ina, others get inaOnline (or ina when
+  inaOnline is 0). This handles two homes that both use 192.168.1.x.
+- An empty `net_local_ip` falls back to REX_DETECTED_LOCAL_IP, then `net_bind_ip`, then
+  0010's routed address (UDP connect towards 192.0.2.1, which sends nothing), with a
+  /24 prefix. The settings line names the source: "[netlink] link active: local
+  192.168.10.10/24 (default-route adapter), ..., LAN broadcast 192.168.10.255,
+  255.255.255.255, port offset 40000".
+
+Still open: the version gate; the 30 minutes of Stage 4 test 1 and tests 2 to 4.
 
 **Wire compatibility.** Guest code builds every packet byte in big-endian guest memory, and the
 runtime passes the bytes through raw, so both platforms put the same bytes on the wire. [I,

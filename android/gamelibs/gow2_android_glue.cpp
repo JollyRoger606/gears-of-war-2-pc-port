@@ -11,8 +11,11 @@
 // - The disc-error box is replaced here: libgow2.so defines the runtime's own
 //   __imp__XamShowDirtyDiscErrorUI, and the recompiled code and the function-mapping table bind
 //   to this definition inside libgow2.so instead of the runtime's export.
+// - XamInputGetState is wrapped the same way, so the gow2_test_input pad file
+//   (src/gow2_test_input.h) also drives the phone.
 
 #include "gow2_crash_watch.h"
+#include "gow2_test_input.h"
 #include "gow2_utf8_guard.h"
 #include "gow2_xam_input_guard.h"
 
@@ -20,6 +23,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 
@@ -30,6 +34,8 @@
 namespace {
 
 constexpr const char* kDiscErrorExport = "__imp__XamShowDirtyDiscErrorUI";
+constexpr const char* kInputStateExport = "__imp__XamInputGetState";
+constexpr uint32_t kErrorDeviceNotConnected = 0x48F;
 
 // GOW2_DISC_ERROR_UI=1 keeps the runtime's own box, as on Windows.
 bool RuntimeDiscErrorUiWanted() {
@@ -37,12 +43,29 @@ bool RuntimeDiscErrorUiWanted() {
   return gate && std::strcmp(gate, "1") == 0;
 }
 
-PPCFunc* RuntimeDiscErrorUi() {
+PPCFunc* RuntimeExport(const char* name) {
   void* runtime = dlopen("librexruntime.so", RTLD_NOW | RTLD_NOLOAD);
   if (!runtime) {
     return nullptr;
   }
-  return reinterpret_cast<PPCFunc*>(dlsym(runtime, kDiscErrorExport));
+  return reinterpret_cast<PPCFunc*>(dlsym(runtime, name));
+}
+
+PPCFunc* RuntimeDiscErrorUi() {
+  return RuntimeExport(kDiscErrorExport);
+}
+
+PPCFunc* RuntimeInputGetState() {
+  static PPCFunc* const original = RuntimeExport(kInputStateExport);
+  return original;
+}
+
+void LogMissingInputStateOnce() {
+  static std::atomic<bool> logged{false};
+  if (!logged.exchange(true)) {
+    REXLOG_ERROR("TESTINPUT the runtime's {} export was not found; pads read as disconnected",
+                 kInputStateExport);
+  }
 }
 
 void LogDiscErrorSuppressedOnce() {
@@ -74,6 +97,22 @@ extern "C" REX_FUNC(__imp__XamShowDirtyDiscErrorUI) {
   ParkCallingThread();
 }
 
+// XamInputGetState(user_index r3, flags r4, XINPUT_STATE* r5); r3 holds the result afterwards.
+extern "C" REX_FUNC(__imp__XamInputGetState) {
+  const uint32_t user_index = ctx.r3.u32;
+  const uint32_t state_addr = ctx.r5.u32;
+  PPCFunc* original = RuntimeInputGetState();
+  if (!original) {
+    LogMissingInputStateOnce();
+    ctx.r3.u64 = kErrorDeviceNotConnected;
+    return;
+  }
+  original(ctx, base);
+  uint32_t result = ctx.r3.u32;
+  rex::glue::ApplyTestInput(base, user_index, state_addr, &result);
+  ctx.r3.u64 = result;
+}
+
 namespace rex::glue {
 
 void InstallUtf8Guard() {
@@ -81,7 +120,10 @@ void InstallUtf8Guard() {
 }
 
 void InstallXamInputGuard() {
-  REXLOG_INFO("XAMINPUTGUARD on Android the runtime serializes its input system (SDK Android patch)");
+  REXLOG_INFO(
+      "XAMINPUTGUARD on Android the runtime serializes its input system (SDK Android patch); "
+      "gow2_test_input is merged in libgow2.so's {}",
+      kInputStateExport);
 }
 
 void InstallDiscErrorSilencer() {
