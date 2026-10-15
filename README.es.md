@@ -34,7 +34,9 @@ Read in English: [README.md](README.md)
 - [ ] Mirada con mouse que se sienta como un juego de PC (arreglo en progreso, ver Problemas conocidos)
 - [ ] Reescalado temporal FSR 4 / DLSS (incluido, todavía no se activa en este juego)
 - [ ] Campaña completa de principio a fin
-- [ ] System Link (capa de sockets corregida y trazada; faltan las sesiones)
+- [x] Campaña cooperativa por System Link: cuatro jugadores en un mismo PC (loopback) y PC con un teléfono Android en la misma LAN, verificado el 2026-10-14 y el 2026-10-15
+- [ ] Juego por internet (implementado: `net_peers`, `net_public_address`, `net_allow_peers`; sin probar)
+- [ ] Horda y Versus por System Link
 
 Ver el plan completo en [ROADMAP.md](ROADMAP.md).
 
@@ -127,7 +129,13 @@ Un reemplazo se aplica cuando tiene al menos tantos niveles de mipmap como la te
 
 ## System Link
 
-El juego en red local (LAN) para Horda y Versus se está implementando en el runtime. Listo hasta ahora: `system_link_trace = true` registra cada llamada de red y de sesión del juego (líneas `[netlink]`), las llamadas no implementadas devuelven errores correctos y las opciones de socket llegan a Windows con el orden de bytes correcto (el búfer de recepción de 128 KiB del juego quedaba en 512 bytes; reportado al SDK como rexglue-sdk#512). Siguiente paso: direcciones XNet reales y el servicio de sesiones, para que dos PC (o dos instancias en un mismo PC) se encuentren. Ver [ROADMAP.md](ROADMAP.md).
+La campaña cooperativa por System Link funciona entre PC, teléfonos Android y varias copias en un mismo PC. Viene apagada: pon `net_link_active = true` en `gow2.toml` (o pasa `--net_link_active=true`) en la copia de cada jugador y usa la misma compilación en todas; `gow2_coop_players` 3 o más la enciende sola. El puerto UDP 1000 del juego pasa a ser 41000 en todas las plataformas (`net_port_offset`, porque Android no puede usar puertos por debajo de 1024) y la baliza de System Link usa UDP 14001, así que un PC anfitrión necesita una regla del Firewall de Windows para esos dos puertos. `system_link_trace = true` registra cada llamada de red y de sesión del juego (líneas `[netlink]`).
+
+- [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): un PC y un teléfono en la misma red, los ajustes, varias copias en un mismo PC y solución de problemas.
+- [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): cooperativo con más de dos jugadores (`gow2_coop_players`; cuatro verificados en un mismo PC) y lo que aún falta, como el cambio de capítulo con jugadores extra.
+- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet con reenvío de puertos o una VPN (Tailscale, ZeroTier). Implementado, sin probar.
+
+Horda y Versus por System Link no se han probado. Ver [ROADMAP.md](ROADMAP.md).
 
 ## Problemas conocidos
 
