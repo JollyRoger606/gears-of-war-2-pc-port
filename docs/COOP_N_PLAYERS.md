@@ -414,6 +414,12 @@ Network (needs SDK patch 0010):
    both `--net_broadcast_targets=127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4 --system_link_trace=true`,
    and a different XUID per instance (`--user_xuid=...`, or a separate `--user_data_root`, which also
    separates the saves).
+
+   Done 2026-10-14 [V] with the crossplay build (patches 0010 and 0011): the client found the host in
+   the System Link Browser, joined the lobby, loaded chapter 2 with the host and spawned as Dom on
+   Right Trigger. Harness: scripts/run-instances.ps1 and scripts/instance-input.ps1; steps and log
+   lines in docs/NETWORK_PLAY.md, "Testing on one PC". Separate user data comes from a per-copy
+   LOCALAPPDATA, because the app sets user_data_root from %LOCALAPPDATA% and ignores --user_data_root.
 7. Host and player 2 play into Act 1 chapter 2. One way to get there is to play chapter 1 first; a
    profile with chapter 2 unlocked also works. `GearGameSP_Base.InitGame+0x0063` reads `?chapter=`,
    but nobody has tested passing it.
@@ -595,14 +601,15 @@ Pass when there is no rubber-banding at 8 players and nobody else is refused bel
 ### Stage 4: PC-Android cross-play over System Link
 
 Status (2026-10-15): SDK patch 0011-network-crossplay implements the Stage 4 networking.
-It builds for Windows and Android and passes its unit tests (50 System Link cases:
-"All tests passed (1336 assertions in 50 test cases)"), but nothing has run in the game
-or on the phone yet. The Android app adds the INTERNET, ACCESS_NETWORK_STATE,
+It builds for Windows and Android and passes its unit tests (53 System Link cases:
+"All tests passed (1348 assertions in 53 test cases)"). It has run on one PC (below)
+but not on the phone yet. The Android app adds the INTERNET, ACCESS_NETWORK_STATE,
 ACCESS_WIFI_STATE, CHANGE_WIFI_MULTICAST_STATE and WAKE_LOCK permissions, holds a Wi-Fi
 MulticastLock and a low-latency WifiLock (WIFI_MODE_FULL_LOW_LATENCY) from onCreate to
 onDestroy, and sets REX_DETECTED_LOCAL_IP to the Wi-Fi or hotspot address. For setup,
-see docs/NETWORK_PLAY.md. The text below the table is the original design; it is
-unchanged.
+see docs/NETWORK_PLAY.md. On 2026-10-14 two PC copies on loopback played chapter 2
+together with 0011 (docs/NETWORK_PLAY.md, "Testing on one PC"); the PC-phone tests are
+still open. The text below the table is the original design; it is unchanged.
 
 | Setting | Default | Effect |
 |---|---|---|

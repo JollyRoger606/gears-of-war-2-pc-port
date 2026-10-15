@@ -89,6 +89,94 @@ address (swlan0/ap0) itself.
 that can reach the forwarded ports can send datagrams to the game. The
 game's System Link traffic is not encrypted.
 
+## Testing on one PC
+
+Two copies of `gow2.exe` can play System Link on one PC over loopback
+[V]: the host binds 127.0.0.1, the client 127.0.0.2. Verified on
+2026-10-14 with the crossplay build (patch 0011): the client found the
+host's campaign in the System Link Browser, joined the lobby, loaded Act
+1 chapter 2 with the host and played as Dom. A second run repeated it
+with the first-datagram trace (see Troubleshooting). Evidence:
+`out\pcpc-test\run2` and `out\pcpc-test\run3` (logs, screenshots,
+`netlink-evidence.txt`). `out\` is not in git.
+
+`scripts\run-instances.ps1` starts the copies and supervises them. Each
+copy gets its own `LOCALAPPDATA` under the run folder (the game keeps
+profile, saves and caches in `%LOCALAPPDATA%\GearsOfWar2PC`, so the
+script seeds each copy with a copy of the real one), its own log, XUID
+(`B13E0000000000` + 2 hex digits) and gamertag (the instance name),
+`--net_bind_ip`, `--net_broadcast_targets` listing every copy,
+`--system_link_trace=true`, and a windowed 1152x648 window placed side
+by side. It stops every copy it started when the file `stop` appears in
+the run folder, when all copies exit, or after `-MaxSeconds` (600 by
+default). It writes `instances.json`.
+
+Example:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-instances.ps1 -OutDir out\pcpc-test\run1 -ExtraArgs "--audio_mute=true --resolution_scale=1"
+```
+
+`scripts\instance-input.ps1` brings one copy to the front and sends it
+keys, clicks and screenshots, for example:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\instance-input.ps1 -OutDir out\pcpc-test\run1 -Instance client -Steps "focus,key:S:200,wait:800,Space,wait:3000,shot:after-join"
+```
+
+Steps: a key name (`System.Windows.Forms.Keys`) or
+`key:<name>:<holdMs>`, `wait:<ms>`, `shot:<label>` (PNG in
+`<run>\shots`), `click` (left button at the window centre), `focus`. The
+game only reads input from the focused window.
+
+Keys in the menus with `--mnk_mode=true`: W/S move the selection (left
+stick; the arrow keys are the right stick and do not move menus), Space
+= A (select), F = B (back), E = X, Q = Y, Return = Start, left mouse
+button = right trigger.
+
+Menu path that worked:
+
+1. Host: PRESS START (Return) -> main menu, S to CO-OP CAMPAIGN, Space
+   -> CAMPAIGN MENU, HOST CO-OP CAMPAIGN (Space) -> SELECT SAVE SLOT
+   (Space) -> CAMPAIGN LOBBY. CO-OP MODE already reads "System Link".
+   The session is created when the lobby opens: the host log shows
+   `[netlink] XGISessionCreate ... flags=0x00000021 ... host=true ...
+   host_ip=127.0.0.1`. LAUNCH CAMPAIGN (Space) once the client is in the
+   lobby.
+2. Client: PRESS START -> CO-OP CAMPAIGN -> JOIN CO-OP CAMPAIGN (S,
+   Space) opens the SYSTEM LINK BROWSER directly. E refreshes; the
+   host's campaign appears under its gamertag; Space joins and both
+   lobbies list both players. After the host launches, the client sees
+   "PRESS RT TO BEGIN!"; the right trigger (left mouse button) spawns
+   the client as Dom.
+
+What the logs show:
+
+```
+client: [netlink] broadcasts to port 14001 go out to [127.0.0.1:14001]
+client: [netlink] XGISessionCreate ... flags=0x00000020 ... host=false known=true xnkid=00F4837B3BB2B61B host_ip=127.0.0.1
+client: [netlink] XNetXnAddrToInAddr caller=1 ina=127.0.0.1 inaOnline=0.0.0.0 -> 127.0.0.1 ret=0x0
+client: [netlink] sendto port 1000 -> 41000 (net_port_offset)
+host:   [netlink] bind port 1000 -> 41000 (net_port_offset)
+host:   [netlink] broadcasts to port 14001 go out to [127.0.0.2:14001]
+client: [netlink] first datagram to 127.0.0.1:14001 from local port 14001 (16 bytes)
+host:   [netlink] first datagram from 127.0.0.2:14001 on local port 14001 (16 bytes)
+host:   [netlink] first datagram to 127.0.0.2:14001 from local port 14001 (190 bytes)
+client: [netlink] first datagram from 127.0.0.1:14001 on local port 14001 (190 bytes)
+client: [netlink] first datagram to 127.0.0.1:41000 from local port 54430 (55 bytes)
+host:   [netlink] first datagram from 127.0.0.2:54430 on local port 41000 (55 bytes)
+```
+
+The 16-byte datagram is the client's System Link query and the 190-byte
+one the host's beacon answer; game traffic then goes to the host's
+remapped port 41000.
+
+The client's XNKID equals the one the host created, which is how the
+beacon answer reached it.
+
+Loopback traffic does not cross Windows Firewall, so this test says
+nothing about the firewall; the PC-phone test does.
+
 ## Troubleshooting
 
 Turn on `system_link_trace` and look for these log lines:
@@ -98,5 +186,19 @@ Turn on `system_link_trace` and look for these log lines:
 - `[netlink] broadcasts to port 14001 go out to [...]`
 - `[netlink] dropped ... (net_allow_peers)`
 - `[netlink] XNetXnAddrToInAddr ... -> ...`
+- `[netlink] first datagram from <ip>:<port> on local port <port> (<n>
+  bytes)` and `[netlink] first datagram to <ip>:<port> from local port
+  <port> (<n> bytes)`: logged once per socket handle and peer in each
+  direction, even after the trace's rate limit (first 50 calls, then
+  every 500th) is spent. Windows reuses socket handles, so a reconnect
+  to the same peer on a new socket may not log again. On a PC that joins a phone's game, "first
+  datagram from <phone>:14001 on local port 14001" means the phone's
+  beacon answer got through Windows Firewall; its absence while the
+  phone's log shows the answer going out points at the firewall.
+
+The successful and the failed (would-block) recvfrom/sendto calls now
+have separate trace budgets, so the polling of an idle socket no longer
+hides real datagrams.
+
 
 If the PC advertises 127.0.0.1, set `net_local_ip` to its LAN address.
