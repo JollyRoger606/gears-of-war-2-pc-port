@@ -143,6 +143,11 @@ target_include_directories(gow2 PRIVATE
 )
 target_link_libraries(gow2 PRIVATE gow2_recomp rex::runtime log)
 target_link_options(gow2 PRIVATE -Wl,--no-undefined)
+# Only SDL_main is looked up from outside (SDLActivity's dlsym); exporting the ~98,000 symbols of
+# the recompiled code made the dynamic linker bind them by name at every start.
+set(GOW2_EXPORTS_MAP "${CMAKE_CURRENT_SOURCE_DIR}/libgow2.map")
+target_link_options(gow2 PRIVATE "-Wl,--version-script=${GOW2_EXPORTS_MAP}")
+set_property(TARGET gow2 APPEND PROPERTY LINK_DEPENDS "${GOW2_EXPORTS_MAP}")
 rexglue_configure_target(gow2 GPU_PLUGINS xenos)
 
 #----------------------------------------------------------------------------------------------
