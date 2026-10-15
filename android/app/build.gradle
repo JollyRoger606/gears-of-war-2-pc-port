@@ -17,7 +17,7 @@ if (!gameLibraries && (!sdl3SourceDir || !file("${sdl3SourceDir}/CMakeLists.txt"
             "(thirdparty/sdl3 of a ReXGlue SDK checkout); got '${sdl3SourceDir}'.")
 }
 
-// The game's libraries come prebuilt from scripts/build-android.ps1 (android/game, out/android/jniLibs).
+// The game's libraries come prebuilt from scripts/build-android.ps1 (android/gamelibs, out/android/jniLibs).
 def gameLibsDir = file(providers.gradleProperty('gow2.gameLibs.dir').getOrNull()
         ?: localProperties.getProperty('gow2.gameLibs.dir')
         ?: rootProject.file('../out/android/jniLibs'))
@@ -90,6 +90,43 @@ android {
             minifyEnabled = false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+abstract class CopyLicenseAssets extends DefaultTask {
+    @InputFiles
+    @PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract ConfigurableFileCollection getLicenseFiles()
+
+    @OutputDirectory
+    abstract DirectoryProperty getOutputDir()
+
+    @TaskAction
+    void copyLicenses() {
+        def target = outputDir.get().dir('licenses').asFile
+        target.deleteDir()
+        target.mkdirs()
+        licenseFiles.each { File file ->
+            if (!file.isFile()) {
+                throw new GradleException("License file ${file} is missing; every APK must carry it " +
+                        "(assets/licenses).")
+            }
+            java.nio.file.Files.copy(file.toPath(), new File(target, file.name).toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+}
+
+// The APK ships the license texts next to the binaries, copied from the repository so there is
+// one copy of each.
+def copyLicenseAssets = tasks.register('copyLicenseAssets', CopyLicenseAssets) {
+    licenseFiles.from(rootProject.file('../LICENSE'), rootProject.file('../THIRD_PARTY_NOTICES.md'),
+            rootProject.file('LICENSE.SDL3.txt'))
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(copyLicenseAssets, { it.outputDir })
     }
 }
 
