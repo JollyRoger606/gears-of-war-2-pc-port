@@ -9,6 +9,8 @@
 
 Retail Xbox 360 Gears of War 2 statically recompiled from the player's own `default.xex` to native x64 code with the ReXGlue SDK. This is not emulation. Players must own the game. An earlier fan port ("Hollow") was built from a leaked 2008 development build; this one runs the complete retail game.
 
+The project's short name, `gow2-recomp`, names the release zip; the repository is `gears-of-war-2-pc-port`.
+
 Leer en español: [README.es.md](README.es.md)
 
 ## Screenshots
@@ -31,10 +33,11 @@ Leer en español: [README.es.md](README.es.md)
 - [x] Community game patches
 - [x] FSR 1 upscaling and CAS sharpening (`present_effect`)
 - [x] Texture packs: dump the game's textures, load your own higher-resolution versions
-- [ ] Mouse look that feels like a PC game (fix in progress, see Known issues)
-- [ ] FSR 4 / DLSS temporal upscaling (built in, not active for this game yet)
+- [x] Mouse aim through the game's own PC mouse axes, with no stick dead zone (`gow2_mouse_aim`, on by default)
+- [x] FSR 4 and FSR 3.1 temporal upscaling (`gow2_temporal`, `gow2_upscaler`; off by default). The release has no DLSS
+- [ ] Keyboard keys handled as on a PC (they still pass through an emulated controller)
 - [ ] Full campaign play-through
-- [x] System Link campaign co-op: four players on one PC (loopback) and PC with an Android phone on one LAN, verified 2026-10-14 and 2026-10-15
+- [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four players on one PC (loopback), two PCs on one LAN, and a PC with an Android phone on one LAN, verified 2026-10-14 and 2026-10-15
 - [ ] Internet play (built: `net_peers`, `net_public_address`, `net_allow_peers`; not tested yet)
 - [ ] System Link Horde and Versus
 
@@ -97,6 +100,7 @@ A controller works at the same time. All bindings are in `gow2.toml`.
 - `gow2_aniso16` — 16x anisotropic filtering.
 - `gow2_ao_upscaling_fix` — ambient occlusion without artifacts when scaled.
 - `gow2_dof_upscaling_fix` — depth of field without artifacts when scaled.
+- `gow2_temporal`, `gow2_upscaler` — temporal upscaling: `gow2_temporal = true` with `gow2_upscaler = "fsr4"` (Radeon RX 7000/9000) or `"fsr3"`; off by default.
 - `mnk_sensitivity` — mouse sensitivity.
 - `gow2_save_dir` — folder for saves, profile settings and achievements; point it at a OneDrive, Google Drive or Dropbox folder to keep the campaign in the cloud ([docs/SAVES.md](docs/SAVES.md)).
 
@@ -110,14 +114,15 @@ Measured on a Ryzen 9 7900X3D + Radeon RX 7800 XT, Act 1, `resolution_scale = 2`
 
 - Native resolution via `resolution_scale` (see Settings).
 - FSR: the release runtime is built with AMD FidelityFX. `present_effect = "fsr"` renders at a lower `resolution_scale` and upscales with FSR 1 plus sharpening; `"cas"` only sharpens. Measured with `resolution_scale = 1` and FSR 1 to 1440p: about 85 fps in Act 1.
-- Temporal upscaling: FSR 4.1 (Radeon RX 7000/9000, through AMD's signed FidelityFX SDK 2.3 DLLs), FSR 3.1 on other GPUs and DLSS on NVIDIA (bring your own `nvngx_dlss.dll`, see THIRD_PARTY_NOTICES.md) are built in, ported from the Gears of War: Judgment recompilation. It does not switch on for this game yet: its scene detection still expects Judgment's frame layout and is being calibrated. Off by default (`gow2_temporal`, `gow2_upscaler`).
+- Temporal upscaling: FSR 4.1 on Radeon RX 7000/9000 and FSR 3.1 on other GPUs, through AMD's signed FidelityFX SDK 2.3 DLLs, ported from the Gears of War: Judgment recompilation. Off by default: set `gow2_temporal = true` and `gow2_upscaler = "fsr4"` or `"fsr3"`, and lower `resolution_scale` so the upscaler has room to work. FSR 4 was checked in game on a Radeon RX 7800 XT (1280x704 upscaled to 2560x1408).
+- No DLSS in the release: NVIDIA's DLSS SDK license does not allow it in an open-source release (see THIRD_PARTY_NOTICES.md). Only builds made from source with your own copy of NVIDIA's DLSS SDK can use it.
 - Texture packs: see the next section. Tested with a texture replaced by a version twice its size:
 
   ![A title-screen texture replaced by a recoloured 2048x2048 version](docs/screenshots/texture-pack-test.jpg)
 
 ## Texture packs
 
-Replace game textures with higher-resolution versions (for example upscaled 4x). The game ships no textures, so each player builds packs from their own copy — packs must never include files from the game, only your own reworked DDS files under their hash names.
+Replace game textures with higher-resolution versions (for example upscaled 4x) for your own use. Each player builds packs from their own copy. An upscaled or recoloured texture is still derived from the game's copyrighted art, so do not share packs made from the game's textures; this project does not host or link them.
 
 1. Set `texture_dump = true` in `gow2.toml` and play. Dumps land in `textures\4D53082D\dump` next to `gow2.exe`, one `.dds` file per unique texture, named `<hash>_<format>_<width>x<height>.dds`. Videos and other textures that change every frame are skipped.
 2. Convert the dumps to PNG with `tools\texpack.py` (included in the release; needs Python 3 and Pillow, `pip install pillow`): `python tools\texpack.py to-png textures\4D53082D\dump work` converts the whole folder.
@@ -139,9 +144,11 @@ Horde and Versus over System Link have not been tried. See [ROADMAP.md](ROADMAP.
 
 ## Known issues
 
-- **Mouse look feels wrong.** The mouse is turned into a right-stick movement, and the game ignores any stick deflection under 30% (its `DeadZone=0.3` binding), so slow mouse movement is lost and fast movement jumps. A fix that removes that dead zone for the mouse while keeping it for controllers is in progress.
+- **Mouse aim changed in 0.1.1.** In 0.1.0 the mouse was turned into a right-stick movement, and the game ignored any stick deflection under 30% (its `DeadZone=0.3` binding). Now the mouse goes through the game's own PC mouse axes (`gow2_mouse_aim`), with no dead zone, while controllers keep the game's own aiming. Keys still pass through an emulated controller. Reports of how it feels are welcome in an issue.
 - **Button prompts show Xbox buttons** even when you play with the keyboard. Keyboard labels are in progress.
 - **Green-looking lighting** has been reported on skin, lights and the menu flames; it has not been reproduced on the development PC yet. Screenshots are welcome in an issue.
+- **Co-op with three or four players is early.** A chapter change, the death of any player, a player leaving, cinematics and vehicles can break it ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)).
+- **Every player needs the same build.** There is no version check yet, and a build without patch 0011 (such as 0.1.0) cannot see a 0.1.1 host.
 - Only Act 1 has been played so far.
 
 ## Building from source
@@ -158,10 +165,12 @@ See [BUILDING.md](BUILDING.md). The main scripts are `scripts/build.ps1`, `scrip
 - [OverkillLabs3/gears-judgement-recomp](https://github.com/OverkillLabs3/gears-judgement-recomp) (Gears of War: Judgment on ReXGlue, BSD-3-Clause) — this repo copies `tools/patch_switch_traps.py` and `tools/check_objects_fresh.py` from it and adapts `scripts/build.ps1` from its `scripts/build.ps1`. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - [XenonRecomp](https://github.com/hedge-dev/xenonrecomp) (hedge-dev).
 - [Xenia](https://github.com/xenia-project/xenia).
-- AMD FidelityFX SDK (MIT).
-- NVIDIA DLSS SDK.
+- AMD FidelityFX SDK: FSR 1 and CAS (MIT). The FSR 4 and FSR 3.1 DLLs in the release are AMD's signed binaries, redistributed under AMD's license, not MIT (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+- NVIDIA DLSS SDK (builds from source only; not in the release).
 - [PresentMon](https://github.com/GameTechDev/PresentMon) (used for measurements).
 
 ## Legal
 
 Unofficial project. Not affiliated with or endorsed by Microsoft, Xbox Game Studios, The Coalition, or Epic Games. All trademarks belong to their owners. This repository's own code is licensed under the BSD-3-Clause License — see [LICENSE](LICENSE).
+
+The screenshots (`docs/screenshots`, the `docs/assets/img` files other than `icon-320.webp`, `docs/assets/og-image*.jpg` and `assets/icon/og-image*.png`) show Gears of War 2 content, © Microsoft Corporation (originally © 2008 Epic Games, Inc.), captured from the game running in this port. They are not covered by the BSD-3-Clause license. The release zip also carries AMD and Microsoft runtime DLLs under their own licenses ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
