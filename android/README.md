@@ -441,8 +441,11 @@ spends building pipelines, why render passes ended, guest memory uploads by the 
 needed them, CPU writes caught by the memory watches, texture loads and all-zero texture data) and
 a `TEXFMT` line per texture format; a texture whose data cannot be loaded logs `TEXFAIL` once per
 format. `gow2_system_settings` sets keys of the game's own `[SystemSettings]` (for example
-`DynamicShadows=False;AmbientOcclusion=False`) in the cached Coalesced copy, so the game's own
-effects can be switched off without a rebuild. `vulkan_android_depth_experiment` (diagnostic bits:
+`DynamicShadows=0;AmbientOcclusion=0`) in the cached Coalesced copy, so the game's own
+effects can be switched off without a rebuild. On Android it defaults to
+`LightEnvironmentShadows=0`; setting the key replaces that default. A value longer than the
+original is not applied (`False` is longer than `True`; `0` reads as false).
+`vulkan_android_depth_experiment` (diagnostic bits:
 depth test forced to pass, depth prepass skipped, stencil off, whole-target scissor, scene draws
 painted magenta, culling off, no clip planes, prepass meshes skipped without their depth clears,
 every float24 color draw passing its depth test, mid-frame depth clears skipped, prepass painted),
@@ -481,11 +484,13 @@ pipelines (22.6 s at boot in the October 15 log); the launch-time effect is to b
 
 ### CPU waits
 
-`gpu_worker_spin_us=50` makes the GPU command thread poll for up to 50 microseconds with ISB
-pauses, then sleep on the write pointer event in 5 ms waits. 0 sleeps at once; -1 restores the
-SDK's roughly 500 yield polls before sleeping. `gow2_android_gpu_wait_yield=true` also calls
+`gpu_worker_spin_us` defaults to -1, the SDK's 500 yield polls before sleeping.
+Setting it to 50 makes the GPU command thread poll for up to 50 microseconds with ISB
+pauses, then sleep on the write pointer event in 5 ms waits; 0 sleeps at once.
+`gow2_android_gpu_wait_yield` defaults to false; true also calls
 `sched_yield` once per poll of the game's wait for the GPU (`sub_8298C2A0` through `sub_82977688`),
-keeping the guest work and its time-base timeout.
+keeping the guest work and its time-base timeout. P9 measured no difference on the warm phone
+at the same GPU clock, so both defaults returned to the SDK behaviour.
 
 At build time `tools/prepare_android_sources.py` runs `tools/patch_spin_hints.py` on the Android
 copy of the generated code. It adds `__builtin_arm_isb(15)` after Xenon delay hints, which the
@@ -512,8 +517,9 @@ unchanged: keyboard labels unless an XInput controller is connected at launch.
 - Speed: about 9 game frames per second on a GPU thermally capped at 222 MHz (see above); the Xenos
   path's remaining cost on the Adreno 830 is next
   ([`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md), steps 1 and P1-P6).
-- Rendering: the black regions were fixed on October 15. After walking, two lamp posts and a
-  hanging banner still render solid white with a glow (0.81 % of the walked picture). The phone's
+- Rendering: the black regions were fixed on October 15. The Android default
+  `LightEnvironmentShadows=0` also removes the solid-white lamp posts and hanging banner;
+  the cause in the Vulkan backend or driver remains open. The phone's
   warm colour grade differs from the PC's teal grade; which matches the console is not established
   (same document, [black scene results](../docs/ANDROID_EXPERIMENTS.md#black-scene-found-october-15-second-session)).
 - A checkpoint written by an older build (before the network fixes) crashes on load: the main

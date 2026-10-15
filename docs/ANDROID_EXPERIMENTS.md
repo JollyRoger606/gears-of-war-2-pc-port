@@ -166,14 +166,16 @@ The fix is not Android-specific and is not behind `REX_PLATFORM_ANDROID`: only t
 compiles the Vulkan backend (`REXGLUE_USE_VULKAN` is off on Windows). Also in 0007,
 `ANativeWindow_setFrameRate` is looked up with `dlopen("libnativewindow.so")` then `dlsym`, falling
 back to `libandroid.so`. `dlsym(RTLD_DEFAULT, ...)` found nothing in the app's namespace and logged
-"not available (Android 10)" on Android 16. The new lookup is to be confirmed on the phone.
+"not available (Android 10)" on Android 16. The new lookup succeeded on the phone (P8/C3 below).
 
 The colour grade still differs from the PC (phone warm, PC teal); which matches the console is
 not established. After walking forward, two lamp posts and a hanging banner render solid white
 with a glow (`crop-white-bias16.png`, 0.81 % of the walked picture). These are the white blocks of
 October 15. With bit 128 they are absent (0.01 %); with bit 256 they are present (0.53 %). A draw
-that should fail its depth test on those objects passes once depth moves. This remains under
-investigation.
+that should fail its depth test on those objects passes once depth moves. The later shadow tests
+isolate light environment shadows: F3's Android default `LightEnvironmentShadows=0` removes the
+white objects while keeping the world's dynamic shadows. The cause in the Vulkan backend or
+driver is still open.
 
 Patch 0011 removed the old Launch log marker, so the helpers kept pressing Space into gameplay.
 They now add `system_link_trace = true` to every `gow2.toml` and wait for `[netlink] bind`.
@@ -182,6 +184,135 @@ They now add `system_link_trace = true` to every `gow2.toml` and wait for `[netl
 grows each value, while `0` reads as false in UE3 and keeps the bundle shorter. The phone self-test
 printed `runtime_selftest: 21 checks, 0 failed` (both FPSCR checks) and
 `touch_model_test: 105 checks, 0 failed`.
+
+### Frame rate, display and image quality (October 15, second session)
+
+The full measurements are in `out\phone2\results.md`, including every section after "After the
+fix". F2 (commit `9a93000`) defaults to depth bias 16. F3 (commit `373c1e8`) also defaults to
+`gow2_system_settings = "LightEnvironmentShadows=0"`, `gpu_worker_spin_us = -1` and
+`gow2_android_gpu_wait_yield = false` on Android. `present_effect` stays `fsr`, FIFO and the 30 Hz
+request stay, and `vulkan_pipeline_cache_file` stays on. Sustained performance mode stays off.
+
+The F2 cool start began at thermal status 0, skin and battery 35.8 C, on USB power. It reached
+status 3, skin 44.7 C, about 90 s into gameplay. USB power could not keep the phone cool; the
+warm-phone A/B comparisons therefore use Mcycles per game frame and fps at the same capped clock.
+
+| Cool-start clock | Quiet windows | Median fps | Mcycles/frame |
+|---|---|---|---|
+| 734 MHz | 3 | 23.6 | 30.2 |
+| 660 MHz | 1 | 23.5 | 27.8 |
+| 525 MHz | 5 | 16.9 | 30.8 |
+| 443 MHz | 20 | 15.8 | 27.8 |
+| 389 MHz | 14 | 13.9 | 27.6 |
+| 342 MHz | 17 | 12.8 | 26.5 |
+
+The median over quiet gameplay windows was 27.0 Mcycles/frame, against 24.2 in the morning build
+with black regions: the missing scene is now drawn. C0 sampled `top -H` at +60 s, 389 MHz and
+status 3, with the GPU 99 % busy:
+
+| Thread | CPU use (% of one core) |
+|---|---|
+| Guest thread | 97-99 % |
+| Audio Worker | 67-70 % |
+| GPU Commands | 54-57 % |
+| Main XThread | 20-23 % |
+| SDLThread | 13-17 % |
+| Second guest thread | 13-17 % |
+
+Total CPU use was about 3.1 cores. Audio Worker runs the guest audio callback after a semaphore
+wait with a 500 ms timeout; it is not polling. No power rails were readable, so this is not a
+power measurement.
+
+C1 recorded only the installed app with `appCategory` game; the other Game Booster/category
+states were not tested. The cap followed skin temperature, with thermal-service thresholds
+38/40/42/45 C, even before Android changed its reported thermal status.
+
+| C1 point | Clock or cap | Thermal observation |
+|---|---|---|
+| At rest | Cap 1200 MHz, pwrlevel 0 | Status 0 |
+| After 54 s at title | Cap 525 MHz, pwrlevel 9 | Skin 39.4 C, still status 0 |
+| Gameplay 14:15:54 to 14:15:58 | 900, 832, 734 MHz | Clock falling |
+| 14:16:28-31 | 660-525 MHz | Then 525/443 MHz alternating for a minute |
+| Later gameplay | 389 MHz, then 342 MHz from 14:19 | Status 3, skin 44.5 C |
+
+C8 changed the game's scene resolution and the runtime's render scale separately. Costs below
+are Mcycles per game frame, with fps in parentheses; the repeated baseline shows the noise.
+
+| C8 setting | At 160 MHz | At 222 MHz | Edge strength |
+|---|---|---|---|
+| ScreenPercentage 100, bias 16 | 20.3 (7.8) | 27.5 (8.0) | 15.0 |
+| Same baseline repeated | 20.6 (7.7) | 28.2 (7.8) | 15.0 |
+| ScreenPercentage 50 | 18.7 (8.5) | 21.3 (10.3) | 4.7 |
+| ScreenPercentage 75, later valid run | - | About 21.9 (9.8-10.2) | - |
+| resolution_scale 2 | 75.4 (2.1) | 73.3 (3.0) | 37.7 |
+
+The first ScreenPercentage 75 run was void because an incoming-call overlay covered the game;
+the later run above was valid. ScreenPercentage 75 saved about 20 % in one run; 50 blurred the
+image heavily for a limited gain. Most of the cost scales with the runtime's render target work,
+shadows and full-resolution passes, not with the game's scene resolution, so ScreenPercentage
+tiers are not a frame-rate lever.
+
+The white banner stayed white with bloom and lens flares off. Disabling dynamic lights or
+shadows removed it; the narrower shadow comparison was:
+
+| Shadow setting (bias 16) | Mcycles/frame at 222 MHz | fps at 222 MHz | Banner/lamps |
+|---|---|---|---|
+| Shadows on | 24.4 | 9.0 | White |
+| DynamicShadows=0 | 18.2 | 12.1 | Normal (dark banner) |
+| LightEnvironmentShadows=0 | 17.9 | 12.3 | Normal |
+| Both off | 17.9 | 12.3 | Normal |
+
+F3 defaults to `LightEnvironmentShadows=0` on Android because it removes the white objects while
+keeping the world's dynamic shadows. Setting `gow2_system_settings` replaces that default;
+include this pair in a custom value to keep it. Use `0`, not `False`, to avoid growing a
+Coalesced bundle past its TOC size. The Vulkan backend or driver cause remains open.
+
+P8/C3 confirmed the panel at 30 Hz with FIFO and `present_android_frame_rate = 30`:
+`ANativeWindow_setFrameRate(30 Hz) returned 0`, SurfaceFlinger reported `vsyncRate=30.00 Hz` and
+`renderRate=30.00 Hz`, and display reported `mActiveRenderFrameRate=30.000002`. The panel left
+120 Hz. This confirms the request, not a power saving measurement.
+
+P9 compared the F2 waits (spin 50 microseconds plus ISB, game wait yield, FIFO and 30 Hz) with
+spin -1, no game wait yield, MAILBOX and no rate request on a warm phone at the same 222 MHz cap.
+Both cost 26.5 Mcycles/frame. Process CPU snapshots were 253/249/240 % against 250/238/238 %;
+GPU Commands used 21-28 % against 21-23 %. No difference was measured, so F3 restores -1 and
+false for the two wait switches. The build-time ISB delay hints stayed in both runs and were
+not isolated. P11 was not measured: cool A/B/B/A starts were not available on USB power.
+
+P10 timed the same 852 stored pipelines back to back on a warm phone: 27.5 s without the driver
+cache, 2.7 s with it (`.vkpc` loaded successfully, about 13 MB of driver data). The cache stays on.
+
+| Present effect | Edge strength (first view / walked) | Mcycles/game frame at 222 MHz |
+|---|---|---|
+| bilinear | 8.2 / 8.6 | 21.8, 22.0 (34.3 in the first window) |
+| fsr (default) | 17.6 / 18.6 | 22.9-27.8, median 23.9 |
+| sgsr | 18.7 / 19.6 | 20.5-31.0, about 28.5 |
+
+P7's present-effect runs drew FSR 1 and SGSR 1 correctly on Adreno 830, with no artefacts seen;
+both were much sharper than bilinear, SGSR a little crisper. At 9 fps with a 30 Hz panel the
+presenter paints about 3.3 times per game frame, putting the FSR cost at most about 0.6 Mcycles
+per paint in these measurements, within run-to-run noise. SGSR was not cheaper here. There was
+only one run per effect, so this is not a precise cost comparison; `present_effect` stays `fsr`.
+
+A3 loaded Vulkan-ValidationLayers 1.4.363.0 for an F2 gameplay run, then removed the layer (it is
+not shipped). One presenter semaphore error, `VUID-vkQueueSubmit-pSignalSemaphores-00067`, was
+reported six times at boot: a signaled semaphore could still be in use by the swapchain. The only
+warnings were fragment outputs without color attachments, capped at 10. Gameplay had no image
+layout, barrier, attachment or depth/stencil errors.
+
+A6-light set the production and prerelease updatable-driver opt-in settings with bias 0. Both
+runs still loaded stock driver `0x80320040`, build `f61dec9117`; neither alternative driver was
+tested. Black shares of 35.1 % and 38.1 % were consistent with the stock driver at bias 0.
+
+| Build | Black share (value 2-6) | fps / Mcycles at 222 MHz | fps / Mcycles at 607-660 MHz |
+|---|---|---|---|
+| October 15 morning (`apk-final.apk`, p0) | 38.0 % | 10.7 / 20.5 | 19.2-19.4 / 26.5-27.8 |
+| F3 (`apk-f3.apk`) | 0.4 % | 12.5 / 17.6 | - |
+
+At 160 MHz F3 ran at 10.1 fps and 15.8 Mcycles/frame. It draws the whole scene with about 14 %
+less GPU cost per frame and 17 % more frames at the same 222 MHz cap than the morning build.
+Frame generation (plan E) is not applicable at the sustained 10-12.5 fps rate at 160-222 MHz;
+even the F2 cool-start peak of 23.6 fps lasted only a few seconds and was below the 28 fps threshold.
 
 ## What the build adds
 
@@ -229,14 +360,14 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   passes dither by default. These filters change image quality, not the game's GPU work (P7).
   The swapchain now defaults to plain FIFO, painting on the UI thread instead of the GPU command
   thread; the October 15 logs used MAILBOX. Android 11+ receives an
-  `ANativeWindow_setFrameRate` request for 30 Hz, expected to let the panel leave 120 Hz (P8).
+  `ANativeWindow_setFrameRate` request for 30 Hz; P8/C3 confirmed the panel left 120 Hz for 30 Hz.
   The request is not a forced rate. 0 makes no request; `gow2_unlock_fps` uses 0 for that launch
   unless `gow2.toml` sets `present_android_frame_rate` (`DISPLAY frame rate hint` in the log).
   The call logs `VulkanPresenter: ANativeWindow_setFrameRate(30 Hz) returned 0` on success.
 - **Transfer shader and frame rate lookup.** Patch 0007 addresses the host depth source with its
   own sample count in the Vulkan render target transfer shader, with no visible change at this
   checkpoint. `ANativeWindow_setFrameRate` is resolved through `dlopen("libnativewindow.so")` then
-  `dlsym`, falling back to `libandroid.so`; the lookup is to be confirmed on the phone.
+  `dlsym`, falling back to `libandroid.so`; P8/C3 confirmed the lookup and request on the phone.
 - **Driver pipeline cache.** `vulkan_pipeline_cache_file` keeps
   `cache/shaders/shareable/4D53082D.vkpc` beside `4D53082D.xsh` and `4D53082D.fbo.vk.xpso`.
   It loads at boot after checking vendor, device, driver version, pipeline cache UUID, size and
@@ -245,19 +376,19 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   at shutdown, writing `.tmp` then renaming it. Logs name the path, load status and driver bytes:
   `VulkanPipelineCache: pipeline cache file <path>: <status> (<n> bytes of driver data)` and
   `VulkanPipelineCache: saved <n> bytes of driver pipeline cache to <path>`. Reusing driver data
-  is expected to avoid repeating compilation of about 1,270 stored pipelines (22.6 s at boot in
-  the October 15 log); boot-time savings are to be measured (P10).
-- **CPU waits.** The GPU command thread polls with ISB pauses for 50 microseconds, then sleeps
-  on the write pointer event in 5 ms waits. The game's GPU wait yields once per poll through
-  `sub_82977688`, called by `sub_8298C2A0`; its guest work and time-base timeout stay the same.
+  avoided repeating driver compilation in P10: the same 852 stored pipelines built in 2.7 s
+  instead of 27.5 s on a warm phone.
+- **CPU waits.** After P9 measured no difference, `gpu_worker_spin_us` defaults to -1 (the SDK's
+  roughly 500 yield polls before sleeping) and `gow2_android_gpu_wait_yield` to false (the game's
+  SDK wait behaviour, without the added yield). Its guest work and time-base timeout stay the same.
   At build time `tools/prepare_android_sources.py` runs `tools/patch_spin_hints.py` on the Android
   copy of the generated code, adding `__builtin_arm_isb(15)` after Xenon delay hints the
   recompiler otherwise omits. GoW2 has 12 `db16cyc` sites: eight in `sub_82977688`, the rest in
   wait loops in `sub_829925B0`, `sub_82955768` and `sub_829531F8`. The original `generated/` and
   Windows build are unchanged. The window's sustained performance mode is opt-in where
   `PowerManager.isSustainedPerformanceModeSupported()` allows it; the runtime logs
-  `SUSTAINED performance mode requested: ...`. CPU, power and sustained clock effects are to
-  be measured (P9, P11). None of these additions has been measured on the phone yet.
+  `SUSTAINED performance mode requested: ...`. P11 remains unmeasured; the USB-powered session
+  could not provide cool A/B/B/A starts.
 - **Switches** (all in `gow2.toml`; defaults below are Android defaults):
 
   | Switch | Default | Effect |
@@ -272,14 +403,14 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   | `vulkan_allow_present_mode_fifo_relaxed` | false | Allow FIFO_RELAXED instead of plain FIFO |
   | `present_android_frame_rate` | 30 | Ask Android 11+ for this window frame rate in Hz; 0 makes no request; launch default 0 with `gow2_unlock_fps` unless configured |
   | `vulkan_pipeline_cache_file` | true | Load and save the driver's `.vkpc` cache beside shader storage (restart) |
-  | `gpu_worker_spin_us` | 50 | GPU command thread polls with ISB pauses for this many microseconds, then waits in 5 ms sleeps; 0 sleeps immediately, -1 restores roughly 500 SDK yield polls |
-  | `gow2_android_gpu_wait_yield` | true | Yield once per poll of the game's GPU wait without changing guest work or its time-base timeout |
+  | `gpu_worker_spin_us` | -1 | -1 keeps roughly 500 SDK yield polls; 0 sleeps immediately; N polls with ISB pauses for N microseconds, then waits in 5 ms sleeps; 50 was measured with no difference |
+  | `gow2_android_gpu_wait_yield` | false | True yields once per poll of the game's GPU wait without changing guest work or its time-base timeout; P9 measured no difference |
   | `gow2_android_sustained_performance` | false | Request supported window sustained performance mode (restart); opt-in until measured |
   | `vulkan_android_empty_fragment_shader` | false | Draws without a pixel shader that have color targets bound get an empty fragment shader instead of none (restart) |
   | `vulkan_android_invariant_position_member` | false | `gl_Position` also gets the `Invariant` member decoration glslang emits (restart) |
   | `vulkan_occlusion_query_precise` | false | Occlusion queries ask for exact sample counts (`VK_QUERY_CONTROL_PRECISE_BIT`) |
   | `vulkan_async_pipeline_placeholders` | true | false: new pipelines are queued without first building a placeholder on the GPU command thread, and pipelines without a pixel shader are built in the background too |
-  | `gow2_system_settings` | "" | `Key=Value` pairs separated by `;` for the game's own `[SystemSettings]` (`Xe-GearEngine.ini`), for example `DynamicShadows=False` (restart) |
+  | `gow2_system_settings` | "LightEnvironmentShadows=0" | Android default removes the white objects; `Key=Value` pairs separated by `;` for the game's own `[SystemSettings]` (`Xe-GearEngine.ini`); setting this key replaces the default, so include `LightEnvironmentShadows=0` to keep it; use `0` for false (restart) |
   | `clear_memory_page_state` | false on Android | true re-uploads every CPU-written page at each frame end (the SDK's default elsewhere); halves the frame rate here |
   | `vulkan_android_depth_experiment` | 0 | Diagnostic bits, each drawing the scene wrongly: 1 color draws without depth writes pass the depth test, 2 skip every depth-only draw on the float24 depth (the prepass and its depth clears), 4 stencil off for color draws, 8 whole-target scissor, 16 scene draws that pass the depth test painted magenta, 32 face culling off, 64 no user clip planes or vertex kill, 128 skip the prepass meshes but keep the depth clears (rectangle lists), 256 every color draw with a pixel shader on the float24 depth passes the depth test (depth writers too), 512 skip the depth clear rectangles drawn after the frame's first prepass mesh (#575-class; #0 stays), 1024 depth-only draws on the float24 depth with color target 0 bound write magenta (restart) |
   | `vulkan_android_color_depth_bias` | 16 | About one float24 step added to the depth bias of color draws with a pixel shader on float24 depth that test GREATER or GEQUAL; fixes the black regions while keeping the prepass, early depth rejection and depth for later passes; 0 turns it off (restart) |
@@ -554,17 +685,21 @@ or more in both B runs.
   Require `unpresented = 0` in the quiet windows being compared. Keep screenshots of that same
   view for quality. The internal game resolution stays 1280x720; filter cost and look
   remain to be measured.
+  Result (October 15): FSR and SGSR were sharper than bilinear; one run each leaves cost noisy ([measurements](#frame-rate-display-and-image-quality-october-15-second-session)).
 - **P8 display pacing.** A: defaults; B: `vulkan_allow_present_mode_mailbox = true` and
   `present_android_frame_rate = 0`. Use A/B/B/A with the same cool-start gate and quiet windows.
   Read `adb -s $s shell dumpsys SurfaceFlinger` in each run for the refresh rate, and keep the
   present-mode and frame-rate request log lines. Compare Mcycles/frame, presented frame cadence
   and sustained clock; any panel or power effect is to be measured.
-- **P9 CPU waits.** A: defaults; B: `gpu_worker_spin_us = -1` and
+  Result (October 15): FIFO with the 30 Hz request put the panel at 30 Hz ([measurements](#frame-rate-display-and-image-quality-october-15-second-session)).
+- **P9 CPU waits.** A: F2 settings (`gpu_worker_spin_us = 50` and
+  `gow2_android_gpu_wait_yield = true`); B: `gpu_worker_spin_us = -1` and
   `gow2_android_gpu_wait_yield = false`. Use A/B/B/A, cool starts and quiet-window Mcycles/frame.
   Record `adb -s $s shell top -H -b -d 5 -n 6 -p <pid>` during the same view: CPU use of the GPU
   command thread and game thread, plus the sustained GPU clock from the sampler. This compares
   the configurable waits; the build-time ISB delay hints stay in both builds. CPU and power
   effects are to be measured.
+  Result (October 15): no difference at the same cap; defaults reverted to -1 and false, build-time ISB hints kept ([measurements](#frame-rate-display-and-image-quality-october-15-second-session)).
 - **P10 pipeline cache.** Delete both shader storage files and `4D53082D.vkpc` with experiment
   6's `rm`, then make a first launch through the same view to populate storage and let it save.
   Keep the next two launches without deleting anything: compare the time from
@@ -576,11 +711,13 @@ or more in both B runs.
   with a cool phone before every launch. Compare boot time and quiet-window Mcycles/frame
   separately. A stale driver cache would hide the compilation this test needs to time; savings
   remain to be measured.
+  Result (October 15): 852 stored pipelines built in 2.7 s with the driver cache against 27.5 s without ([measurements](#frame-rate-display-and-image-quality-october-15-second-session)).
 - **P11 sustained performance.** A: defaults; B: `gow2_android_sustained_performance = true`.
   Use A/B/B/A from cool starts, the same two-minute view and quiet-window Mcycles/frame. Keep
   `SUSTAINED performance mode requested: ...`, sustained CPU/GPU clocks, thermal status and game
   frame rate. If unsupported, record that result; any steadier clock or frame-rate effect is to
   be measured.
+  Result (October 15): not measured; cool A/B/B/A starts were unavailable on USB power ([measurements](#frame-rate-display-and-image-quality-october-15-second-session)).
 
 ## Not covered
 
