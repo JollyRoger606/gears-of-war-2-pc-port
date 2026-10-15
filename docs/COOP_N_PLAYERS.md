@@ -4,6 +4,9 @@ Status: Stage 1 is in progress. SDK patch `0010-system-link-sessions` (section 3
 builds for Windows, compiles for Android and passes its unit tests, but has not run in the game
 yet. The script patches in guest memory (sections 2 and 4) build and pass their offline check on a
 retail package, but have not run in the game either; everything else is design only.
+SDK patch 0011-network-crossplay (Stage 4 networking) and the Android app's network permissions
+and Wi-Fi locks build for Windows and Android and pass their unit tests, but have not run in the
+game yet.
 
 This document condenses four read-only investigations from 2026-10-14 (join and spawn path,
 campaign systems, patch mechanism, network). A second pass re-checked each one, and the corrections
@@ -590,6 +593,54 @@ broadcast and `net_bind_ip` off.
 Pass when there is no rubber-banding at 8 players and nobody else is refused below N.
 
 ### Stage 4: PC-Android cross-play over System Link
+
+Status (2026-10-15): SDK patch 0011-network-crossplay implements the Stage 4 networking.
+It builds for Windows and Android and passes its unit tests (50 System Link cases:
+"All tests passed (1336 assertions in 50 test cases)"), but nothing has run in the game
+or on the phone yet. The Android app adds the INTERNET, ACCESS_NETWORK_STATE,
+ACCESS_WIFI_STATE, CHANGE_WIFI_MULTICAST_STATE and WAKE_LOCK permissions, holds a Wi-Fi
+MulticastLock and a low-latency WifiLock (WIFI_MODE_FULL_LOW_LATENCY) from onCreate to
+onDestroy, and sets REX_DETECTED_LOCAL_IP to the Wi-Fi or hotspot address. For setup,
+see docs/NETWORK_PLAY.md. The text below the table is the original design; it is
+unchanged.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `net_port_offset` | 40000 | Guest ports below 1024 use port + offset on the host (the game's UDP 1000 becomes 41000; beacon port 14001 is unchanged). Every peer uses the same value. |
+| `net_local_ip` | empty (new meaning) | a.b.c.d or a.b.c.d/prefix (prefix 24 by default; the prefix defines the local subnet). Empty means REX_DETECTED_LOCAL_IP, then `net_bind_ip`, then the default-route address, then 127.0.0.1. |
+| `net_peers` | empty | Comma-separated host[:port] list (IPv4 or DNS names). Every broadcast the game sends also goes to each peer as a unicast copy. |
+| `net_public_address` | empty | host[:port] (IPv4 or DNS name) advertised as XNADDR inaOnline / wPortOnline. |
+| `net_allow_peers` | empty | IPv4 addresses, a.b.c.d/n ranges or DNS names. When set, datagrams from other addresses are dropped before the game sees them (loopback always passes). When empty and `net_peers` is set, the allow list is the peers plus the local subnet. When both are empty, everyone is allowed. |
+
+Decisions taken while implementing:
+
+- The guest's beacon reply is a broadcast, not a reply to the sender [V]:
+  sub_828294A0 (LAN response builder) sends with sub_827E3548
+  (out/re-coop/sub_828294A0.txt line 98), and sub_827E3548 passes the beacon object
+  itself as the destination address (generated/default/gow2_recomp.41.cpp:15762,
+  `mr r7,r3`), which holds the 255.255.255.255:14001 address set at beacon init
+  (sub_827E33C0).
+- Every broadcast also goes, as a unicast copy, to each address that sent a datagram
+  to that socket in the last 10 seconds. That reaches a client behind NAT and a
+  Windows PC on a Public network (Windows Firewall lets a unicast reply to its own
+  broadcast through for about 3 seconds, but drops a broadcast reply).
+- A datagram identical to one from the same source in the last 250 ms is dropped, so
+  a client that also hears the broadcast does not see the reply twice.
+- On Android and Linux the runtime sends 255.255.255.255 as the subnet's directed
+  broadcast, because Android routes the limited broadcast through the default
+  network, which can be mobile data. Windows keeps 255.255.255.255.
+- The Android app uses REX_DETECTED_LOCAL_IP instead of REX_NET_LOCAL_IP, because
+  REX_NET_LOCAL_IP would set the cvar itself and outrank the config file.
+- `XNetXnAddrToInAddr` counts a peer as local when its ina is loopback, or when its
+  ina is on our subnet and (it has no inaOnline, or a datagram arrived from that ina
+  in the last 10 minutes). Local peers get ina, others get inaOnline (or ina when
+  inaOnline is 0). This handles two homes that both use 192.168.1.x.
+- An empty `net_local_ip` falls back to the address of the default route, found with
+  a UDP connect to 8.8.8.8:53 (which sends no packet) and logged as
+  "[netlink] local address 192.168.10.10 (default route)". Before 0011 an empty
+  `net_local_ip` meant 127.0.0.1 on a real LAN, so a PC advertised 127.0.0.1.
+
+Still open: the version gate; the Stage 4 tests.
 
 **Wire compatibility.** Guest code builds every packet byte in big-endian guest memory, and the
 runtime passes the bytes through raw, so both platforms put the same bytes on the wire. [I,

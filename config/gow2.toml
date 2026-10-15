@@ -84,3 +84,17 @@ keybind_dpad_down = "3"
 keybind_dpad_left = "4"
 keybind_back = "Tab"
 keybind_start = "Return,Escape"
+
+# ---------- Network (System Link) ----------
+# Guest ports below 1024 move up by this offset (the game's UDP 1000 becomes 41000); every
+# player needs the same value. See docs/NETWORK_PLAY.md.
+# net_port_offset = 40000
+# This PC's LAN address (and prefix) when the automatic choice is wrong.
+# net_local_ip = "192.168.10.10/24"
+# Internet play. On the host: the name or address friends reach it at.
+# net_public_address = "gow2.suruworks.com"
+# On each friend's PC: the host's name or address (comma-separated list).
+# net_peers = "gow2.suruworks.com"
+# Optional: only these addresses, ranges or names reach the game.
+# net_allow_peers = ""
+# system_link_trace = false
