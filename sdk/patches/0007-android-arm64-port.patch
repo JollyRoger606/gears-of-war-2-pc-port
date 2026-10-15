@@ -3275,7 +3275,7 @@ index 001f36b..d8f253d 100644
      // reverted (slope only along the scaled axis), thus max. More bias is
      // better than less bias, because less bias means Z fighting with the
 diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
-index 91ac08f..e6f32b5 100644
+index 91ac08f..0964025 100644
 --- a/src/graphics/vulkan/pipeline_cache.cpp
 +++ b/src/graphics/vulkan/pipeline_cache.cpp
 @@ -59,10 +59,197 @@ REXCVAR_DEFINE_BOOL(vulkan_tessellation_wireframe, false, "GPU/Vulkan",
@@ -4001,21 +4001,23 @@ index 91ac08f..e6f32b5 100644
      {
        std::unique_lock<std::mutex> lock(storage_write_request_lock_);
        if (storage_write_thread_shutdown_) {
-@@ -3669,12 +4202,23 @@ void VulkanPipelineCache::StorageWriteThread() {
+@@ -3669,12 +4202,26 @@ void VulkanPipelineCache::StorageWriteThread() {
          storage_write_flush_pipelines_ = false;
          flush_pipelines = true;
        }
--      if (!shader && !write_pipeline) {
-+      bool has_work = shader || write_pipeline;
 +#if REX_PLATFORM_ANDROID
 +      save_pipeline_cache = storage_write_save_pipeline_cache_;
 +      storage_write_save_pipeline_cache_ = false;
-+      has_work = has_work || save_pipeline_cache;
-+#endif
-+      if (!has_work) {
++      if (!shader && !write_pipeline && !save_pipeline_cache) {
++        storage_write_request_cond_.wait(lock);
++        continue;
++      }
++#else
+       if (!shader && !write_pipeline) {
          storage_write_request_cond_.wait(lock);
          continue;
        }
++#endif
      }
  
 +#if REX_PLATFORM_ANDROID
