@@ -1,0 +1,274 @@
+# Android experiments: black scene and frame rate
+
+The phone runs of October 14-15, 2026 left three problems (see [ANDROID.md](ANDROID.md)): large
+black regions in Act 1 gameplay, 2.6 to 6 game frames per second with the GPU thermally capped at
+160-222 MHz, and an old checkpoint that crashes on load. This is the plan for the next session on
+the Galaxy S25 Ultra, in order. Each experiment says what to set, what to capture and what counts as
+a result. The switches it uses keep today's behaviour unless a step sets them.
+
+## What the build adds
+
+The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) has:
+
+- **The shader storage fix.** Bionic's `fopen(..., "a+")` starts reading at the end of the file, so
+  the Vulkan pipeline and shader storage found no header and truncated itself on every launch; no
+  phone log ever had a `Created N graphics pipelines from Vulkan storage` line, while the PC loads
+  about 1300. From the second launch on, pipelines seen before are built at boot instead of in
+  gameplay.
+- **`FRAMES` lines with the clock.** `gow2_frame_log` lines end with `gpu <MHz> of <MHz> busy <%>
+  pwrlevel <n> thermal <status> headroom <h>`; any value Android hides from the app reads `n/a`.
+- **`GPUSTATS` lines** (`vulkan_android_stats_log = true`), every five seconds:
+  `swaps` / `unpresented` (frames not shown because a pipeline was still being built), `draws` /
+  `pending` (draws skipped for that reason), `no_ps` / `no_ps_color` (draws without a pixel shader,
+  and those of them with color targets bound), `gs` (rectangle, point and quad lists expanded in a
+  geometry shader), `d24s8` / `d24fs8` (depth format of the draws), `missing_textures` (valid
+  texture fetches bound to no image, which read 0), `color_draw_zfunc` (depth test of draws that
+  write color), `passes` / `submits` / `drains` (render passes, queue submissions, waits for the
+  whole GPU), `occlusion ends` / `host` / `zero` / `samples`, and `pipeline_setup` (time the GPU
+  command thread spent translating shaders and building pipelines, the slowest call, and how many
+  calls took 1 ms or more).
+- **`TEXFMT`** lines (with `vulkan_android_stats_log`): each texture format the first time it is
+  loaded, with its host format and load shader. **`TEXFAIL`** lines (always): a texture whose data
+  could not be loaded, once per format; that used to fail without a word.
+- **Switches** (all in `gow2.toml`):
+
+  | Switch | Default | Effect |
+  |---|---|---|
+  | `vulkan_android_empty_fragment_shader` | false | Draws without a pixel shader that have color targets bound get an empty fragment shader instead of none (restart) |
+  | `vulkan_android_invariant_position_member` | false | `gl_Position` also gets the `Invariant` member decoration glslang emits (restart) |
+  | `vulkan_occlusion_query_precise` | false | Occlusion queries ask for exact sample counts (`VK_QUERY_CONTROL_PRECISE_BIT`) |
+  | `vulkan_async_pipeline_placeholders` | true | false: new pipelines are queued without first building a placeholder on the GPU command thread, and pipelines without a pixel shader are built in the background too |
+  | `gow2_system_settings` | "" | `Key=Value` pairs separated by `;` for the game's own `[SystemSettings]` (`Xe-GearEngine.ini`), for example `DynamicShadows=False` (restart) |
+
+- **Tools.** `tools\android_log_summary.py <log> [--clocks <file>]` prints one row per `FRAMES`
+  window (fps, pipelines built in it, clock, GPU megacycles per game frame, `GPUSTATS` fields) and
+  the median of the quiet windows (4 or fewer pipelines built). `tools\black_fraction.py <png>`
+  gives the share of the 16:9 picture that is one flat dark value: 34.0% in tonight's screenshots
+  at the start of the checkpoint (`fix-11-loaded.png`, `fix-23-gameplay.png`,
+  `final-06-gameplay.png`). `scripts\android-gpu-clocks.sh` samples the GPU clock on the phone once
+  a second for `--clocks`.
+
+## Setup (every session)
+
+PowerShell from the worktree (`C:\personal\gow2-recomp-droid`). Settings reach the app only
+through `gow2.toml` in `Android/data/com.santiquiroz.gow2recomp/files`, beside the `logs` folder,
+read at launch ([android/README.md](../android/README.md#frame-rate-log)). Each step below writes
+a complete `gow2.toml`; the phone's own file is saved first and put back at the end. Keys are
+sent with the keyboard driver (`mnk_mode`, touch controls off), which `adb shell input keyevent`
+drives: Return is Start, Space is A.
+
+```powershell
+$s = 'R5CY82F28DM'
+$pkg = 'com.santiquiroz.gow2recomp'
+$files = "/sdcard/Android/data/$pkg/files"
+$exp = 'out\android-probe\exp'
+New-Item -ItemType Directory -Force $exp | Out-Null
+
+function Set-GameConfig([string]$name, [string[]]$extra = @()) {
+    $lines = @('gow2_frame_log = true', 'vulkan_android_stats_log = true',
+               'gow2_touch = "off"', 'mnk_mode = true') + $extra
+    $toml = Join-Path $exp "$name.toml"
+    Set-Content -Path $toml -Value $lines -Encoding ascii
+    adb -s $s push $toml "$files/gow2.toml"
+}
+function Start-Game {
+    adb -s $s shell am force-stop $pkg
+    adb -s $s shell am start -W -n "$pkg/.Gow2Activity" --ez "$pkg.extra.SHOW_WHEN_LOCKED" true
+}
+function Send-Key([string]$key, [int]$seconds) {
+    adb -s $s shell input keyevent $key
+    Start-Sleep -Seconds $seconds
+}
+# Title, Start, Solo Campaign, save slot 1 (Tip of the Spear), Launch: the path of fix-08..fix-11.
+function Open-Checkpoint {
+    Start-Sleep -Seconds 30
+    Send-Key KEYCODE_ENTER 8
+    Send-Key KEYCODE_SPACE 8
+    Send-Key KEYCODE_SPACE 0
+}
+function Save-Shot([string]$name) {
+    adb -s $s shell screencap -p /data/local/tmp/gow2-shot.png
+    adb -s $s pull /data/local/tmp/gow2-shot.png (Join-Path $exp "$name.png")
+}
+function Save-Log([string]$name) {
+    $newest = (adb -s $s shell ls -t "$files/logs" | Select-Object -First 1).Trim()
+    adb -s $s pull "$files/logs/$newest" (Join-Path $exp "$name-$newest")
+}
+function Measure-Black([string]$name) {
+    Start-Game; Open-Checkpoint; Start-Sleep -Seconds 40
+    Save-Shot $name; Save-Log $name
+    python tools\black_fraction.py (Join-Path $exp "$name.png")
+}
+```
+
+The first time, take a `Save-Shot` after each key of `Open-Checkpoint` and lengthen its waits if a
+screen was not ready (the boot logos, then the title). Screenshots go through a file on the phone:
+redirecting `exec-out screencap` in Windows PowerShell corrupts the PNG.
+
+## 0. Prepare (the phone may be warm)
+
+```powershell
+adb -s $s pull "$files/gow2.toml" (Join-Path $exp 'gow2.toml.orig')
+adb -s $s install -r android\app\build\outputs\apk\debug\app-debug.apk
+powershell -ExecutionPolicy Bypass -File scripts\test-android-device.ps1 -Serial $s -LowPriority
+adb -s $s push scripts\android-gpu-clocks.sh /data/local/tmp/android-gpu-clocks.sh
+
+Set-GameConfig 'storage'
+Start-Game; Start-Sleep -Seconds 40
+adb -s $s shell ls -l "$files/gow2/cache/shaders/shareable"
+Start-Game; Start-Sleep -Seconds 40; Save-Log 'storage-second'
+Select-String 'from Vulkan storage' (Join-Path $exp 'storage-second-*.log')
+
+Measure-Black 'b0-first-gameplay'
+```
+
+`install -r` keeps the copied game, the saves and the config. If the `shareable` folder is not
+there, `adb -s $s shell find /sdcard/Android/data/$pkg -name '*.xpso'` finds it.
+
+Pass: the self-test prints `runtime_selftest: 19 checks, 0 failed` (the 19th, new, is the fiber
+switch keeping d8-d15) and `touch_model_test: 105 checks, 0 failed`; `4D53082D.fbo.vk.xpso` and
+`4D53082D.xsh` are larger than their 12- and 8-byte headers after the first launch; the second
+launch logs `Created N graphics pipelines from Vulkan storage` with N above 0. The
+`b0-first-gameplay` run is the first gameplay since the install: it fills the storage with the
+gameplay pipelines and is the reference picture for experiment 6. Keep its `GPUSTATS`, `TEXFMT`
+and `TEXFAIL` lines; they say which of the black-scene experiments to run first (see there).
+
+## 1. Cool-phone baseline (first measurement)
+
+1. Move adb to Wi-Fi so charging does not heat the phone, then unplug USB:
+   `adb -s $s tcpip 5555`, `adb -s $s shell ip -f inet addr show wlan0`,
+   `adb connect <ip>:5555`, `$s = '<ip>:5555'`. If `connect` fails while the phone answers ping,
+   pair again under Wireless debugging (the port changes; the mDNS serial also works).
+2. `adb -s $s shell am force-stop $pkg`, `adb -s $s shell input keyevent KEYCODE_SLEEP`, phone out
+   of its case on a hard surface, no builds or installs, room temperature noted. Check every five
+   minutes until all hold (usually 20 minutes):
+   ```powershell
+   adb -s $s shell dumpsys thermalservice | Select-String 'Thermal Status|mType=3'
+   adb -s $s shell dumpsys battery | Select-String 'temperature'
+   adb -s $s shell cat /sys/class/kgsl/kgsl-3d0/thermal_pwrlevel
+   ```
+   Gate: thermal status 0, SKIN at 33 C or less, battery temperature 300 (30.0 C) or less,
+   `thermal_pwrlevel` 0. Note `cat /sys/class/kgsl/kgsl-3d0/max_gpuclk`, the screen brightness, and
+   the Game Booster profile and Motion smoothness setting; keep them for every later run.
+3. Measure (storage warm from step 0, no input after the checkpoint loads):
+   ```powershell
+   Set-GameConfig 'p0-baseline'
+   Start-Game; Open-Checkpoint; Start-Sleep -Seconds 20
+   $clocks = Start-Job { param($s) adb -s $s shell sh /data/local/tmp/android-gpu-clocks.sh 600 /data/local/tmp/gpu-clocks.txt } -ArgumentList $s
+   Start-Sleep -Seconds 120; Save-Shot 'p0-baseline-120s'
+   Wait-Job $clocks | Out-Null
+   adb -s $s pull /data/local/tmp/gpu-clocks.txt (Join-Path $exp 'p0-baseline-clocks.txt')
+   Save-Log 'p0-baseline'
+   python tools\android_log_summary.py (Get-Item "$exp\p0-baseline-gow2_*.log").FullName --clocks "$exp\p0-baseline-clocks.txt"
+   ```
+   The sampler runs 10 minutes, so the run also shows how long the phone holds its clock. During
+   it, `adb -s $s shell dumpsys thermalservice | Select-String 'Thermal Status|mType=3'` every
+   minute records the throttling as it comes.
+
+Read: fps, clock, busy and Mcycles/frame of the quiet windows over the 10 minutes. GPU-bound (as
+tonight): busy 95% or more and Mcycles/frame within about 15% while the clock falls; expect 15-28
+fps at 680-1200 MHz and 35-50 Mcycles per frame, falling to 4-7 fps once the cap returns. If busy
+stays under 85% while fps is low, the game is CPU- or sync-bound: record
+`adb -s $s shell top -H -b -d 5 -n 6 -p <pid>` (`adb -s $s shell pidof $pkg`) to see which
+thread holds a core. Repeat on two more days before trusting the numbers. Every later frame-rate
+experiment compares Mcycles/frame of quiet windows, with the gate of step 2 before each run.
+
+## 2-11. The black scene
+
+The black regions do not depend on the clock: run these on a warm phone, one launch each, the
+same checkpoint and no input. `Measure-Black <name>` after `Set-GameConfig <name> @(<keys>)`; it
+prints the black share. Baseline: about 34% at this view (`p0-baseline-120s.png`). A cause found:
+under 5% with the scene complete; partial: a drop of 5 points or more, or a visibly different
+shape. Keep each log; `GPUSTATS` shows what the switch changed.
+
+What `b0`/`p0` tell first: `no_ps_color` above 0 favours experiment 2; `TEXFAIL` lines or
+`missing_textures` above 0 point at textures (go to 11 with that format); many `zero` occlusion
+results favour 4; most `color_draw_zfunc` in `equal` favours 5; `d24fs8` above 0 makes 9 worth
+running.
+
+2. **Empty fragment shader.** `Set-GameConfig 'b2-empty-fs' @('vulkan_android_empty_fragment_shader = true')`,
+   `Measure-Black 'b2-empty-fs'`; the log has `pipelines without a pixel shader get an empty
+   fragment shader`. The black shapes in `fix-11`/`fix-23` have straight edges that cut jaggedly
+   into the buildings, like boxes drawn with the depth test (occlusion boxes, shadow volumes and
+   depth-only passes are drawn with color writes off and no pixel shader, while the scene's color
+   targets stay bound); LibertyRecompAndroid documents garbage writes in exactly that case on
+   Turnip. Pass: black share under 5%. Then the stock driver mishandles fragment-less pipelines
+   with color targets bound, and the switch should become the Android default.
+3. **The game's shadows.** `Set-GameConfig 'b3-noshadows' @('gow2_system_settings = "DynamicShadows=False"')`,
+   `Measure-Black 'b3-noshadows'`; the log's `COALESCED:` line names `system-settings`. Modulated
+   shadows draw their frustum into stencil without color and then darken what is inside it, so a
+   shadow-depth texture that reads 0 would blacken boxy regions. If the black goes, narrow it down
+   with `LightEnvironmentShadows=False`, `bAllowBetterModulatedShadows=False` and
+   `bEnableBranchingPCFShadows=False` one at a time. Also try `DirectionalLightmaps=False` for the
+   lightmap path. The section has 76 keys; the switches among them are `StaticDecals`,
+   `DynamicDecals`, `DynamicLights`, `DynamicShadows`, `LightEnvironmentShadows`,
+   `CompositeDynamicLights`, `DirectionalLightmaps`, `MotionBlur`, `DepthOfField`,
+   `AmbientOcclusion`, `Bloom`, `UseHighQualityBloom`, `Distortion`, `LensFlares`, `FogVolumes`,
+   `bAllowBetterModulatedShadows`, `bEnableBranchingPCFShadows` and `ScreenPercentage`.
+4. **Occlusion queries.** `Set-GameConfig 'b4-noquery' @('occlusion_query_enable = false')`, then
+   `Set-GameConfig 'b4-precise' @('vulkan_occlusion_query_precise = true')`, a `Measure-Black` each.
+   The game still draws its query boxes either way, so a change here means the counts the Adreno
+   driver returns (zero or too low) make the game cull meshes; `b4-noquery`'s `GPUSTATS` shows
+   `host 0` and fewer `drains`.
+5. **Position invariance.** `Set-GameConfig 'b5-invariant' @('vulkan_android_invariant_position_member = true')`,
+   `Measure-Black 'b5-invariant'`. A depth pass followed by a color pass with an `equal` depth test
+   fails everywhere if the two vertex shaders compute even slightly different depth; the switch adds
+   the decoration drivers most often honour.
+6. **Pipelines built late.** Compare `b0-first-gameplay.png` (first gameplay after the install, every
+   pipeline built during play) with `p0-baseline-120s.png` (storage warm). A draw skipped while its
+   pipeline was being built is gone for good when its result is kept across frames. If `b0` is black
+   and `p0` is not, the fix is the storage; if both are black, run
+   `Set-GameConfig 'b6-sync' @('async_shader_compilation = false')` once with the storage deleted
+   (`adb -s $s shell rm "$files/gow2/cache/shaders/shareable/4D53082D.fbo.vk.xpso" "$files/gow2/cache/shaders/shareable/4D53082D.xsh"`)
+   and `Measure-Black 'b6-sync'`. Run step 0's two title launches again afterwards to refill the
+   storage.
+7. **Sparse shared memory.** `@('vulkan_sparse_shared_memory = false')`, `Measure-Black 'b7-nosparse'`;
+   the log then says `Vulkan sparse binding is not used for shared memory emulation`. A change
+   means sparse binds the driver accepted did not take effect.
+8. **Render passes instead of dynamic rendering.** `@('vulkan_dynamic_rendering = false')`,
+   `Measure-Black 'b8-renderpass'`. Set it only in `gow2.toml`, never in the overlay.
+9. **Float24 depth in the shader** (only if `d24fs8` is above 0).
+   `@('depth_float24_convert_in_pixel_shader = true')`, `Measure-Black 'b9-float24'`.
+10. **No geometry shaders.** `@('vulkan_force_expand_rectangle_lists_in_vs = true', 'vulkan_force_expand_point_sprites_in_vs = true', 'vulkan_force_convert_quad_lists_to_triangle_lists = true')`,
+    `Measure-Black 'b10-nogs'`; `GPUSTATS` then shows `gs 0`. Also a frame-rate experiment (P3).
+11. **Name the draw (if 2-10 change nothing).** The debug APK is debuggable: capture one frame at
+    this view with RenderDoc for Android (`gpu_debug_markers = true` in the config helps), and run
+    pixel history on a black pixel in the column above the street in `fix-23` and on the jagged
+    edge in `alt-07`. The draw that writes the black, or the base-pass draw that is missing, is
+    named directly.
+
+Restore the phone's own settings at the end of a session:
+`adb -s $s push (Join-Path $exp 'gow2.toml.orig') "$files/gow2.toml"`.
+
+## P1-P6. Frame rate (cool phone, A/B)
+
+Each pair alternates A, B, B, A, two minutes each, with the gate of step 1 before every launch,
+the clock sampler running (`android-gpu-clocks.sh 120`), and the comparison done on Mcycles/frame
+of quiet windows (fps alone moves with the clock). A switch helps when Mcycles/frame falls by 10%
+or more in both B runs.
+
+- **P1 occlusion queries.** B: `occlusion_query_enable = false`. Each guest query ends the render
+  pass twice and waits for the whole GPU (`drains`). Helps if the game issues many per frame
+  (`ends` per swap in `GPUSTATS`); everything then counts as visible, so watch for extra geometry.
+- **P2 fewer submissions.** B: `vulkan_submit_on_primary_buffer_end = false`; then B:
+  `readback_memexport = false`. `submits` and `passes` per swap show the change.
+- **P3 no geometry shaders.** B: the three keys of experiment 10.
+- **P4 the game's effects.** B: `gow2_system_settings = "AmbientOcclusion=False;MotionBlur=False;DepthOfField=False;UseHighQualityBloom=False;Distortion=False"`,
+  then one key at a time for those that matter, then `ScreenPercentage=75` (no change means the
+  console build ignores it). Splits the 35-50 Mcycles into the game's content and the emulation's
+  overhead.
+- **P5 placeholders.** With the storage deleted before each launch (experiment 6's `rm`), A:
+  default, B: `vulkan_async_pipeline_placeholders = false`. Compare `pipeline_setup` ms, the
+  slowest call and fps of the compile windows. Pass: `pipeline_setup` halves or better, frames are
+  still presented once building ends (`unpresented` back to 0), and the log has no `Vulkan
+  IssueDraw failed` lines.
+- **P6 trace.** If P1-P5 leave the cost unexplained, record ten seconds of quiet gameplay with
+  Perfetto (`gpu.renderstages`, `gpu.counters`, `linux.ftrace` with `sched_switch` and
+  `gpu_frequency`) or AGI's system profile: render passes and submissions per frame, GMEM load and
+  store share, and GPU idle while the GPU command thread waits.
+
+## Not covered
+
+The old checkpoint that crashes on load (`sub_8255E4A8` recursing over object `42C20140`, which
+lists itself as its only child) was written by a build before the network fixes; new campaigns and
+their checkpoints load. Nothing here changes it.

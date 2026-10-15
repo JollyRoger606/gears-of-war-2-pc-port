@@ -7,7 +7,9 @@ controllers, and a keyboard and mouse attached at launch): menus, the campaign i
 cutscene and gameplay, where Marcus moves, turns the camera and fires. It runs at about 3 to 5 game frames
 per second while the phone's thermal limit holds the GPU at its lowest clocks, and parts of the
 scene render black. Target device for bring-up: Samsung Galaxy S25 Ultra (Snapdragon 8 Elite,
-Adreno 830, Vulkan 1.3). Controls: [`android/README.md`](../android/README.md#controls).
+Adreno 830, Vulkan 1.3). Controls: [`android/README.md`](../android/README.md#controls). The next
+session on the phone follows [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md): a cool-phone
+baseline, then one switch per candidate cause of the black scene and of the frame rate.
 
 ## Building the APK
 
@@ -141,13 +143,22 @@ copy of the generated code.
    record `vulkaninfo` for the device. Started in October 2026: with the stock driver the game
    reaches gameplay in Act 1 once the app may open sockets (`INTERNET`) and patch 0007 maps the
    guest's privileged port and Winsock socket options and ioctls. Large parts of the scene render
-   black.
+   black: about a third of the picture at the start of the first checkpoint, in regions with
+   straight edges that cut jaggedly into the buildings, like boxes drawn with the depth test. The
+   runtime logs no GPU error. Patch 0007 has switches that each test one candidate (draws without
+   a pixel shader while color targets are bound, occlusion query counts, position invariance,
+   sparse binding, dynamic rendering) and `gow2_system_settings` switches the game's own effects
+   (shadows first); [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md) runs them in order.
 5. **Measure.** If the generic Xenos path cannot hold 30 fps in Act 1, the proven alternative is a
    renderer written for Unreal Engine 3's draw calls, which is a large project of its own. First
    numbers (`gow2_frame_log`): 3 to 5 game frames per second in the first gameplay area with the
    GPU 99% busy but thermally capped at 160-222 MHz of 1.2 GHz, and 13.6 to 16.8 for the first
    seconds after the phone had cooled a little (GPU up to 734 MHz). A sustained measurement on a
-   cool phone is next.
+   cool phone is next. Part of the slowest windows was not the clock but pipelines built during
+   play: Bionic starts reading an `"a+"` stream at its end, so the Vulkan shader storage found no
+   header and truncated itself at every launch. Patch 0007 now rewinds those streams (not yet run
+   on the phone). `FRAMES` lines carry the GPU clock and thermal state, and `GPUSTATS` lines the
+   command processor's work, so the next numbers can be read per clock.
 6. **More players and online** last, through hooks into the engine's session code (shared with
    the PC System Link work).
 

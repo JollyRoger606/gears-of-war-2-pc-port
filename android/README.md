@@ -372,7 +372,29 @@ socket options and `FIONBIO`/`FIONREAD` the game passes with Winsock numbers.
 `gow2_frame_log=true` (in `gow2.toml` beside the logs) logs the game's own frame rate every five
 seconds as `FRAMES` lines, counted at the player's input step. Presented frames do not measure it on
 a phone: Android lowers the display's refresh rate, and runtime overlays repaint without new game
-frames.
+frames. Each line ends with the GPU clock and its current ceiling, busy percentage and
+`thermal_pwrlevel` from `/sys/class/kgsl/kgsl-3d0`, and the thermal status and headroom Android
+reports (`n/a` for whatever the app may not read), so a rate can be read against the clock it ran
+at. `tools/android_log_summary.py` turns a log into one row per window with GPU megacycles per
+game frame.
+
+### GPU diagnostics and switches
+
+Patch 0007's Vulkan side has Android-only diagnostics and switches for the black scene and the
+frame rate; none changes what the game does unless it is set in `gow2.toml`.
+[`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md) lists them and the order to try
+them in. `vulkan_android_stats_log=true` adds a `GPUSTATS` line every five seconds (draws by kind,
+render passes, submissions, waits for the whole GPU, occlusion queries, time the GPU command thread
+spends building pipelines) and a `TEXFMT` line per texture format; a texture whose data cannot be
+loaded logs `TEXFAIL` once per format. `gow2_system_settings` sets keys of the game's own
+`[SystemSettings]` (for example `DynamicShadows=False;AmbientOcclusion=False`) in the cached
+Coalesced copy, so the game's own effects can be switched off without a rebuild.
+
+The Vulkan shader and pipeline storage now survives a relaunch: Bionic starts reading an `"a+"`
+stream at the end of the file, so the storage found no header and truncated itself at every
+launch, and every pipeline was built again during play. Each new pipeline held the GPU command
+thread for 40-48 ms, and those bursts made the slowest windows of the October 14-15 runs. Patch
+0007 rewinds such streams. Not yet run on the phone.
 
 ## Menu prompts
 
@@ -385,8 +407,10 @@ unchanged: keyboard labels unless an XInput controller is connected at launch.
 ## Not done yet
 
 - Speed: 3 to 5 game frames per second on a thermally capped GPU (see above); a measurement on a cool
-  phone, and the Xenos path's cost on the Adreno 830, are next.
-- Rendering: large parts of the scene are black in gameplay.
+  phone, and the Xenos path's cost on the Adreno 830, are next
+  ([`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md), steps 1 and P1-P6).
+- Rendering: large parts of the scene are black in gameplay (34% of the picture at the start of the
+  first checkpoint, `tools/black_fraction.py`); experiments 2-11 of the same document.
 - A checkpoint written by an older build (before the network fixes) crashes on load: the main
   thread's guest stack overflows in `sub_8255E4A8`, which calls itself through an object listed as
   its own child (`Unhandled guest access violation: write of guest 0x7014FFD0`). New campaigns and
