@@ -139,7 +139,7 @@ US$10.
 
 ## NVIDIA DLSS
 
-Not included in the release. The DLSS SDK license does not allow it to become part of an open-source distribution and asks for NVIDIA trademarks in the game's splash and about screens, which this project cannot do. Players with an NVIDIA GPU who want to try the DLSS path can place `nvngx_dlss.dll` from NVIDIA's DLSS SDK next to `gow2.exe` themselves.
+Not included in the release. The DLSS SDK license does not allow it to become part of an open-source distribution and asks for NVIDIA trademarks in the game's splash and about screens, which this project cannot do. The release's `rexgpu-xenos.dll` is built with `scripts/build-sdk.ps1 -NoDlss`, so it holds no NGX code and cannot run DLSS, and `scripts/package.ps1` refuses any `.dll` or `.exe` that holds an NGX name. A player who builds the SDK DLLs with `scripts/build-sdk.ps1` (without `-NoDlss`) gets the DLSS path for their own use: NGX linked into `rexgpu-xenos.dll` and `nvngx_dlss.dll` from NVIDIA's DLSS SDK next to `gow2.exe`.
 
 ## Android APK
 
@@ -213,10 +213,10 @@ TinySHA1, the SDL3 Android project template) apply to the APK as well.
 ## Windows release zip
 
 `scripts/package.ps1` builds the zip from `gow2.exe` (built by `scripts/build.ps1`) and the
-`rexruntime.dll` and `rexgpu-xenos.dll` that `scripts/build-sdk.ps1` builds from ReXGlue `923c1a5`
-with the patches in `sdk/patches/`. It also holds the AMD FidelityFX DLLs, the Microsoft Visual
-C++ runtime and `config/gamecontrollerdb.txt` (all described above), `LICENSE`, this file,
-`README.md`, `gow2.toml` and `tools/texpack.py`. It holds no game files.
+`rexruntime.dll` and `rexgpu-xenos.dll` that `scripts/build-sdk.ps1 -NoDlss` builds from ReXGlue
+`923c1a5` with the patches in `sdk/patches/`. It also holds the AMD FidelityFX DLLs, the
+Microsoft Visual C++ runtime and `config/gamecontrollerdb.txt` (all described above), `LICENSE`,
+this file, `README.md`, `gow2.toml` and `tools/texpack.py`. It holds no game files.
 
 ### gow2.exe
 
@@ -262,7 +262,8 @@ It calls `amd_fidelityfx_dx12.dll` through that DLL's import library and contain
 - spdlog.
 - xxHash.
 - SIMDe.
-- The NVIDIA NGX SDK static library `nvsdk_ngx_d.lib` (see NVIDIA NGX SDK below).
+
+It holds no NVIDIA NGX code (see NVIDIA DLSS above).
 
 ## Component licenses
 
@@ -910,9 +911,11 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ### NVIDIA NGX SDK
 
+- Not in the Windows release zip or the APK.
 - Project: the NGX static library `nvsdk_ngx_d.lib` of NVIDIA's DLSS SDK
   ([NVIDIA/DLSS](https://github.com/NVIDIA/DLSS)), which `scripts/build-sdk.ps1` downloads and links
-  into `rexgpu-xenos.dll` so the DLSS path can load `nvngx_dlss.dll` when a player supplies it.
+  into `rexgpu-xenos.dll` for a player's own build, so the DLSS path can load `nvngx_dlss.dll`.
+  `scripts/build-sdk.ps1 -NoDlss`, which builds the release DLLs, neither downloads nor links it.
 - Copyright: NVIDIA Corporation.
 - License: the NVIDIA RTX SDKs license (`LICENSE.txt` of the DLSS SDK). It is not an open-source
   license; the library is NVIDIA's code, not this project's.
