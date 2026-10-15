@@ -25,6 +25,8 @@ set(GOW2_SOURCES
     src/gow2_script_patches.cpp
     src/gow2_script_patch_table.cpp
     src/gow2_script_patch_hook.cpp
+    src/gow2_test_input.cpp
+    src/gow2_test_input_hook.cpp
 )
 
 # The exe icon. CMake already turns on RC for clang on Windows; enable_language makes it explicit.
@@ -48,6 +50,13 @@ add_executable(gow2_script_patch_test EXCLUDE_FROM_ALL
     src/gow2_script_patch_table.cpp
 )
 target_include_directories(gow2_script_patch_test PRIVATE src)
+
+# Host-side test of the focus-free test input parser and XINPUT_STATE merge.
+add_executable(gow2_test_input_test EXCLUDE_FROM_ALL
+    tools/tests/test_input_core_test.cpp
+    src/gow2_test_input.cpp
+)
+target_include_directories(gow2_test_input_test PRIVATE src)
 
 # SDL's gamepad mapping database; the input driver looks for it in the working directory.
 add_custom_command(TARGET gow2 POST_BUILD
