@@ -42,8 +42,9 @@ GPU, its driver, the Vulkan features and extensions the port cares about to logc
 
 - JDK 17.
 - Android SDK with platform 36, NDK `30.0.14904198` and CMake `4.1.2` (SDK manager).
-- An SDL3 source tree: `thirdparty/sdl3` of a ReXGlue SDK checkout. It is only read; the build
-  files go to `app/.cxx`.
+- An SDL3 source tree: `thirdparty/sdl3` of a ReXGlue SDK checkout, for example
+  `out/sdk-android-src/thirdparty/sdl3` once `scripts/build-android.ps1` has run. It is only read;
+  the build files go to `app/.cxx`.
 
 ## Build (placeholder shell)
 
@@ -63,6 +64,15 @@ Then, from `android/`:
 The APK is `app/build/outputs/apk/debug/app-debug.apk` (arm64-v8a only, minSdk 29, targetSdk 36).
 Native libraries are stored uncompressed and 16 KB aligned in the APK (`useLegacyPackaging =
 false`, NDK r28+ default linker alignment), so the app also runs on 16 KB-page devices.
+
+## Licenses in the APK
+
+Every APK carries the license texts in `assets/licenses/`: the repository's [`LICENSE`](../LICENSE)
+and [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md), and
+[`LICENSE.SDL3.txt`](LICENSE.SDL3.txt). The Gradle task `copyLicenseAssets` (`app/build.gradle`)
+copies them from the repository at build time for every variant, so there is one copy of each in
+git; it stops the build when one of them is missing. `tools/check_android_libs.py` fails an APK
+without `assets/licenses/LICENSE` and `assets/licenses/THIRD_PARTY_NOTICES.md`.
 
 ## Install and run
 
@@ -94,18 +104,24 @@ Vulkan renderer.
 
 ## Game build
 
-`scripts/build-android.ps1` builds the APK with the game's libraries from a clean clone. It needs,
-besides the requirements above, Python 3, `cmake` and `ninja` on `PATH`, your own `game\default.xex`
-(only while `generated\default` does not exist yet, together with the Windows ReXGlue SDK for
-`rexglue codegen`, `-Sdk`), and a rexglue-sdk source tree with the Android port (`-SdkSource`).
-`gow2.sdl3.dir` is not used in this mode.
+`scripts/build-android.ps1` builds the APK with the game's libraries from a clean clone of this
+repository. It needs, besides the requirements above, Python 3, `git`, `cmake` and `ninja` on
+`PATH`, network access the first time (it clones the SDK), and your own `game\default.xex` (only
+while `generated\default` does not exist yet, together with the Windows ReXGlue SDK for
+`rexglue codegen`, `-Sdk`). `gow2.sdl3.dir` is not used in this mode.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-android.ps1 -SdkSource C:\path\to\rexglue-sdk-android -LowPriority
+powershell -ExecutionPolicy Bypass -File scripts\build-android.ps1 -LowPriority
 ```
 
 The steps, each skipped when its output is current:
 
+0. Clones ReXGlue `923c1a5` with its submodules into `out\sdk-android-src` and applies every
+   `sdk\patches\*.patch` in order (0002-0006 like the Windows SDK build, then
+   `0007-android-arm64-port.patch`), with the same clone, marker and symlink repair as
+   `scripts\build-sdk.ps1` (shared in `scripts\sdk-source.ps1`). `out\sdk-android-patched.txt`
+   records the commit and the patch hashes; when a patch changes (or that file is deleted), the
+   tree is reset and patched again. `-Clean` leaves the clone alone.
 1. `rexglue codegen` when `generated\default` is missing (`-Codegen` forces it).
 2. `tools/prepare_android_sources.py` copies `generated\default` to `out\android\generated\default`
    and applies the switch-trap, game and ARM memory-barrier patches to the copy; files whose
@@ -120,14 +136,26 @@ The steps, each skipped when its output is current:
 5. `tools/check_android_libs.py` checks the staged libraries, then Gradle builds
    `assembleDebug -Pgow2.gameLibraries=true` and the APK is checked again.
 
-Logs are in `out\android\logs`. A first build took 10 minutes on a busy 24-thread PC; a rebuild
-after a source change takes about a minute.
+Logs are in `out\android\logs`. A first build took 10 minutes on a busy 24-thread PC, plus the SDK
+clone; a rebuild after a source change takes about a minute.
+
+### Building your own SDK tree
+
+`-SdkSource <folder>` (or `REXGLUE_SDK_ANDROID`) builds that rexglue-sdk tree instead of
+`out\sdk-android-src`, for example the worktree you change the Android port in: ReXGlue `923c1a5`
+with all of `sdk\patches` applied. Before anything else the script checks the tree for files and
+texts only the current patches add and stops with the list of what is missing:
+`include\rex\main_android.h` and `thirdparty\ffmpeg-android\config.h` (0007; an older Android tree
+changed FFmpeg's config inside the FFmpeg submodule instead), `GOW2_VFS_OVERRIDES` and
+`src\input\stick_deadzone.h` (0005), and `mnk_mouse_stick` (0006). How to turn your changes back
+into `0007-android-arm64-port.patch` is in [`sdk/patches/README.md`](../sdk/patches/README.md).
 
 `libgow2.so` holds the recompiled code, the port's code from `src/` and the SDK's SDL entry point
 (`windowed_app_main_sdl.cpp`, which exports `SDL_main` on Android). Every file in `src/` is built
 except the Windows-only ones listed in `gamelibs/CMakeLists.txt` (`gow2_xam_input_guard.cpp`,
 `gow2_utf8_guard.cpp`, `gow2_crash_watch.cpp`); `gamelibs/gow2_android_glue.cpp` stands in for
-them and logs that those guards are off.
+them: it suppresses the disc-error box itself, logs that the XamInput serialization and the
+non-throwing UTF-8 decoder come from patch 0007, and that there is no crash watch on Android.
 
 Gradle alone, once the libraries are staged:
 
@@ -151,7 +179,9 @@ compressed or not 16 KB aligned in the zip); a `DT_NEEDED` entry is neither pack
 system library; an undefined symbol is not defined by the libraries the linker will search for it
 (the library's own `DT_NEEDED` closure, with the NDK's API-29 stubs for system libraries, which is
 how Android's linker resolves app libraries); a library other than `libSDL3.so` defines `SDL_*` or
-`Java_org_libsdl_app_*` symbols; or `libgow2.so` does not export `SDL_main`.
+`Java_org_libsdl_app_*` symbols; or `libgow2.so` does not export `SDL_main`; or an APK lacks
+`assets/licenses/LICENSE` or `assets/licenses/THIRD_PARTY_NOTICES.md` (`--no-notices` skips that
+check).
 
 ## Native libraries
 
@@ -170,5 +200,6 @@ inside the runtime would be a second copy without that state.
 
 ## Not done yet
 
-- Running the game libraries on a phone (built and checked statically only so far).
+- Gameplay: on the Galaxy S25 Ultra the game reaches the PRESS START title screen in landscape
+  (intro video and audio work); nothing past it is verified yet.
 - Controller and touch mapping, and a separate `:game` process.

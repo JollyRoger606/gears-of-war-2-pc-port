@@ -4,13 +4,16 @@
 
 .DESCRIPTION
   The whole chain, each step skipped when its output is already current:
+  0. SDK sources: clones ReXGlue 923c1a5 into out\sdk-android-src and applies every
+     sdk\patches\*.patch (0007 is the Android port), like scripts\build-sdk.ps1 does for
+     Windows; prepared again whenever a patch changes. -SdkSource uses your own tree instead.
   1. Codegen: when generated\default is missing (or with -Codegen), runs the Windows SDK's
      `rexglue codegen` on game\default.xex, like scripts\build.ps1.
   2. Android sources: tools\prepare_android_sources.py copies generated\default to
      out\android\generated\default and applies the switch-trap, game and ARM memory-barrier
      patches to the copy (generated\default itself is never patched for ARM).
   3. Configures android\gamelibs with the NDK's CMake toolchain into out\android\build: the
-     rexglue-sdk source tree (-SdkSource) and the game are one build.
+     rexglue-sdk source tree and the game are one build.
   4. SDK: builds libSDL3.so, librexruntime.so and librexgpu-xenos.so.
   5. Game: builds libgow2.so and stages the four libraries plus libc++_shared.so in
      out\android\jniLibs\arm64-v8a.
@@ -22,8 +25,9 @@
   (CMake's first configure about 3, the SDK about 4, the 223 generated files about 3).
 
 .PARAMETER SdkSource
-  rexglue-sdk source tree with the Android port (for example a worktree of ReXGlue 923c1a5 with
-  sdk\patches applied and the Android changes on top). Or set REXGLUE_SDK_ANDROID.
+  Developer override: build this rexglue-sdk tree instead of out\sdk-android-src, for example the
+  worktree you change the Android port in (ReXGlue 923c1a5 with all of sdk\patches applied). Or
+  set REXGLUE_SDK_ANDROID. The build stops when the tree lacks a patch the game needs.
 
 .PARAMETER Sdk
   Windows ReXGlue SDK folder with bin\rexglue.exe; only needed for codegen. Or set REXGLUE_SDK.
@@ -54,6 +58,9 @@
   Run below normal priority (cmake, ninja, the compilers and Gradle inherit it).
 
 .EXAMPLE
+  powershell -ExecutionPolicy Bypass -File scripts\build-android.ps1 -LowPriority
+
+.EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\build-android.ps1 -SdkSource C:\src\rexglue-sdk-android -LowPriority
 #>
 param(
@@ -72,7 +79,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
-. (Join-Path $PSScriptRoot 'sdk-symlinks.ps1')
+. (Join-Path $PSScriptRoot 'sdk-source.ps1')
 if ($LowPriority) { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' }
 
 $out = Join-Path $root 'out\android'
@@ -82,6 +89,19 @@ $genCopy = Join-Path $out 'generated\default'
 $jniLibs = Join-Path $out 'jniLibs'
 $abiLibs = Join-Path $jniLibs 'arm64-v8a'
 $apk = Join-Path $root 'android\app\build\outputs\apk\debug\app-debug.apk'
+$cleanSdk = Join-Path $root 'out\sdk-android-src'
+$cleanSdkMarker = Join-Path $root 'out\sdk-android-patched.txt'
+
+# Files and texts only a tree with the current patches has; an older Android worktree lacks some.
+$SdkTreeMarkers = @(
+    @{ Path = 'include\rex\main_android.h'; Text = ''; What = 'the Android port (patch 0007)' },
+    @{ Path = 'thirdparty\ffmpeg-android\config.h'; Text = '';
+       What = "FFmpeg's Android config outside the FFmpeg submodule (patch 0007)" },
+    @{ Path = 'src\filesystem\devices\host_path_device.cpp'; Text = 'GOW2_VFS_OVERRIDES';
+       What = 'GOW2_VFS_OVERRIDES (patch 0005)' },
+    @{ Path = 'src\input\stick_deadzone.h'; Text = ''; What = 'pad_right_stick_deadzone (patch 0005)' },
+    @{ Path = 'src\input\mnk\mnk_input_driver.cpp'; Text = 'mnk_mouse_stick'; What = 'mnk_mouse_stick (patch 0006)' }
+)
 
 function Fail($msg) { Write-Host "BUILD FAILED: $msg" -ForegroundColor Red; exit 1 }
 function Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
@@ -113,6 +133,34 @@ function Find-Python {
     $py = Get-Command py -ErrorAction SilentlyContinue
     if ($py) { return (& $py.Source -3 -c 'import sys; print(sys.executable)') }
     return $null
+}
+
+function Test-SdkTreeMarker([string]$tree, [hashtable]$marker) {
+    $file = Join-Path $tree $marker.Path
+    if (-not (Test-Path $file -PathType Leaf)) { return $false }
+    if (-not $marker.Text) { return $true }
+    return [bool](Select-String -Path $file -Pattern $marker.Text -SimpleMatch -Quiet)
+}
+
+function Get-MissingSdkTreeMarkers([string]$tree, [object[]]$markers) {
+    return @($markers | Where-Object { -not (Test-SdkTreeMarker $tree $_) } | ForEach-Object { $_.What })
+}
+
+function Assert-SdkTreeCurrent([string]$tree, [string]$remedy) {
+    $missing = Get-MissingSdkTreeMarkers $tree $SdkTreeMarkers
+    if ($missing.Count -eq 0) { return }
+    Write-Host "$tree lacks:" -ForegroundColor Red
+    $missing | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+    Fail "$tree is not ReXGlue $SdkCommit with the current sdk\patches. $remedy"
+}
+
+function Initialize-CleanSdk {
+    Step "Preparing the SDK sources in $cleanSdk (ReXGlue $SdkCommit + sdk\patches)"
+    try {
+        if (-not (Initialize-SdkSource $cleanSdk $cleanSdkMarker (Join-Path $root 'sdk\patches'))) {
+            Write-Host '  already prepared with the current patches'
+        }
+    } catch { Fail $_.Exception.Message }
 }
 
 function Show-Errors([string]$log) {
@@ -177,23 +225,24 @@ function Write-LocalProperties([string]$androidSdk) {
 
 # ---- checks ---------------------------------------------------------------------------------
 Step 'Checking the tools'
-foreach ($tool in 'cmake', 'ninja') {
+foreach ($tool in 'git', 'cmake', 'ninja') {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { Fail "$tool was not found on PATH." }
 }
 $python = Find-Python
 if (-not $python) { Fail 'Python 3 was not found (python, python3 or py on PATH).' }
-if (-not $SdkSource) { Fail 'Give the rexglue-sdk tree with the Android port with -SdkSource <folder> or set REXGLUE_SDK_ANDROID.' }
-if (-not (Test-Path (Join-Path $SdkSource 'include\rex\main_android.h'))) {
-    Fail "$SdkSource is not a rexglue-sdk tree with the Android port (include\rex\main_android.h is missing)."
+if ($SdkSource) {
+    if (-not (Test-Path $SdkSource -PathType Container)) { Fail "-SdkSource $SdkSource does not exist." }
+    $SdkSource = (Resolve-Path $SdkSource).Path
+    Assert-SdkTreeCurrent $SdkSource ('Run without -SdkSource to build from a clean clone, or apply ' +
+        'the missing patches to your tree (sdk\patches\README.md).')
 }
-$SdkSource = (Resolve-Path $SdkSource).Path
 if (-not $Ndk) { $Ndk = Find-Ndk }
 $toolchain = if ($Ndk) { Join-Path $Ndk 'build\cmake\android.toolchain.cmake' } else { '' }
 if (-not $Ndk -or -not (Test-Path $toolchain)) { Fail 'Android NDK not found; pass -Ndk <folder> (NDK r29 or newer).' }
 $androidSdk = Find-AndroidSdk $Ndk
 if (-not $SkipGradle -and -not $androidSdk) { Fail 'Android SDK not found; set ANDROID_HOME (platform 36 is needed).' }
 if ($Jobs -le 0) { $Jobs = [Environment]::ProcessorCount }
-Write-Host "SDK source: $SdkSource"
+Write-Host "SDK source: $(if ($SdkSource) { $SdkSource } else { "$cleanSdk (clean clone)" })"
 Write-Host "NDK:        $Ndk"
 Write-Host "Python:     $python"
 Write-Host "Jobs:       $Jobs"
@@ -202,6 +251,13 @@ New-Item -ItemType Directory -Force -Path $logs | Out-Null
 if ($Clean) {
     Step 'Cleaning'
     foreach ($d in $build, $jniLibs) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
+}
+
+# ---- 0. SDK sources --------------------------------------------------------------------------
+if (-not $SdkSource) {
+    Initialize-CleanSdk
+    $SdkSource = $cleanSdk
+    Assert-SdkTreeCurrent $SdkSource "Delete $cleanSdkMarker to prepare it again."
 }
 
 # ---- 1. codegen -----------------------------------------------------------------------------
