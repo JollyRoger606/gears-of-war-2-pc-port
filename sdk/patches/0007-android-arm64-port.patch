@@ -1342,6 +1342,38 @@ index 4fcfd7b..7565c36 100644
  namespace rex::string {
  
  std::string to_utf8(const std::u16string_view source) {
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index a744375..ab2e134 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -31,16 +31,27 @@
+ #include <rex/math.h>
+ #include <rex/memory.h>
+ #include <rex/memory/ring_buffer.h>
++#include <rex/platform.h>
+ #include <rex/stream.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/user_module.h>
+ 
+ REXCVAR_DEFINE_BOOL(vsync, true, "GPU", "Enable vertical sync");
+ 
++#if REX_PLATFORM_ANDROID
++// Re-uploading every CPU-written page at each frame end costs a Vulkan render pass per upload on a
++// tiling GPU (Gears of War 2: ~1,850 uploads and ~1,600 passes a frame, half the frame rate on the
++// Adreno 830); the memory watches still catch the CPU's writes.
++REXCVAR_DEFINE_BOOL(clear_memory_page_state, false, "GPU",
++                    "Refresh page-valid state from GPU-written memory at frame end. "
++                    "Disable for minor CPU overhead reduction, but may break memory coherency.")
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++#else
+ REXCVAR_DEFINE_BOOL(clear_memory_page_state, true, "GPU",
+                     "Refresh page-valid state from GPU-written memory at frame end. "
+                     "Disable for minor CPU overhead reduction, but may break memory coherency.")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
++#endif
+ 
+ REXCVAR_DEFINE_BOOL(occlusion_query_enable, true, "GPU", "Enable host occlusion query handling")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
 index 1774f97..85b169c 100644
 --- a/src/graphics/pipeline/shader/spirv_translator.cpp
