@@ -183,7 +183,7 @@ through the system folder picker.
 
 ### 4. Later: your own server
 
-Any of the routes above can end at a server you run (for example behind `suruworks.com`): an
+Any of the routes above can end at a server you run (a home server or a rented one): an
 always-on Syncthing device as a third peer that keeps versions, or an rclone remote (WebDAV, SFTP,
 S3-compatible) as Ludusavi's cloud target. Neither needs code in the port. A sync built into the game
 itself is not planned until one of these has been used for a while.

@@ -148,14 +148,14 @@ address (swlan0/ap0) itself.
 
 ## Over the internet (host on a PC)
 
-[ONLINE.md](ONLINE.md) applies these steps to the home network measured on 2026-10-15 (two
-routers in a row, the suruworks.com DNS zone) and covers Tailscale and ZeroTier.
+[ONLINE.md](ONLINE.md) works these steps through in detail (one or two routers in a row, a DNS
+name, the firewall rule, a test from mobile data) and covers Tailscale and ZeroTier.
 
 1. On the router, forward UDP 14001 (System Link beacon) and UDP 41000
-   (game traffic, guest port 1000 + 40000) to the hosting PC
-   (192.168.10.10). TCP is not needed for campaign co-op (TCP 8675 is the
+   (game traffic, guest port 1000 + 40000) to the hosting PC's LAN
+   address. TCP is not needed for campaign co-op (TCP 8675 is the
    versus party beacon).
-2. DNS: create an A record such as `gow2.suruworks.com` that points at the
+2. DNS: create an A record such as `gow2.example.com` that points at the
    home's public IP. If the ISP changes the address, use dynamic DNS.
    Check for CGNAT first: if the router's WAN address differs from the
    public address that a "what is my IP" page shows, port forwarding
@@ -163,13 +163,13 @@ routers in a row, the suruworks.com DNS zone) and covers Tailscale and ZeroTier.
    put the other players' virtual addresses in `net_peers`, because
    broadcasts do not cross those either.
 3. The host sets `net_link_active=true`,
-   `net_public_address=gow2.suruworks.com` and `net_allow_peers` with every
+   `net_public_address=gow2.example.com` and `net_allow_peers` with every
    friend's public address or dynamic DNS name, for example
    `net_allow_peers=friend1.example.com,203.0.113.7`. Without
    `net_allow_peers` the host lets in only its own network and its
    `net_peers`, and logs a warning that names `net_allow_peers`.
 4. Each friend sets `net_link_active=true` and
-   `net_peers=gow2.suruworks.com`, and searches for System Link games as
+   `net_peers=gow2.example.com`, and searches for System Link games as
    usual.
 5. The host's Windows Firewall needs the inbound rule for its `gow2.exe`
    path (see Windows Firewall above).
