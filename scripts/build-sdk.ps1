@@ -41,11 +41,6 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-# The SDK commit the project and the patches are made for (must match the
-# prebuilt SDK the game is compiled against).
-$SdkUrl = 'https://github.com/rexglue/rexglue-sdk.git'
-$SdkCommit = '923c1a5'
-
 function Fail($msg) { Write-Host "ERROR: $msg" -ForegroundColor Red; exit 1 }
 function Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
 function Run($what, [scriptblock]$cmd) {
@@ -74,7 +69,8 @@ function Import-VcVars($vsPath) {
     }
 }
 
-. (Join-Path $PSScriptRoot 'sdk-symlinks.ps1')
+# The pinned SDK commit ($SdkCommit), the patched checkout and the symlink repair.
+. (Join-Path $PSScriptRoot 'sdk-source.ps1')
 
 function Find-ClangDir($vsPath) {
     foreach ($dir in @((Join-Path $vsPath 'VC\Tools\Llvm\x64\bin'), (Join-Path $env:ProgramFiles 'LLVM\bin'))) {
@@ -110,30 +106,12 @@ New-Item -ItemType Directory -Force $work, $outDir | Out-Null
 # ---- the SDK ---------------------------------------------------------------------------------
 $sdk = Join-Path $work 'rexglue-sdk'
 $marker = Join-Path $work 'sdk-patched.txt'
-$patchDir = Join-Path $root 'sdk\patches'
-$patchFiles = @()
-if (Test-Path $patchDir) { $patchFiles = @(Get-ChildItem $patchDir -Filter *.patch | Sort-Object Name) }
-$stamp = ($patchFiles | ForEach-Object { "$($_.Name):$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)" }) -join ','
-$want = "$SdkCommit|$stamp"
-
-if (-not (Test-Path (Join-Path $sdk '.git'))) {
-    Step "Cloning the ReXGlue SDK ($SdkCommit)"
-    Run 'git clone' { git clone --filter=blob:none $SdkUrl $sdk }
-}
-if (-not (Test-Path $marker) -or (Get-Content $marker -Raw).Trim() -ne $want) {
-    Step 'Preparing the SDK sources'
-    Push-Location $sdk
-    try {
-        Run 'git checkout' { git checkout -f $SdkCommit }
-        Run 'git clean' { git clean -fdq -e out }
-        Run 'git submodule update' { git submodule update --init --recursive --depth 1 --jobs 8 }
-        Repair-SymlinkStubs $sdk
-        foreach ($p in $patchFiles) {
-            Run "applying patch $($p.Name)" { git apply --ignore-whitespace --whitespace=nowarn $p.FullName }
-        }
-    } finally { Pop-Location }
-    Set-Content $marker $want
-}
+Step "The ReXGlue SDK ($SdkCommit) with sdk\patches"
+try {
+    if (-not (Initialize-SdkSource $sdk $marker (Join-Path $root 'sdk\patches'))) {
+        Write-Host "Already prepared: $sdk"
+    }
+} catch { Fail $_.Exception.Message }
 
 # ---- public upscaler SDKs (not redistributed) --------------------------------------------------
 $dlss = Join-Path $work 'dlss-sdk'

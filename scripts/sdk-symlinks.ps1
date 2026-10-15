@@ -1,4 +1,4 @@
-# Dot-sourced by build-sdk.ps1 and build-sdk-android.ps1.
+# Dot-sourced by sdk-source.ps1 (build-sdk.ps1, build-android.ps1) and build-sdk-android.ps1.
 #
 # Without symlink privileges (no Developer Mode) git checks symlinks out as small text files that
 # hold the target path; libmspack's cabextract/mspack/*.c are such links and fail to compile.
