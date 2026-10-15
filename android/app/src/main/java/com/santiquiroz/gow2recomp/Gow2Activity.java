@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.util.Log;
 import android.view.WindowManager;
 
@@ -30,6 +31,16 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
     private GamePaths paths;
     private GameSetupScreen setupScreen;
     private NetworkPlayLocks networkLocks;
+
+    public boolean requestSustainedPerformanceMode(boolean enable) {
+        PowerManager pm = getSystemService(PowerManager.class);
+        boolean supported = pm != null && pm.isSustainedPerformanceModeSupported();
+        if (supported) {
+            runOnUiThread(() -> getWindow().setSustainedPerformanceMode(enable));
+        }
+        Log.i(TAG, "Sustained performance mode requested: " + enable + ", supported: " + supported);
+        return supported;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

@@ -32,6 +32,7 @@
 
 #if defined(__ANDROID__)
 #include "gow2_android_devices.h"
+#include "gow2_android_power.h"
 #include "gow2_frame_stats.h"
 #include "gow2_touch_controls.h"
 #endif
@@ -419,6 +420,7 @@ class Gow2App : public rex::ReXApp {
     rex::glue::InstallNativeMouseAim(window());
 #if defined(__ANDROID__)
     rex::glue::InstallFrameStats();
+    rex::glue::ApplySustainedPerformanceMode();
 #endif
   }
 #if defined(__ANDROID__)
