@@ -72,12 +72,13 @@ false`, NDK r28+ default linker alignment), so the app also runs on 16 KB-page d
 
 ## Licenses in the APK
 
-Every APK carries the license texts in `assets/licenses/`: the repository's [`LICENSE`](../LICENSE)
-and [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md), and
-[`LICENSE.SDL3.txt`](LICENSE.SDL3.txt). The Gradle task `copyLicenseAssets` (`app/build.gradle`)
+Every APK carries the license texts in `assets/licenses/`: the repository's [`LICENSE`](../LICENSE),
+[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md), [`LICENSE.SDL3.txt`](LICENSE.SDL3.txt)
+and [`LICENSE.SGSR.txt`](LICENSE.SGSR.txt). The Gradle task `copyLicenseAssets` (`app/build.gradle`)
 copies them from the repository at build time for every variant, so there is one copy of each in
 git; it stops the build when one of them is missing. `tools/check_android_libs.py` fails an APK
-without `assets/licenses/LICENSE` and `assets/licenses/THIRD_PARTY_NOTICES.md`.
+without `assets/licenses/LICENSE`, `assets/licenses/THIRD_PARTY_NOTICES.md` or
+`assets/licenses/LICENSE.SGSR.txt`.
 `THIRD_PARTY_NOTICES.md` has an "Android APK" section with what each of the five libraries
 contains (and a "Windows release zip" section for the PC package), every component's license, and
 how to get the FFmpeg and libmspack sources (LGPL 2.1, linked statically into `librexruntime.so`
@@ -247,7 +248,8 @@ system library; an undefined symbol is not defined by the libraries the linker w
 how Android's linker resolves app libraries); a library other than `libSDL3.so` defines `SDL_*` or
 `Java_org_libsdl_app_*` symbols; or `libgow2.so` does not export `SDL_main`; or `libgow2.so` exports
 anything besides `SDL_main` (`--main-exports` lists the allowed names); or an APK lacks
-`assets/licenses/LICENSE` or `assets/licenses/THIRD_PARTY_NOTICES.md` (`--no-notices` skips that
+`assets/licenses/LICENSE`, `assets/licenses/THIRD_PARTY_NOTICES.md` or
+`assets/licenses/LICENSE.SGSR.txt` (`--no-notices` skips that
 check); or a library contains an absolute build path: the repository root, the NDK folder or a
 `--forbid-path` (the build script passes the SDK tree), with either slash and in any case
 (`--allow-build-paths` skips that check).
@@ -300,6 +302,39 @@ There is exactly one SDL in the process: the SDK's Android build makes SDL3 a sh
 (`SDL_SHARED`), `librexruntime.so` and `librexgpu-xenos.so` link that `libSDL3.so`, and SDLActivity
 loads it first, so its `JNI_OnLoad` sets up the JNI state the runtime's SDL calls use. A static SDL
 inside the runtime would be a second copy without that state.
+
+## Upscaling and display
+
+Android now defaults `present_effect` to `"fsr"` (previously only `"bilinear"`). The choices are
+`"bilinear"`, `"cas"`, `"fsr"` (AMD FSR 1) and `"sgsr"` (Snapdragon Game Super Resolution 1).
+FSR 2 and FSR 3 are not available on Android. Set a choice in `gow2.toml` beside the logs, then
+relaunch, for example:
+
+```toml
+present_effect = "sgsr"
+```
+
+Use `present_effect = "bilinear"` for the old filter. FSR 1 runs EASU from 1280x720 to 2560x1440
+into an intermediate image at that output size, then RCAS into the swapchain. SGSR draws once
+straight into the swapchain, with no intermediate image and no dithering. `present_dither` is
+true on Android (false elsewhere) for the final pass of the other effects.
+`present_fsr_sharpness_reduction` is 0.3 stops on Android (0.2 elsewhere).
+`present_cas_additional_sharpness` (0) and `present_fsr_max_upsampling_passes` (4) are now available
+on Android too; their defaults are unchanged from elsewhere.
+
+The runtime still renders the game at 1280x720. These upscalers change the presented image, not
+the GPU work of the game. Their cost and look on the phone are to be measured
+([ANDROID_EXPERIMENTS.md](../docs/ANDROID_EXPERIMENTS.md), P7).
+
+Android defaults `vulkan_allow_present_mode_immediate`, `vulkan_allow_present_mode_mailbox` and
+`vulkan_allow_present_mode_fifo_relaxed` to false, selecting plain FIFO (the October 15 logs used
+MAILBOX). With FIFO the presenter paints on the UI thread, never on the GPU command thread.
+`present_android_frame_rate` defaults to 30: the window asks Android 11+ for this rate through
+`ANativeWindow_setFrameRate`, so the panel is expected to be able to leave 120 Hz; it is a request,
+not a forced refresh rate. 0 makes no request. If `gow2_unlock_fps` is on and `gow2.toml` does not
+set the rate, the port uses 0 for that launch (`DISPLAY frame rate hint` in the log). The runtime
+also logs `VulkanPresenter: ANativeWindow_setFrameRate(30 Hz) returned 0` when that call succeeds.
+P8 measures the display pacing. These changes are Android-only; Windows behaviour is unchanged.
 
 ## Controls
 
@@ -427,6 +462,37 @@ launch, and every pipeline was built again during play. Each new pipeline held t
 thread for 40-48 ms, and those bursts made the slowest windows of the October 14-15 runs. Patch
 0007 rewinds such streams; on the phone the storage now loads its pipelines at boot (`Created 295
 graphics pipelines from Vulkan storage` once the first gameplay has filled it).
+
+`vulkan_pipeline_cache_file=true` also keeps the driver's pipeline cache in
+`cache/shaders/shareable/4D53082D.vkpc`, beside `4D53082D.xsh` and `4D53082D.fbo.vk.xpso` under
+the game's storage. At boot it checks vendor, device, driver version, the driver's pipeline cache
+UUID, size and an XXH3 hash; a different or damaged file is ignored and rewritten. The storage
+writer saves it after the boot-time pipelines are built, every two minutes while new pipelines
+appear, and at shutdown, by writing `.tmp` then renaming it. Look for
+`VulkanPipelineCache: pipeline cache file <path>: <status> (<n> bytes of driver data)` and
+`VulkanPipelineCache: saved <n> bytes of driver pipeline cache to <path>`.
+Reusing driver data is expected to avoid repeating compilation of the roughly 1,270 stored
+pipelines (22.6 s at boot in the October 15 log); the launch-time effect is to be measured (P10).
+
+### CPU waits
+
+`gpu_worker_spin_us=50` makes the GPU command thread poll for up to 50 microseconds with ISB
+pauses, then sleep on the write pointer event in 5 ms waits. 0 sleeps at once; -1 restores the
+SDK's roughly 500 yield polls before sleeping. `gow2_android_gpu_wait_yield=true` also calls
+`sched_yield` once per poll of the game's wait for the GPU (`sub_8298C2A0` through `sub_82977688`),
+keeping the guest work and its time-base timeout.
+
+At build time `tools/prepare_android_sources.py` runs `tools/patch_spin_hints.py` on the Android
+copy of the generated code. It adds `__builtin_arm_isb(15)` after Xenon delay hints, which the
+recompiler otherwise emits nothing for: 12 `db16cyc` sites in GoW2, eight in `sub_82977688` and the
+others in the wait loops of `sub_829925B0`, `sub_82955768` and `sub_829531F8`. The original
+`generated/` and the Windows build do not receive these pauses. CPU and power effects are to be
+measured (P9).
+
+`gow2_android_sustained_performance=false` leaves sustained performance mode opt-in. True asks
+for the window's mode where `PowerManager.isSustainedPerformanceModeSupported()` allows it; the
+runtime logs `SUSTAINED performance mode requested: ...`. Sustained clocks and frame rate remain
+to be measured (P11).
 
 ## Menu prompts
 

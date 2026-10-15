@@ -132,10 +132,55 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
 - **`TEXFMT`** lines (with `vulkan_android_stats_log`): each texture format the first time it is
   loaded, with its host format and load shader. **`TEXFAIL`** lines (always): a texture whose data
   could not be loaded, once per format; that used to fail without a word.
-- **Switches** (all in `gow2.toml`):
+- **Present effects and display.** Android now has `bilinear`, `cas`, `fsr` (FSR 1, the default)
+  and `sgsr` (Snapdragon GSR 1); FSR 2/3 are not available. The game still renders at 1280x720.
+  At 2560x1440 output FSR 1 runs EASU into an intermediate image then RCAS into the swapchain;
+  SGSR draws once into the swapchain without an intermediate image or dithering. The other final
+  passes dither by default. These filters change image quality, not the game's GPU work (P7).
+  The swapchain now defaults to plain FIFO, painting on the UI thread instead of the GPU command
+  thread; the October 15 logs used MAILBOX. Android 11+ receives an
+  `ANativeWindow_setFrameRate` request for 30 Hz, expected to let the panel leave 120 Hz (P8).
+  The request is not a forced rate. 0 makes no request; `gow2_unlock_fps` uses 0 for that launch
+  unless `gow2.toml` sets `present_android_frame_rate` (`DISPLAY frame rate hint` in the log).
+  The call logs `VulkanPresenter: ANativeWindow_setFrameRate(30 Hz) returned 0` on success.
+- **Driver pipeline cache.** `vulkan_pipeline_cache_file` keeps
+  `cache/shaders/shareable/4D53082D.vkpc` beside `4D53082D.xsh` and `4D53082D.fbo.vk.xpso`.
+  It loads at boot after checking vendor, device, driver version, pipeline cache UUID, size and
+  an XXH3 hash; a different or damaged file is ignored and rewritten. The storage writer saves
+  after the boot-time pipelines are built, every two minutes while new pipelines appear, and
+  at shutdown, writing `.tmp` then renaming it. Logs name the path, load status and driver bytes:
+  `VulkanPipelineCache: pipeline cache file <path>: <status> (<n> bytes of driver data)` and
+  `VulkanPipelineCache: saved <n> bytes of driver pipeline cache to <path>`. Reusing driver data
+  is expected to avoid repeating compilation of about 1,270 stored pipelines (22.6 s at boot in
+  the October 15 log); boot-time savings are to be measured (P10).
+- **CPU waits.** The GPU command thread polls with ISB pauses for 50 microseconds, then sleeps
+  on the write pointer event in 5 ms waits. The game's GPU wait yields once per poll through
+  `sub_82977688`, called by `sub_8298C2A0`; its guest work and time-base timeout stay the same.
+  At build time `tools/prepare_android_sources.py` runs `tools/patch_spin_hints.py` on the Android
+  copy of the generated code, adding `__builtin_arm_isb(15)` after Xenon delay hints the
+  recompiler otherwise omits. GoW2 has 12 `db16cyc` sites: eight in `sub_82977688`, the rest in
+  wait loops in `sub_829925B0`, `sub_82955768` and `sub_829531F8`. The original `generated/` and
+  Windows build are unchanged. The window's sustained performance mode is opt-in where
+  `PowerManager.isSustainedPerformanceModeSupported()` allows it; the runtime logs
+  `SUSTAINED performance mode requested: ...`. CPU, power and sustained clock effects are to
+  be measured (P9, P11). None of these additions has been measured on the phone yet.
+- **Switches** (all in `gow2.toml`; defaults below are Android defaults):
 
   | Switch | Default | Effect |
   |---|---|---|
+  | `present_effect` | "fsr" | `bilinear`, `cas`, `fsr` (FSR 1 EASU then RCAS), `sgsr` (Snapdragon GSR 1, one pass); no FSR 2/3 (restart) |
+  | `present_fsr_sharpness_reduction` | 0.3 | RCAS sharpness reduction in stops (0.2 elsewhere; restart) |
+  | `present_dither` | true | Dither the final pass except SGSR (false elsewhere; restart) |
+  | `present_cas_additional_sharpness` | 0 | Additional CAS sharpness in [0, 1], same default as elsewhere (restart) |
+  | `present_fsr_max_upsampling_passes` | 4 | Maximum chained EASU passes, same default as elsewhere (restart) |
+  | `vulkan_allow_present_mode_immediate` | false | Allow IMMEDIATE instead of FIFO |
+  | `vulkan_allow_present_mode_mailbox` | false | Allow MAILBOX instead of FIFO |
+  | `vulkan_allow_present_mode_fifo_relaxed` | false | Allow FIFO_RELAXED instead of plain FIFO |
+  | `present_android_frame_rate` | 30 | Ask Android 11+ for this window frame rate in Hz; 0 makes no request; launch default 0 with `gow2_unlock_fps` unless configured |
+  | `vulkan_pipeline_cache_file` | true | Load and save the driver's `.vkpc` cache beside shader storage (restart) |
+  | `gpu_worker_spin_us` | 50 | GPU command thread polls with ISB pauses for this many microseconds, then waits in 5 ms sleeps; 0 sleeps immediately, -1 restores roughly 500 SDK yield polls |
+  | `gow2_android_gpu_wait_yield` | true | Yield once per poll of the game's GPU wait without changing guest work or its time-base timeout |
+  | `gow2_android_sustained_performance` | false | Request supported window sustained performance mode (restart); opt-in until measured |
   | `vulkan_android_empty_fragment_shader` | false | Draws without a pixel shader that have color targets bound get an empty fragment shader instead of none (restart) |
   | `vulkan_android_invariant_position_member` | false | `gl_Position` also gets the `Invariant` member decoration glslang emits (restart) |
   | `vulkan_occlusion_query_precise` | false | Occlusion queries ask for exact sample counts (`VK_QUERY_CONTROL_PRECISE_BIT`) |
@@ -154,8 +199,9 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   `FRAMETRACE` lines, so a trace of a run with a skip switch still lines up with the plain one.
   Switches that change a pipeline's description (bits 1, 4, 32, 64, 256 and 1024, and the paint
   list for draws without a pixel shader) add those pipelines to the shader storage, and a later
-  plain launch builds them at boot too: delete the storage (experiment 6's `rm`) before measuring
-  boot time or frame rate after such runs. Bit 16 and the paint list for draws with a pixel shader
+  plain launch builds them at boot too: delete the storage and `4D53082D.vkpc` (experiment 6's
+  `rm`) before measuring boot time or frame rate after such runs. A stale driver cache would hide
+  boot-time compilation. Bit 16 and the paint list for draws with a pixel shader
   only swap the fragment shader when a pipeline is built.
 
 - **Tools.** `tools\android_log_summary.py <log> [--clocks <file>]` prints one row per `FRAMES`
@@ -355,9 +401,9 @@ running.
    pipeline was being built is gone for good when its result is kept across frames. If `b0` is black
    and `p0` is not, the fix is the storage; if both are black, run
    `Set-GameConfig 'b6-sync' @('async_shader_compilation = false')` once with the storage deleted
-   (`adb -s $s shell rm "$files/gow2/cache/shaders/shareable/4D53082D.fbo.vk.xpso" "$files/gow2/cache/shaders/shareable/4D53082D.xsh"`)
-   and `Measure-Black 'b6-sync'`. Run step 0's two title launches again afterwards to refill the
-   storage.
+   (`adb -s $s shell rm "$files/gow2/cache/shaders/shareable/4D53082D.fbo.vk.xpso" "$files/gow2/cache/shaders/shareable/4D53082D.xsh" "$files/gow2/cache/shaders/shareable/4D53082D.vkpc"`)
+   and `Measure-Black 'b6-sync'`. Delete the driver cache too: leaving it would hide boot-time
+   compilation. Run step 0's two title launches again afterwards to refill the storage.
 7. **Sparse shared memory.** `@('vulkan_sparse_shared_memory = false')`, `Measure-Black 'b7-nosparse'`;
    the log then says `Vulkan sparse binding is not used for shared memory emulation`. A change
    means sparse binds the driver accepted did not take effect.
@@ -376,7 +422,7 @@ running.
 Restore the phone's own settings at the end of a session:
 `adb -s $s push (Join-Path $exp 'gow2.toml.orig') "$files/gow2.toml"`.
 
-## P1-P6. Frame rate (cool phone, A/B)
+## P1-P11. Frame rate (cool phone, A/B)
 
 Each pair alternates A, B, B, A, two minutes each, with the gate of step 1 before every launch,
 the clock sampler running (`android-gpu-clocks.sh 120`), and the comparison done on Mcycles/frame
@@ -402,6 +448,41 @@ or more in both B runs.
   Perfetto (`gpu.renderstages`, `gpu.counters`, `linux.ftrace` with `sched_switch` and
   `gpu_frequency`) or AGI's system profile: render passes and submissions per frame, GMEM load and
   store share, and GPU idle while the GPU command thread waits.
+
+- **P7 present effect.** A: `present_effect = "bilinear"`; B: `present_effect = "fsr"`, then a
+  separate A/B/B/A with B: `present_effect = "sgsr"`. Use a cool phone and quiet windows at the
+  same view. Compare GPU Mcycles per presented frame: use `GPUSTATS` swaps minus unpresented
+  per window with the sampled clock and busy fraction, rather than the game's `FRAMES` count.
+  Require `unpresented = 0` in the quiet windows being compared. Keep screenshots of that same
+  view for quality. The internal game resolution stays 1280x720; filter cost and look
+  remain to be measured.
+- **P8 display pacing.** A: defaults; B: `vulkan_allow_present_mode_mailbox = true` and
+  `present_android_frame_rate = 0`. Use A/B/B/A with the same cool-start gate and quiet windows.
+  Read `adb -s $s shell dumpsys SurfaceFlinger` in each run for the refresh rate, and keep the
+  present-mode and frame-rate request log lines. Compare Mcycles/frame, presented frame cadence
+  and sustained clock; any panel or power effect is to be measured.
+- **P9 CPU waits.** A: defaults; B: `gpu_worker_spin_us = -1` and
+  `gow2_android_gpu_wait_yield = false`. Use A/B/B/A, cool starts and quiet-window Mcycles/frame.
+  Record `adb -s $s shell top -H -b -d 5 -n 6 -p <pid>` during the same view: CPU use of the GPU
+  command thread and game thread, plus the sustained GPU clock from the sampler. This compares
+  the configurable waits; the build-time ISB delay hints stay in both builds. CPU and power
+  effects are to be measured.
+- **P10 pipeline cache.** Delete both shader storage files and `4D53082D.vkpc` with experiment
+  6's `rm`, then make a first launch through the same view to populate storage and let it save.
+  Keep the next two launches without deleting anything: compare the time from
+  `Initializing shader storage` to `Created N graphics pipelines from Vulkan storage` on the
+  second and third launch, with the same pipeline count. The second builds the stored pipelines
+  and saves driver data; the third can reuse it. Look for `pipeline cache file <path>: ok` and
+  the saved-byte line. For a control, repeat the three-launch sequence with
+  `vulkan_pipeline_cache_file = false`; alternate enabled/disabled/disabled/enabled (A/B/B/A),
+  with a cool phone before every launch. Compare boot time and quiet-window Mcycles/frame
+  separately. A stale driver cache would hide the compilation this test needs to time; savings
+  remain to be measured.
+- **P11 sustained performance.** A: defaults; B: `gow2_android_sustained_performance = true`.
+  Use A/B/B/A from cool starts, the same two-minute view and quiet-window Mcycles/frame. Keep
+  `SUSTAINED performance mode requested: ...`, sustained CPU/GPU clocks, thermal status and game
+  frame rate. If unsupported, record that result; any steadier clock or frame-rate effect is to
+  be measured.
 
 ## Not covered
 
