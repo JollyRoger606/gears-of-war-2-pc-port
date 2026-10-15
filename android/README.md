@@ -263,8 +263,11 @@ platforms). 8 threads calling `InputSystem`'s `GetState`, `GetCapabilities`, `Se
 `GetKeystroke` over a counting driver never have more than one thread inside the driver, while the
 same driver called without `InputSystem` does see overlapping threads (so the check can detect the
 race). The guest `XamInputGetState`, `XamInputGetCapabilities(Ex)`, `XamInputSetState` and
-`XamInputGetKeystroke(Ex)` call exactly those four methods. On the S25 Ultra it prints
-`runtime_selftest: 18 checks, 0 failed`. The script then runs `gow2_touch_model_test`
+`XamInputGetKeystroke(Ex)` call exactly those four methods. On the S25 Ultra it printed
+`runtime_selftest: 18 checks, 0 failed`. A 19th check (October 15, not yet run on the phone) sets
+d8-d15 to known values, switches to a fiber that overwrites them and back, and expects them
+unchanged: AAPCS64 makes them callee-saved, and patch 0007's fiber switch did not keep them before.
+The script then runs `gow2_touch_model_test`
 (`gamelibs/tests/touch_model_test.cpp`, pure C++): the touch layout, finger ownership, the stick,
 taps held until each reader has seen them (also while a second reader polls every 16 ms), look
 speed between reads 300 and 900 ms apart, the look curve's direction and smoothness, RT and LT

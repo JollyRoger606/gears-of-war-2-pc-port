@@ -112,10 +112,10 @@ index 0000000..9b44b47
 +
 +#endif  // REX_PLATFORM_ANDROID
 diff --git a/include/rex/thread/fiber.h b/include/rex/thread/fiber.h
-index 352af67..f5e7787 100644
+index 352af67..849db20 100644
 --- a/include/rex/thread/fiber.h
 +++ b/include/rex/thread/fiber.h
-@@ -20,11 +20,29 @@
+@@ -20,11 +20,31 @@
  // before including <ucontext.h>.
  #define _XOPEN_SOURCE 700
  #endif
@@ -138,14 +138,16 @@ index 352af67..f5e7787 100644
 +  uint64_t fp_ = 0;
 +  uint64_t lr_ = 0;
 +  uint64_t sp_ = 0;
++  // The low 64 bits of v8-v15 (d8-d15) are callee-saved too (AAPCS64).
++  uint64_t d8_[8] = {};
 +};
-+static_assert(sizeof(AndroidFiberContext) == 14 * sizeof(uint64_t));
++static_assert(sizeof(AndroidFiberContext) == 22 * sizeof(uint64_t));
 +#endif
 +
  namespace rex::thread {
  
  /// Host OS fiber primitive.
-@@ -57,13 +75,23 @@ struct Fiber {
+@@ -57,13 +77,23 @@ struct Fiber {
    void* handle_ = nullptr;
    bool is_thread_fiber_ = false;
  #elif REX_PLATFORM_LINUX || REX_PLATFORM_MAC
@@ -413,10 +415,10 @@ index 8b1c76a..0bc7730 100644
        assert_always("Failed to install new SIGBUS handler");
      }
 diff --git a/src/core/fiber_posix.cpp b/src/core/fiber_posix.cpp
-index 4fe1ca6..d213ead 100644
+index 4fe1ca6..0cbe6bf 100644
 --- a/src/core/fiber_posix.cpp
 +++ b/src/core/fiber_posix.cpp
-@@ -22,11 +22,94 @@
+@@ -22,11 +22,102 @@
  #include <rex/thread/fiber.h>
  
  #include <cassert>
@@ -431,8 +433,8 @@ index 4fe1ca6..d213ead 100644
 +#if REX_PLATFORM_ANDROID && REX_ARCH_ARM64
 +// Bionic provides no ucontext user-context functions, so fibers switch with a
 +// small hand-rolled AArch64 context switch: only callee-saved registers
-+// (x19-x28, fp, lr) plus sp are preserved, matching the AAPCS64 contract, and
-+// x0_ carries the Fiber* into freshly created fibers.
++// (x19-x28, fp, lr, d8-d15) plus sp are preserved, matching the AAPCS64
++// contract, and x0_ carries the Fiber* into freshly created fibers.
 +
 +__attribute__((naked)) static void FiberSwitchImpl(AndroidFiberContext* from,
 +                                                   AndroidFiberContext* to) {
@@ -446,12 +448,20 @@ index 4fe1ca6..d213ead 100644
 +      "stp x29, x30, [x0, #88]\n"
 +      "mov x2, sp\n"
 +      "str x2, [x0, #104]\n"
++      "stp d8, d9, [x0, #112]\n"
++      "stp d10, d11, [x0, #128]\n"
++      "stp d12, d13, [x0, #144]\n"
++      "stp d14, d15, [x0, #160]\n"
 +      // Restore callee-saved state from *to (x1).
 +      "ldp x19, x20, [x1, #8]\n"
 +      "ldp x21, x22, [x1, #24]\n"
 +      "ldp x23, x24, [x1, #40]\n"
 +      "ldp x25, x26, [x1, #56]\n"
 +      "ldp x27, x28, [x1, #72]\n"
++      "ldp d8, d9, [x1, #112]\n"
++      "ldp d10, d11, [x1, #128]\n"
++      "ldp d12, d13, [x1, #144]\n"
++      "ldp d14, d15, [x1, #160]\n"
 +      "ldr x2, [x1, #104]\n"
 +      "mov sp, x2\n"
 +      "ldp x29, x30, [x1, #88]\n"
@@ -511,7 +521,7 @@ index 4fe1ca6..d213ead 100644
  Fiber* Fiber::ConvertCurrentThread() {
    auto* f = new Fiber();
    if (getcontext(&f->context_) == -1) {
-@@ -68,6 +151,8 @@ void Fiber::SwitchTo(Fiber* target) {
+@@ -68,6 +159,8 @@ void Fiber::SwitchTo(Fiber* target) {
    swapcontext(&from->context_, &target->context_);
  }
  
@@ -521,7 +531,7 @@ index 4fe1ca6..d213ead 100644
    // Thread fibers are destroyed from the owning thread itself.
    if (is_thread_fiber_) {
 diff --git a/src/core/filesystem_posix.cpp b/src/core/filesystem_posix.cpp
-index ef5bdf4..2c03f9a 100644
+index ef5bdf4..26dba04 100644
 --- a/src/core/filesystem_posix.cpp
 +++ b/src/core/filesystem_posix.cpp
 @@ -10,6 +10,7 @@
@@ -546,7 +556,31 @@ index ef5bdf4..2c03f9a 100644
    return GetExecutablePath().parent_path();
  }
  
-@@ -302,5 +310,32 @@ std::vector<FileInfo> ListFiles(const std::filesystem::path& path) {
+@@ -123,8 +131,22 @@ std::filesystem::path GetUserFolder() {
+   return std::filesystem::path(pw->pw_dir) / ".local" / "share";
+ }
+ 
++#if REX_PLATFORM_ANDROID
++static bool IsAppendReadMode(const std::string_view mode) {
++  return mode.find('a') != std::string_view::npos && mode.find('+') != std::string_view::npos;
++}
++#endif
++
+ FILE* OpenFile(const std::filesystem::path& path, const std::string_view mode) {
+-  return fopen(path.c_str(), std::string(mode).c_str());
++  FILE* file = fopen(path.c_str(), std::string(mode).c_str());
++#if REX_PLATFORM_ANDROID
++  // Bionic starts an "a+" stream's reads at the end of the file (glibc and MSVC at 0), so the
++  // shader storage readers saw no header and truncated their files on every launch.
++  if (file && IsAppendReadMode(mode)) {
++    rewind(file);
++  }
++#endif
++  return file;
+ }
+ 
+ bool Seek(FILE* file, int64_t offset, int origin) {
+@@ -302,5 +324,32 @@ std::vector<FileInfo> ListFiles(const std::filesystem::path& path) {
    return result;
  }
  

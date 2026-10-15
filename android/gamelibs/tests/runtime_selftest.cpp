@@ -8,8 +8,10 @@
 #include <rex/input/input_system.h>
 #include <rex/string/utf8.h>
 #include <rex/system/xtypes.h>
+#include <rex/thread/fiber.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -304,6 +306,75 @@ void CheckInputLock() {
          "only " + std::to_string(result.calls) + " driver calls");
 }
 
+constexpr size_t kFiberStackBytes = 256 * 1024;
+using FpCalleeSaved = std::array<double, 8>;
+
+// Leaves -1.0 in d8-d15 when it switches back, as fiber code that uses them would.
+void ClobberFpCalleeSavedAndSwitchBack(void* main_fiber) {
+  asm volatile(
+      "fmov d8, #-1.0\n"
+      "fmov d9, #-1.0\n"
+      "fmov d10, #-1.0\n"
+      "fmov d11, #-1.0\n"
+      "fmov d12, #-1.0\n"
+      "fmov d13, #-1.0\n"
+      "fmov d14, #-1.0\n"
+      "fmov d15, #-1.0\n" ::
+          : "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15");
+  rex::thread::Fiber::SwitchTo(static_cast<rex::thread::Fiber*>(main_fiber));
+}
+
+// Sets d8-d15 to 1.0-8.0, switches to `target` and back, and returns what d8-d15 hold then. One
+// asm block, so the compiler cannot move its own values through those registers in between.
+FpCalleeSaved SwitchWithFpCalleeSavedSet(rex::thread::Fiber* target) {
+  void (*switch_to)(rex::thread::Fiber*) = &rex::thread::Fiber::SwitchTo;
+  FpCalleeSaved after{};
+  double* out = after.data();
+  asm volatile(
+      "fmov d8, #1.0\n"
+      "fmov d9, #2.0\n"
+      "fmov d10, #3.0\n"
+      "fmov d11, #4.0\n"
+      "fmov d12, #5.0\n"
+      "fmov d13, #6.0\n"
+      "fmov d14, #7.0\n"
+      "fmov d15, #8.0\n"
+      "mov x0, %[target]\n"
+      "blr %[fn]\n"
+      "stp d8, d9, [%[out]]\n"
+      "stp d10, d11, [%[out], #16]\n"
+      "stp d12, d13, [%[out], #32]\n"
+      "stp d14, d15, [%[out], #48]\n"
+      :
+      : [target] "r"(target), [fn] "r"(switch_to), [out] "r"(out)
+      : "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
+        "x14", "x15", "x16", "x17", "x30", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",
+        "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20",
+        "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31", "memory",
+        "cc");
+  return after;
+}
+
+FpCalleeSaved FpCalleeSavedAfterFiberRoundTrip() {
+  rex::thread::Fiber* main_fiber = rex::thread::Fiber::ConvertCurrentThread();
+  rex::thread::Fiber* other = rex::thread::Fiber::Create(
+      kFiberStackBytes, ClobberFpCalleeSavedAndSwitchBack, main_fiber);
+  const FpCalleeSaved after = SwitchWithFpCalleeSavedSet(other);
+  other->Destroy();
+  main_fiber->Destroy();
+  return after;
+}
+
+// AAPCS64 makes d8-d15 callee-saved, so a fiber switch must hand them back unchanged.
+void CheckFiberSwitchKeepsFpRegisters() {
+  Check("fiber switch keeps d8-d15", [] {
+    FpCalleeSaved after{};
+    std::thread worker([&after] { after = FpCalleeSavedAfterFiberRoundTrip(); });
+    worker.join();
+    return after == FpCalleeSaved{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+  });
+}
+
 }  // namespace
 
 int main() {
@@ -313,6 +384,7 @@ int main() {
   CheckUtf8CaseOps();
   CheckInstrumentSeesOverlap();
   CheckInputLock();
+  CheckFiberSwitchKeepsFpRegisters();
   std::printf("runtime_selftest: %d checks, %d failed\n", g_checks, g_failures);
   std::fflush(stdout);
   return g_failures == 0 ? 0 : 1;
