@@ -93,6 +93,38 @@ October 15; the code is patch 0007):
    shaders get `gl_SampleMask`. b9 (depth written by the pixel shader, late Z: 66.6 against 47.8
    Mcycles per frame) shows what early Z is worth here.
 
+### PC reference at the same checkpoint (plan A1)
+
+On 2026-10-15, the RX 7800 XT PC (Windows 11, D3D12) ran the phone's own save and profile at
+`resolution_scale` 1 and 2, using separate user and cache copies and the phone's six game-patch
+values, including the AO patch. The player's own user folder stayed unchanged. Each kept run
+passed the 180 s idle gate and ended with no real input; runs interrupted by input were repeated.
+
+| First gameplay view | Black share | Probe (952,234), mean RGB |
+|---|---|---|
+| Phone `b0-first-gameplay.png` | 37.0 % | (4,4,4) |
+| PC 1x `g45` | 2.9 % | (41,48,50) |
+| PC 2x `g45` | 3.1 % | (39,47,48) |
+
+The phone and PC first views have the same framing; the PC draws the right building, street and
+sky where the phone is flat black. The probe is a 9x9 guest-pixel box on that building.
+The phone's white block behind the car is far buildings and a banner on the PC at 1x and 2x.
+The lit facade is warm on the phone and teal on the PC; which matches the console is not established.
+
+- The black regions and white blocks are Android-specific: the PC renders this checkpoint
+  completely with the phone's save, profile and game-patch values at both scales.
+- Ruled out as the whole cause here: the game, the six patches on their own, native 720p, and
+  shared render-target logic as far as D3D12 exercises it. The PC also uses host render targets,
+  not ROV; branches that depend on backend features can still differ.
+- Vulkan backend code and the Adreno driver remain open: this Windows build has no Vulkan backend.
+  A patch could still trigger a Vulkan-only fault, so A2's game-patch rows stay cheap tests.
+- Next: A2's render-target and transfer rows, A3 validation, A4 RenderDoc pixel history and A5 depth
+  switches. A PC Vulkan run would separate backend from driver; it needs `REXGLUE_USE_VULKAN`
+  and a backend selector (`LoadGpuPlugin` gets no backend name; "any" picks D3D12 first).
+
+The full record and repeat commands are in `out\pcref\results.md`, in the session's local folder,
+like `out\device\results.md` above.
+
 ## What the build adds
 
 The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) has:
