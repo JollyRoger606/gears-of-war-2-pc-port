@@ -342,11 +342,29 @@ class Gow2App : public rex::ReXApp {
     REXLOG_INFO("{}", saves.summary);
   }
 
+  // The command line outranks gow2.toml: a test instance's --user_data_root keeps its own saves
+  // even when gow2.toml points gow2_save_dir at the player's cloud folder.
+  static bool UserDataRootOutranksSaveDir() {
+    return rex::cvar::GetFlagSource("user_data_root") > rex::cvar::GetFlagSource("gow2_save_dir");
+  }
+
+  static void ReportSaveDirOutranked(const std::filesystem::path& user_data_root) {
+    if (rex::glue::SaveDirSetting().empty()) return;
+    const std::u8string root = user_data_root.u8string();
+    REXLOG_INFO("gow2_save_dir ignored: --user_data_root keeps saves, profile settings and "
+                "achievements in {}",
+                std::string(root.begin(), root.end()));
+  }
+
   // gow2.toml is loaded by now (OnConfigurePaths runs before it), and the runtime is not built yet.
   std::optional<rex::PathConfig> OnFinalizePaths(const rex::PathConfig& defaults,
                                                  std::function<void(rex::PathConfig)> resume) override {
     (void)resume;
     rex::PathConfig paths = defaults;
+    if (UserDataRootOutranksSaveDir()) {
+      ReportSaveDirOutranked(paths.user_data_root);
+      return paths;
+    }
     const rex::glue::SaveDirChoice saves = rex::glue::ChooseUserDataRoot(
         rex::glue::SaveDirSetting(), paths.user_data_root, paths.cache_root,
         paths.config_path.parent_path());

@@ -63,8 +63,11 @@ Everything worth keeping is under 1 MB; the cache next to it was 16 MB and can b
 Settings that move the data:
 
 - `gow2_save_dir` (below): the user data root only. The cache stays where it is.
-- The runtime's own `--user_data_root` flag does not work on Windows: `OnConfigurePaths` replaces it
-  with the `%LOCALAPPDATA%` folder. Use `gow2_save_dir`.
+- The runtime's own `--user_data_root` flag moves the user data root for one run (the cache then
+  follows the runtime default unless `--cache_root` is given too). It is meant for test copies of
+  the game: on the command line it outranks a `gow2_save_dir` from `gow2.toml`, and the log says
+  `gow2_save_dir ignored: --user_data_root keeps saves, profile settings and achievements in ...`.
+  For your own saves, use `gow2_save_dir`.
 - `GOW2_HOME` only moves `gow2_game_path.txt` (the remembered game folder), not the saves.
 
 ## `gow2_save_dir`
@@ -103,9 +106,10 @@ quietly go back to the default folder. If you build the game yourself, put the l
 `config/gow2.toml` too, or start the game with `--gow2_save_dir=<folder>` from a shortcut.
 
 Test runs must not share this folder. `scripts/run-instances.ps1` (System Link tests with several
-copies on one PC, `docs/NETWORK_PLAY.md`) passes `--gow2_save_dir=<run>\<name>\saves` to every copy;
-the command line outranks `gow2.toml`, so the copies never write your real, cloud-synced save at the
-same time.
+copies on one PC, `docs/NETWORK_PLAY.md`) passes `--gow2_save_dir=<run>\<name>\saves` to every copy,
+and `scripts/coop-instances.ps1` (co-op tests, `docs/COOP_N_PLAYERS.md`) gives every copy its own
+`--user_data_root`; the command line outranks `gow2.toml` either way, so the copies never write your
+real, cloud-synced save at the same time.
 
 ## Keeping saves safe and synced
 
