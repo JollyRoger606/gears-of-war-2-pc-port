@@ -160,8 +160,10 @@ name, the firewall rule, a test from mobile data) and covers Tailscale and ZeroT
 
 1. On the router, forward UDP 14001 (System Link beacon) and UDP 41000
    (game traffic, guest port 1000 + 40000) to the hosting PC's LAN
-   address. TCP is not needed for campaign co-op (TCP 8675 is the
-   versus party beacon).
+   address. `scripts/host-online.ps1 -Start` does this through UPnP on
+   every router in the path, with a lease, and `-Stop` undoes it.
+   TCP is not needed for campaign co-op (TCP 8675 is the versus party
+   beacon).
 2. DNS: create an A record such as `gow2.example.com` that points at the
    home's public IP. If the ISP changes the address, use dynamic DNS.
    Check for CGNAT first: if the router's WAN address differs from the
@@ -181,7 +183,9 @@ name, the firewall rule, a test from mobile data) and covers Tailscale and ZeroT
 5. The host's Windows Firewall needs the inbound rule for its `gow2.exe`
    path (see Windows Firewall above).
 6. Phones on mobile data sit behind carrier NAT in most cases and cannot
-   host. They can join.
+   host. They can join: on 2026-10-15 a Galaxy S25 Ultra on mobile data
+   joined a PC host behind two routers in a row and played Act 1 chapter 2
+   as Dom (ONLINE.md, "Tested over the internet").
 
 ## Security note
 

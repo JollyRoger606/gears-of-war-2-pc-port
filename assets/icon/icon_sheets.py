@@ -21,7 +21,22 @@ REPO_DIR = Path(__file__).resolve().parents[2]
 SCREENSHOT = REPO_DIR / "docs" / "screenshots" / "act1-4k-internal.jpg"
 FONT_PATH = Path(r"C:\Windows\Fonts\bahnschrift.ttf")
 OG_SIZE = (1200, 630)
-OG_BODY = ("Static recompilation to native x64 code.", "Not an emulator.", "Bring your own copy of the Xbox 360 game.")
+OG_TEXT = {
+    "en": {
+        "tag": "UNOFFICIAL FAN PORT",
+        "subtitle": "— native PC port",
+        "body": ("Static recompilation to native x64 code.", "Not an emulator.", "Bring your own copy of the Xbox 360 game."),
+        "notice": "Not affiliated with or endorsed by Microsoft, Xbox Game Studios, The Coalition or Epic Games.",
+    },
+    "es": {
+        "tag": "PORT NO OFICIAL",
+        "subtitle": "— port nativo para PC",
+        "body": ("Recompilación estática a código nativo x64.", "No es un emulador.", "Usa tu propia copia del juego de Xbox 360."),
+        "notice": "Sin afiliación ni respaldo de Microsoft, Xbox Game Studios, The Coalition o Epic Games.",
+    },
+}
+OG_NOTICE_BAND = 64
+OG_NOTICE_SIZES = (24, 23, 22)
 
 
 # ---- Open Graph image ----
@@ -48,41 +63,51 @@ def screenshot_panel(width, height):
 
 
 def draw_tag(draw, xy, text):
-    face = font(17, "SemiBold SemiCondensed")
+    face = font(28, "SemiBold SemiCondensed")
     x, y = xy
-    width = face.getlength(text) + 26
-    draw.rounded_rectangle([x, y, x + width, y + 30], radius=15, outline=HOT_TOP, width=2)
-    draw.text((x + 13, y + 15), text, font=face, fill=(255, 122, 92), anchor="lm")
+    width = face.getlength(text) + 36
+    draw.rounded_rectangle([x, y, x + width, y + 44], radius=22, outline=HOT_TOP, width=3)
+    draw.text((x + 18, y + 22), text, font=face, fill=(255, 122, 92), anchor="lm")
 
 
-def og_text(draw, left):
-    draw_tag(draw, (left, 236), "UNOFFICIAL FAN PORT")
-    draw.text((left, 282), "Gears of War 2", font=font(66, "SemiBold"), fill=(238, 240, 242))
-    draw.text((left, 356), "\u2014 native PC port", font=font(42, "Light"), fill=(178, 184, 190))
-    y = 432
-    for line in OG_BODY:
+def og_text(draw, left, text):
+    draw_tag(draw, (left, 204), text["tag"])
+    draw.text((left, 260), "Gears of War 2", font=font(66, "SemiBold"), fill=(238, 240, 242))
+    draw.text((left, 334), text["subtitle"], font=font(42, "Light"), fill=(178, 184, 190))
+    y = 406
+    for line in text["body"]:
         draw.text((left, y), line, font=font(21), fill=(150, 157, 164))
         y += 29
-    draw.text((left, y + 14), "github.com/santiquiroz/gears-of-war-2-pc-port", font=font(19, "SemiBold"), fill=(214, 218, 222))
+    draw.text((left, y + 12), "github.com/santiquiroz/gears-of-war-2-pc-port", font=font(19, "SemiBold"), fill=(214, 218, 222))
 
 
-def og_footer(image):
+def notice_font(notice, max_width):
+    for size in OG_NOTICE_SIZES:
+        face = font(size)
+        if face.getlength(notice) <= max_width:
+            return face
+    raise SystemExit(f"social card notice does not fit in {max_width} px at {OG_NOTICE_SIZES[-1]} px: {notice}")
+
+
+# The notice stays clear of the bottom 15 px, which a feed may crop when it fits 1.91:1 into 2:1.
+def og_footer(image, notice):
     w, h = image.size
-    band = Image.new("RGBA", (w, 44), (10, 11, 13, 225))
-    image.alpha_composite(band, (0, h - 44))
-    notice = "Not affiliated with or endorsed by Microsoft, Xbox Game Studios, The Coalition or Epic Games. Screenshot: Act 1 in this port, 4K internal."
-    ImageDraw.Draw(image).text((64, h - 22), notice, font=font(15), fill=(128, 134, 140), anchor="lm")
+    band = Image.new("RGBA", (w, OG_NOTICE_BAND), (10, 11, 13, 235))
+    image.alpha_composite(band, (0, h - OG_NOTICE_BAND))
+    face = notice_font(notice, w - 2 * 64)
+    ImageDraw.Draw(image).text((64, h - 38), notice, font=face, fill=(169, 175, 182), anchor="lm")
 
 
-def og_image(master):
+def og_image(master, lang="en"):
+    text = OG_TEXT[lang]
     w, h = OG_SIZE
     image = Image.new("RGBA", OG_SIZE, (20, 20, 22, 255))
     panel_x = 470
     panel = screenshot_panel(w - panel_x, h).convert("RGBA")
     image.paste(panel, (panel_x, 0), horizontal_ramp(w - panel_x, h, 0, 230))
-    image.alpha_composite(master.resize((168, 168), Image.LANCZOS), (52, 50))
-    og_text(ImageDraw.Draw(image), 64)
-    og_footer(image)
+    image.alpha_composite(master.resize((150, 150), Image.LANCZOS), (55, 36))
+    og_text(ImageDraw.Draw(image), 64, text)
+    og_footer(image, text["notice"])
     return image.convert("RGB")
 
 

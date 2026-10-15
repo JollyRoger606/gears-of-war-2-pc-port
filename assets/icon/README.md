@@ -6,7 +6,7 @@ numeral II sprayed through a stencil in orange-red. It is plain geometry drawn b
 like the Crimson Omen, no logotype and no traced artwork from the game.
 
 Gears of War is a trademark of Microsoft. The icon never shows the name. Wherever the icon
-appears with the name (README header, release page, store listing, social card), the name is
+appears with the name (release page, store listing, social card, website), the name is
 plain text and the "unofficial, not affiliated with Microsoft, Xbox Game Studios, The Coalition
 or Epic Games" notice goes with it.
 
@@ -20,8 +20,9 @@ or Epic Games" notice goes with it.
 | `favicon-32.png` | PNG favicon |
 | `favicon-180.png` | `apple-touch-icon`, opaque on the background colour |
 | `gow2-icon-flat.svg` | Flat vector: steel rim, flat red, no texture. For SVG favicons and badges on busy or mid-tone backgrounds |
-| `gow2-icon-mono.svg` | Single-colour vector: light shield with the II knocked out |
-| `og-image-1200x630.png` | Open Graph / social preview card (GitHub: Settings > Social preview) |
+| `gow2-icon-mono.svg` | Single-colour vector: light shield (`#E8ECEF`) with the II knocked out. For dark backgrounds only; on light ones use `gow2-icon-flat.svg` |
+| `og-image-1200x630.png` | Open Graph / social preview card in English (GitHub: Settings > Social preview; the website's `docs/assets/og-image.jpg`) |
+| `og-image-es-1200x630.png` | The same card in Spanish (the website's `docs/assets/og-image-es.jpg`) |
 | `android/` | Android launcher icons, laid out like `res/` (see below) |
 
 The 16, 20, 24, 32, 40 and 48 px frames are drawn on whole pixels by hand-fitted layouts in
@@ -69,7 +70,11 @@ same icon to the game window, so the title bar and taskbar match the file.
 ```text
 python assets/icon/render_icon.py
 python assets/icon/render_icon.py --preview out/brand/final
+python tools/site_assets.py
 ```
+
+`tools/site_assets.py` then copies the favicons and the social cards into the website
+(`docs/assets`) and rebuilds its WebP screenshots.
 
 Needs Python 3 with Pillow and NumPy (`pip install pillow numpy`; tested with Python 3.11,
 Pillow 10.4 and NumPy 2.4), on Windows for the font (see below). Every file listed above is rewritten from scratch, and the output is
@@ -92,10 +97,13 @@ The icon is original work for this project and is covered by the repository's BS
 license (see `LICENSE` at the root). That covers the mark and every file here that contains only
 the mark: the PNG, ICO and SVG icons and the Android layers.
 
-`og-image-1200x630.png` also contains two things that are not covered by that license:
+The social cards (`og-image-1200x630.png`, `og-image-es-1200x630.png`) and their website copies
+(`docs/assets/og-image.jpg`, `docs/assets/og-image-es.jpg`) also contain two things that are not
+covered by that license; the website's screenshot images (`docs/screenshots/*.jpg` and every
+`docs/assets/img/*.webp` except `icon-320.webp`) contain the first:
 
-- A screenshot of the game running in this port (`docs/screenshots/act1-4k-internal.jpg`). The
-  game's content belongs to its owners.
+- A screenshot of the game running in this port (`docs/screenshots/act1-4k-internal.jpg`). Gears
+  of War 2 content is © Microsoft Corporation (originally © 2008 Epic Games, Inc.).
 - Text set in Bahnschrift, a Microsoft font that ships with Windows 10 and 11
   (`C:\Windows\Fonts\bahnschrift.ttf`). The font file is not part of this repository and is not
   redistributed; only the rendered text is. Bahnschrift is licensed by Microsoft with Windows,
