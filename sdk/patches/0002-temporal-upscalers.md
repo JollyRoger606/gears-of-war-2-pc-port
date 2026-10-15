@@ -134,6 +134,10 @@ and measured GoW2 render sizes replacing Judgment's 720p/1440p assumptions.
   1280x704)`). DLSS itself has not run on NVIDIA hardware yet. `gow2_upscale_typed_copy = true`
   gives FSR the same copy so that input path can be checked on any GPU: with it on, FSR 4's
   image matches the direct read (mean RGB within 0.2 levels, same frame-to-frame difference).
+- `gow2_upscaler = auto` falls back to FSR 3.1 when DLSS is unavailable. One flag used to mean
+  both "DLSS failed" and "stop upscaling", so on this AMD card `auto` logged `DLSS: NGX init
+  failed 0xBAD00001` and then `Upscaler: failed` for good; each backend now has its own failure
+  flag and the next frame creates `FSR: context created '3.1.5'`.
 - Scene detection at scale 1: frame and depth are both 1280x704 (depth dxgi 41), the output is
   the monitor size at the frame's aspect (2560x1408 on 2560x1440). Colours match the
   upscaler-off image (mean RGB within one level) and the HUD stays sharp while turning.

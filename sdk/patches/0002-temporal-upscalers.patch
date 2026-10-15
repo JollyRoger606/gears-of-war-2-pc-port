@@ -1388,10 +1388,10 @@ index 0000000..0619953
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/src/graphics/d3d12/gow2_upscale.cpp b/src/graphics/d3d12/gow2_upscale.cpp
 new file mode 100644
-index 0000000..0ba1fe8
+index 0000000..cc7460f
 --- /dev/null
 +++ b/src/graphics/d3d12/gow2_upscale.cpp
-@@ -0,0 +1,752 @@
+@@ -0,0 +1,766 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +// Temporal upscaler pass runner: camera motion vectors -> DLSS -> write back into the scene colour
 +// texture, all recorded as one callback in the guest command stream.
@@ -1531,6 +1531,7 @@ index 0000000..0ba1fe8
 +  uint64_t depth_area = 0;
 +  uint32_t last_frame = 0;
 +  bool dlss_failed = false;
++  bool fsr_failed = false;
 +};
 +Gpu g;
 +constexpr uint32_t kSlices = 8;
@@ -1752,6 +1753,14 @@ index 0000000..0ba1fe8
 +  return true;
 +}
 +
++// Job backend: 0 = DLSS, 1 = FSR.
++void MarkBackendFailed(int job_backend) {
++  if (job_backend == 0)
++    g.dlss_failed = true;
++  else
++    g.fsr_failed = true;
++}
++
 +void RunJob(ID3D12GraphicsCommandList* list, void* user) {
 +  Job& j = *static_cast<Job*>(user);
 +  const D3D12_RESOURCE_STATES kSrv =
@@ -1822,7 +1831,7 @@ index 0000000..0ba1fe8
 +      e.quality = j.quality;
 +      have_out = DlssEvaluate(list, e);
 +    }
-+    if (!have_out) g.dlss_failed = true;
++    if (!have_out) MarkBackendFailed(j.backend);
 +  }
 +  // The upscaler (NGX / FidelityFX) rebinds its own heaps and root signature.
 +  list->SetDescriptorHeaps(1, heaps);
@@ -1859,6 +1868,11 @@ index 0000000..0ba1fe8
 +  if (u == "fsr4") return 3;
 +  if (u == "auto") return g.dlss_failed ? 2 : 1;
 +  return REXCVAR_GET(gow2_dlss) ? 1 : 0;
++}
++
++// Selection as SelectedBackend() returns it: 1 = DLSS, 2/3 = FSR.
++static bool BackendFailed(int backend_sel) {
++  return backend_sel == 1 ? g.dlss_failed : g.fsr_failed;
 +}
 +
 +int SelectedUpscaler() { return SelectedBackend(); }
@@ -1944,7 +1958,7 @@ index 0000000..0ba1fe8
 +  g.depth_tex.Reset();
 +  g.depth_area = 0;
 +  if (!UpscaleEnabled()) return false;
-+  if (g.dlss_failed) {
++  if (BackendFailed(SelectedBackend())) {
 +    SetUpscaleStatus("Upscaler: failed (see log)");
 +    return false;
 +  }
@@ -1991,7 +2005,7 @@ index 0000000..0ba1fe8
 +    }
 +  } else {
 +    if (!FsrInit(g.device.Get())) {
-+      g.dlss_failed = true;
++      g.fsr_failed = true;
 +      SetUpscaleStatus("FSR: unavailable (amd_fidelityfx_loader_dx12.dll / upscaler DLL missing)");
 +      return false;
 +    }
