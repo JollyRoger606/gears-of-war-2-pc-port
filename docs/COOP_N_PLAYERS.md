@@ -6,9 +6,10 @@ player 2 as Dom, players 3 and 4 as Ben Carmine (section 3, Stage 1 results). Th
 bugs, now fixed: `getsockname` was a stub, so every join failed; the S1-2 tail returned None, so
 players 3+ became Marcus clones; and `--user_data_root` never reached the runtime, so every
 instance shared one save folder. Not done yet: ten minutes of real combat with four players, a
-desync check, and anything on Android. There, patch 0010 and the co-op `src/` files have only
-passed NDK arm64 `-fsyntax-only` checks, and the newest additions (`getsockname`, the traffic log,
-the census and the test input) have not had even that. Stages 2-4 are design only.
+desync check, and co-op beyond two players on Android. The merged tree builds and links every
+patch and `src/` file for Android (below), but nobody has run `gow2_coop_players` 3+, the census or
+the traffic log on a phone. Stages 2 and 3 are design only; Stage 4's networking (patch 0011) is
+built and has joined two players, PC with PC and PC with phone.
 
 Merged on the `integration` branch (2026-10-15): master, then `saves`, `coop-stage1` and
 `crossplay`. The SDK series 0002-0011 applies in order on `923c1a5` (`git apply --check`, one patch
@@ -22,6 +23,14 @@ would never meet); its option table gained SO_KEEPALIVE and SO_OOBINLINE, the tw
 lacked; its `getsockname` replaces 0010's; and `net_traffic_log_sec` counts the datagrams that pass
 its filters, by host port. The Android build applies every `sdk/patches/*.patch` and globs
 `src/*.cpp`.
+
+Checked on the merged tree (2026-10-15): `scripts/build-sdk.ps1` and `scripts/build.ps1`; the
+SDK's System Link and session tests ("All tests passed (2151 assertions in 81 test cases)"); the
+host tests `gow2_test_input_test`, `gow2_script_patch_test` and `gow2_save_dir_test`; two copies
+on loopback (`scripts/run-instances.ps1` with `--net_traffic_log_sec=10`) that joined each other's
+System Link campaign and loaded Act 1 chapter 2, the client as Dom, with `[nettraffic]` lines for
+port 41000 in both logs (`out\pcpc-test\int1`); and `scripts/build-android.ps1`, whose library and
+APK checks passed, plus the app's JVM unit tests. The APK has not been installed on a phone.
 
 On the `crossplay` branch `scripts/build-android.ps1` built and linked 0002-0011 (with the
 getsockname 0010, before the traffic log). Two copies of the crossplay build joined each other's
