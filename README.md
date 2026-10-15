@@ -96,6 +96,7 @@ A controller works at the same time. All bindings are in `gow2.toml`.
 - `gow2_ao_upscaling_fix` — ambient occlusion without artifacts when scaled.
 - `gow2_dof_upscaling_fix` — depth of field without artifacts when scaled.
 - `mnk_sensitivity` — mouse sensitivity.
+- `gow2_save_dir` — folder for saves, profile settings and achievements; point it at a OneDrive, Google Drive or Dropbox folder to keep the campaign in the cloud ([docs/SAVES.md](docs/SAVES.md)).
 
 The community patches come from [xenia-canary/game-patches](https://github.com/xenia-canary/game-patches) (authors illusion and boma); the patched sites and values for this XEX are applied to the generated code, each behind its `gow2_*` setting.
 

@@ -22,6 +22,8 @@ set(GOW2_SOURCES
     src/gow2_utf8_guard.cpp
     src/gow2_crash_watch.cpp
     src/gow2_game_patches.cpp
+    src/gow2_save_dir.cpp
+    src/gow2_save_dir_setting.cpp
 )
 
 # The exe icon. CMake already turns on RC for clang on Windows; enable_language makes it explicit.
@@ -106,3 +108,11 @@ add_custom_command(TARGET gow2 POST_BUILD
             ${CMAKE_BINARY_DIR}/CMakeFiles/gow2_recomp.dir/generated/default
     COMMENT "Checking that no patched source is newer than its object"
     VERBATIM)
+
+# Host-side test of the gow2_save_dir logic on temporary folders (no game data, no SDK). Not part
+# of the default build: cmake --build <dir> --target gow2_save_dir_test, then run the exe.
+add_executable(gow2_save_dir_test EXCLUDE_FROM_ALL
+    tools/tests/save_dir_test.cpp
+    src/gow2_save_dir.cpp
+)
+target_include_directories(gow2_save_dir_test PRIVATE src)
