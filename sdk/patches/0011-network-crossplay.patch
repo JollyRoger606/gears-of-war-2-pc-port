@@ -1,8 +1,17 @@
 diff --git a/include/rex/system/system_link.h b/include/rex/system/system_link.h
-index cae697b..546522e 100644
+index 68ce93a..3104375 100644
 --- a/include/rex/system/system_link.h
 +++ b/include/rex/system/system_link.h
-@@ -27,9 +27,124 @@ constexpr size_t kXnKeySize = 16;
+@@ -5,6 +5,8 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <filesystem>
++#include <functional>
++#include <map>
+ #include <optional>
+ #include <span>
+ #include <string>
+@@ -29,11 +31,176 @@ constexpr size_t kXnKeySize = 16;
  constexpr size_t kSessionInfoSize = kXnKidSize + kXnAddrSize + kXnKeySize;
  constexpr const char* kInstallXuidFileName = "system_link_xuid.txt";
  
@@ -18,7 +27,16 @@ index cae697b..546522e 100644
 +constexpr size_t kXnAddrInaOnlineOffset = 4;
 +constexpr size_t kXnAddrPortOnlineOffset = 8;
 +constexpr uint64_t kPeerResolveIntervalMs = 5ull * 60 * 1000;
-+constexpr uint64_t kReplyToSourceWindowMs = 10ull * 1000;
++// A broadcast is copied back only to senders heard this recently: the beacon answer follows its
++// query within a few frames, and a longer window turns the host into a reflector.
++constexpr uint64_t kReplyToSourceWindowMs = 1000;
++constexpr size_t kMaxReplyCopiesPerBroadcast = 4;
++constexpr uint32_t kReplyCopiesPerSecond = 2;
++constexpr size_t kReplyBudgetCapacity = 64;
++// UE3's LanAnnouncePort: the System Link beacon socket, the only one whose broadcasts are copied
++// back to recent senders.
++constexpr uint16_t kBeaconGuestPort = 14001;
++constexpr size_t kMaxUdpDatagramSize = 65536;
 +constexpr uint64_t kHeardFromWindowMs = 10ull * 60 * 1000;
 +constexpr size_t kRecentSourceCapacity = 32;
 +constexpr uint64_t kDuplicateWindowMs = 250;
@@ -29,6 +47,8 @@ index cae697b..546522e 100644
 +
  using MacAddress = std::array<uint8_t, kMacSize>;
  using XnAddrBytes = std::array<uint8_t, kXnAddrSize>;
+ 
+ enum class XuidSource { kSetting, kOffline, kInstall };
  
 +struct Subnet {
 +  uint32_t ip = 0;
@@ -77,6 +97,7 @@ index cae697b..546522e 100644
 +  RecentSources(uint64_t window_ms, size_t capacity);
 +  void Note(const Endpoint& source, uint64_t now_ms);
 +  std::vector<Endpoint> Active(uint64_t now_ms) const;
++  std::vector<Endpoint> Latest(uint64_t now_ms, size_t max_count) const;
 +  bool HeardFrom(uint32_t ip, uint64_t now_ms) const;
 +
 + private:
@@ -85,6 +106,26 @@ index cae697b..546522e 100644
 +    uint64_t seen_ms;
 +  };
 +  uint64_t window_ms_;
++  size_t capacity_;
++  std::vector<Entry> entries_;
++};
++
++// Per-source token bucket for the unicast copies of a broadcast sent back to recent senders.
++// Not thread-safe.
++class ReplyBudget {
++ public:
++  ReplyBudget(uint32_t copies_per_second, size_t capacity);
++  bool TryTake(const Endpoint& source, uint64_t now_ms);
++
++ private:
++  struct Entry {
++    Endpoint source;
++    uint32_t tokens;
++    uint64_t refilled_ms;
++  };
++  void EvictOldestIfFull();
++  void Refill(Entry& entry, uint64_t now_ms) const;
++  uint32_t copies_per_second_;
 +  size_t capacity_;
 +  std::vector<Entry> entries_;
 +};
@@ -124,11 +165,31 @@ index cae697b..546522e 100644
 +  std::vector<Entry> entries_;
 +};
 +
++// Host name -> its last good IPv4 addresses.
++using NameTable = std::map<std::string, std::vector<uint32_t>>;
++using HostLookup = std::function<std::vector<uint32_t>(const std::string& host)>;
++
++struct NameRefresh {
++  NameTable table;
++  std::vector<std::string> changed;  // resolved to a different, non-empty list
++  std::vector<std::string> stale;    // lookup failed; previous addresses kept
++  std::vector<std::string> missing;  // lookup failed and nothing to keep
++};
++
++struct AllowPolicyInput {
++  bool allow_list_set = false;       // net_allow_peers is not empty
++  std::vector<Subnet> allow_list;    // its ranges plus the addresses of its names
++  bool peers_set = false;            // net_peers is not empty
++  std::vector<uint32_t> peer_ips;    // the addresses of net_peers
++  bool public_address_set = false;   // net_public_address is not empty
++  Subnet local_subnet;
++};
++
  std::optional<uint32_t> ParseIpv4(std::string_view text);
  std::vector<uint32_t> ParseIpv4List(std::string_view text);
  std::string FormatIpv4(uint32_t ip);
-@@ -40,20 +155,68 @@ std::string FormatXuid(uint64_t xuid);
- uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t> bind_ip);
+@@ -47,20 +214,86 @@ uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t
+ XuidSource ChooseXuidSource(bool xuid_setting_usable, bool link_active);
  uint64_t SplitMix64(uint64_t& state);
  MacAddress MakeInstanceMac(uint64_t xuid, uint32_t local_ip);
 -XnAddrBytes BuildXnAddr(uint32_t local_ip, const MacAddress& mac);
@@ -153,6 +214,7 @@ index cae697b..546522e 100644
 +bool IsInSubnet(uint32_t ip, const Subnet& subnet);
 +bool IsLoopbackIp(uint32_t ip);
 +uint32_t LanBroadcastIp(const Subnet& local_subnet, bool prefer_directed);
++std::vector<uint32_t> LanBroadcastIps(const Subnet& local_subnet, bool prefer_directed);
 +Subnet ResolveLocalSubnet(std::optional<Subnet> configured, std::optional<Subnet> environment,
 +                          std::optional<uint32_t> bind_ip, std::optional<uint32_t> detected_ip);
 +std::optional<HostPort> ParseHostPort(std::string_view text);
@@ -161,13 +223,30 @@ index cae697b..546522e 100644
 +
 +bool IsAllowedSource(uint32_t source_ip, std::span<const Subnet> allowed);
 +std::vector<Subnet> DefaultAllowList(std::span<const uint32_t> peer_ips, const Subnet& local_subnet);
-+std::vector<Endpoint> BroadcastFanOut(uint16_t host_port, uint32_t lan_broadcast_ip,
++std::vector<Subnet> EffectiveAllowList(const AllowPolicyInput& input);
++std::vector<Endpoint> BroadcastFanOut(uint16_t host_port,
++                                      std::span<const uint32_t> lan_broadcast_ips,
 +                                      std::span<const uint32_t> broadcast_targets,
 +                                      std::span<const Endpoint> peers,
 +                                      std::span<const Endpoint> recent_sources,
 +                                      std::span<const uint32_t> self_ips);
 +uint32_t PeerInAddr(uint32_t peer_ina, uint32_t peer_ina_online, const Subnet& local_subnet,
 +                    bool heard_from_ina);
++std::vector<Endpoint> ReplyCopyTargets(uint16_t socket_guest_port,
++                                       std::span<const Endpoint> latest_sources,
++                                       ReplyBudget& budget, uint64_t now_ms);
++
++std::vector<std::string> NamesToResolve(std::span<const HostPort> peers,
++                                        std::span<const std::string> allow_entries,
++                                        const std::optional<HostPort>& public_host);
++NameRefresh RefreshNames(const NameTable& previous, std::span<const std::string> names,
++                         const HostLookup& lookup);
++std::vector<uint32_t> HostAddresses(const std::string& host, const NameTable& names);
++std::vector<Endpoint> PeerEndpointsFrom(std::span<const HostPort> peers, const NameTable& names);
++std::vector<Subnet> AllowListFrom(std::span<const std::string> allow_entries,
++                                  const NameTable& names);
++std::optional<Endpoint> PublicEndpointFrom(const std::optional<HostPort>& public_host,
++                                           const NameTable& names);
 +
 +GuestSocketOption ClassifyGuestSocketOption(uint32_t level, uint32_t optname);
 +GuestSocketIoctl ClassifyGuestIoctl(uint32_t cmd);
@@ -184,7 +263,7 @@ index cae697b..546522e 100644
  uint32_t SelfIp();
 +std::vector<uint32_t> SelfIps();
  std::vector<uint32_t> BroadcastTargets();
-+uint32_t LanBroadcastIp();
++std::vector<uint32_t> LanBroadcastIps();
 +uint32_t PortOffset();
 +std::vector<Endpoint> PeerEndpoints();
 +std::vector<Subnet> AllowedSources();
@@ -196,9 +275,9 @@ index cae697b..546522e 100644
 +bool TraceEnabled();
  std::string Gamertag();
  uint64_t ResolveXuid(const std::filesystem::path& user_data_root);
- XnAddrBytes TitleXnAddr(uint64_t xuid);
+ std::optional<uint32_t> DetectRoutedIpv4();
 diff --git a/include/rex/system/xsocket.h b/include/rex/system/xsocket.h
-index 578e38b..c003e73 100644
+index 578e38b..aa8a381 100644
 --- a/include/rex/system/xsocket.h
 +++ b/include/rex/system/xsocket.h
 @@ -11,9 +11,11 @@
@@ -233,18 +312,24 @@ index 578e38b..c003e73 100644
    X_STATUS Connect(N_XSOCKADDR* name, int name_len);
    X_STATUS Bind(N_XSOCKADDR_IN* name, int name_len);
    X_STATUS Listen(int backlog);
-@@ -134,6 +142,10 @@ class XSocket : public XObject {
+@@ -134,6 +142,16 @@ class XSocket : public XObject {
    XSocket(KernelState* kernel_state, uint64_t native_handle);
    int SendCopy(const uint8_t* buf, uint32_t buf_len, uint32_t flags, uint32_t ip, uint16_t port);
    int SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags, uint16_t port);
 +  static void CaptureHostError();
 +  static void SetHostError(uint32_t wsa_error);
 +  bool AcceptDatagram(const system_link::Endpoint& source, const uint8_t* buf, int len);
++  std::vector<system_link::Endpoint> TakeReplyCopyTargets(uint64_t now_ms);
++  int RecvFromDatagram(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* from,
++                       uint32_t* from_len);
++  int RecvFromStream(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* from,
++                     uint32_t* from_len);
++  bool DiscardPeekedDatagram(uint32_t flags);
 +  X_STATUS SetLingerOption(const uint8_t* guest_value);
  
    uint64_t native_handle_ = -1;
  
-@@ -147,6 +159,12 @@ class XSocket : public XObject {
+@@ -147,6 +165,14 @@ class XSocket : public XObject {
  
    bool broadcast_socket_ = false;
  
@@ -253,6 +338,8 @@ index 578e38b..c003e73 100644
 +                                             system_link::kRecentSourceCapacity};
 +  system_link::DuplicateFilter duplicates_{system_link::kDuplicateWindowMs,
 +                                           system_link::kDuplicateCapacity};
++  system_link::ReplyBudget reply_budget_{system_link::kReplyCopiesPerSecond,
++                                         system_link::kReplyBudgetCapacity};
 +
    std::unique_ptr<rex::thread::Event> event_;
    std::mutex incoming_packet_mutex_;
@@ -682,10 +769,10 @@ index cd6a5b8..e93472b 100644
 -NETLINK_STUB_WSA(__imp__NetDll_getsockname, -1);
  REX_EXPORT(__imp__NetDll_getsockopt, rex::kernel::xam::NetDll_getsockopt_entry)
 diff --git a/src/system/system_link.cpp b/src/system/system_link.cpp
-index 2cc9af7..fd4cfec 100644
+index 4b1eadd..72d438f 100644
 --- a/src/system/system_link.cpp
 +++ b/src/system/system_link.cpp
-@@ -159,6 +159,251 @@ std::optional<uint32_t> ParseIpv4Field(std::string_view token) {
+@@ -159,6 +159,324 @@ std::optional<uint32_t> ParseIpv4Field(std::string_view token) {
    return value;
  }
  
@@ -848,11 +935,13 @@ index 2cc9af7..fd4cfec 100644
 +}
 +
 +void AppendLanEndpoints(std::vector<Endpoint>& out, uint16_t host_port,
-+                        uint32_t lan_broadcast_ip,
++                        std::span<const uint32_t> lan_broadcast_ips,
 +                        std::span<const uint32_t> broadcast_targets,
 +                        std::span<const uint32_t> self_ips) {
 +  if (broadcast_targets.empty()) {
-+    AppendUniqueEndpoint(out, Endpoint{lan_broadcast_ip, host_port});
++    for (uint32_t ip : lan_broadcast_ips) {
++      AppendUniqueEndpoint(out, Endpoint{ip, host_port});
++    }
 +    return;
 +  }
 +  for (uint32_t target : broadcast_targets) {
@@ -899,6 +988,77 @@ index 2cc9af7..fd4cfec 100644
 +  return peer_ina_online == kAnyIp || heard_from_ina;
 +}
 +
++void AppendUniqueSubnet(std::vector<Subnet>& out, const Subnet& subnet) {
++  if (std::find(out.begin(), out.end(), subnet) == out.end()) {
++    out.push_back(subnet);
++  }
++}
++
++std::vector<Subnet> LocalSubnetPlus(const Subnet& local_subnet, std::span<const Subnet> extra) {
++  std::vector<Subnet> result{local_subnet};
++  for (const Subnet& subnet : extra) {
++    AppendUniqueSubnet(result, subnet);
++  }
++  return result;
++}
++
++void AppendIfHostName(std::vector<std::string>& names, const std::string& host) {
++  if (host.empty() || ParseIpv4(host).has_value()) {
++    return;
++  }
++  names.push_back(host);
++}
++
++std::string AllowEntryHost(const std::string& entry) {
++  if (ParseIpv4Cidr(entry, kHostPrefixLength).has_value()) {
++    return {};
++  }
++  std::optional<HostPort> host_port = ParseHostPort(entry);
++  return host_port.has_value() ? host_port->host : std::string();
++}
++
++std::vector<uint32_t> KnownAddresses(const NameTable& names, const std::string& name) {
++  auto found = names.find(name);
++  if (found == names.end()) {
++    return {};
++  }
++  return found->second;
++}
++
++void RecordLookup(NameRefresh& refresh, const std::string& name, std::vector<uint32_t> fresh,
++                  std::vector<uint32_t> previous) {
++  if (!fresh.empty()) {
++    if (fresh != previous) {
++      refresh.changed.push_back(name);
++    }
++    refresh.table[name] = std::move(fresh);
++    return;
++  }
++  if (!previous.empty()) {
++    refresh.stale.push_back(name);
++    refresh.table[name] = std::move(previous);
++    return;
++  }
++  refresh.missing.push_back(name);
++}
++
++std::vector<Subnet> AllowEntrySubnets(const std::string& entry, const NameTable& names) {
++  if (std::optional<Subnet> range = ParseIpv4Cidr(entry, kHostPrefixLength); range.has_value()) {
++    return {*range};
++  }
++  std::optional<HostPort> host_port = ParseHostPort(entry);
++  if (!host_port.has_value()) {
++    return {};
++  }
++  std::vector<Subnet> result;
++  for (uint32_t ip : HostAddresses(host_port->host, names)) {
++    result.push_back(Subnet{ip, kHostPrefixLength});
++  }
++  return result;
++}
++
++constexpr uint64_t kMillisecondsPerSecond = 1000;
++
 +constexpr uint32_t kGuestSolSocket = 0xFFFF;
 +constexpr uint32_t kGuestSoReuseAddr = 0x0004;
 +constexpr uint32_t kGuestSoBroadcast = 0x0020;
@@ -937,7 +1097,7 @@ index 2cc9af7..fd4cfec 100644
  }  // namespace
  
  std::optional<uint32_t> ParseIpv4(std::string_view text) {
-@@ -313,12 +558,12 @@ MacAddress MakeInstanceMac(uint64_t xuid, uint32_t local_ip) {
+@@ -333,12 +651,12 @@ MacAddress MakeInstanceMac(uint64_t xuid, uint32_t local_ip) {
    return mac;
  }
  
@@ -955,7 +1115,7 @@ index 2cc9af7..fd4cfec 100644
    for (size_t i = 0; i < kMacSize; ++i) {
      out[kXnAddrMacOffset + i] = mac[i];
    }
-@@ -365,4 +610,388 @@ uint32_t WsaErrorFromErrno(int error) {
+@@ -385,4 +703,560 @@ uint32_t WsaErrorFromErrno(int error) {
    return kWsaEInval;
  }
  
@@ -1086,6 +1246,18 @@ index 2cc9af7..fd4cfec 100644
 +  return local_subnet.ip | ~PrefixMask(local_subnet.prefix_length);
 +}
 +
++std::vector<uint32_t> LanBroadcastIps(const Subnet& local_subnet, bool prefer_directed) {
++  if (!CanUseDirectedBroadcast(local_subnet)) {
++    return {kBroadcastIp};
++  }
++  uint32_t directed = LanBroadcastIp(local_subnet, true);
++  if (prefer_directed) {
++    return {directed};
++  }
++  // Windows sends 255.255.255.255 out of one adapter only, which may not be the LAN one.
++  return {directed, kBroadcastIp};
++}
++
 +Subnet ResolveLocalSubnet(std::optional<Subnet> configured, std::optional<Subnet> environment,
 +                          std::optional<uint32_t> bind_ip,
 +                          std::optional<uint32_t> detected_ip) {
@@ -1095,13 +1267,11 @@ index 2cc9af7..fd4cfec 100644
 +  if (environment.has_value()) {
 +    return *environment;
 +  }
-+  if (bind_ip.has_value()) {
-+    return Subnet{*bind_ip, kDefaultLocalPrefixLength};
++  uint32_t ip = ResolveLocalIp(std::nullopt, bind_ip, detected_ip);
++  if (!bind_ip.has_value() && ip == kLoopbackIp) {
++    return Subnet{kLoopbackIp, kLoopbackPrefixLength};
 +  }
-+  if (detected_ip.has_value()) {
-+    return Subnet{*detected_ip, kDefaultLocalPrefixLength};
-+  }
-+  return Subnet{kLoopbackIp, kLoopbackPrefixLength};
++  return Subnet{ip, kDefaultLocalPrefixLength};
 +}
 +
 +std::optional<HostPort> ParseHostPort(std::string_view text) {
@@ -1179,13 +1349,24 @@ index 2cc9af7..fd4cfec 100644
 +  return result;
 +}
 +
-+std::vector<Endpoint> BroadcastFanOut(uint16_t host_port, uint32_t lan_broadcast_ip,
++std::vector<Subnet> EffectiveAllowList(const AllowPolicyInput& input) {
++  if (input.allow_list_set) {
++    return LocalSubnetPlus(input.local_subnet, input.allow_list);
++  }
++  if (input.public_address_set || input.peers_set) {
++    return DefaultAllowList(input.peer_ips, input.local_subnet);
++  }
++  return {};
++}
++
++std::vector<Endpoint> BroadcastFanOut(uint16_t host_port,
++                                      std::span<const uint32_t> lan_broadcast_ips,
 +                                      std::span<const uint32_t> broadcast_targets,
 +                                      std::span<const Endpoint> peers,
 +                                      std::span<const Endpoint> recent_sources,
 +                                      std::span<const uint32_t> self_ips) {
 +  std::vector<Endpoint> result;
-+  AppendLanEndpoints(result, host_port, lan_broadcast_ip, broadcast_targets, self_ips);
++  AppendLanEndpoints(result, host_port, lan_broadcast_ips, broadcast_targets, self_ips);
 +  AppendPeerEndpoints(result, host_port, peers, self_ips);
 +  AppendRecentEndpoints(result, recent_sources, self_ips);
 +  return result;
@@ -1200,6 +1381,91 @@ index 2cc9af7..fd4cfec 100644
 +    return peer_ina_online;
 +  }
 +  return peer_ina;
++}
++
++std::vector<Endpoint> ReplyCopyTargets(uint16_t socket_guest_port,
++                                       std::span<const Endpoint> latest_sources,
++                                       ReplyBudget& budget, uint64_t now_ms) {
++  std::vector<Endpoint> result;
++  if (socket_guest_port != kBeaconGuestPort) {
++    return result;
++  }
++  for (const Endpoint& source : latest_sources) {
++    if (source.port == kEmptyPort) {
++      continue;
++    }
++    if (budget.TryTake(source, now_ms)) {
++      result.push_back(source);
++    }
++  }
++  return result;
++}
++
++std::vector<std::string> NamesToResolve(std::span<const HostPort> peers,
++                                        std::span<const std::string> allow_entries,
++                                        const std::optional<HostPort>& public_host) {
++  std::vector<std::string> names;
++  for (const HostPort& peer : peers) {
++    AppendIfHostName(names, peer.host);
++  }
++  for (const std::string& entry : allow_entries) {
++    AppendIfHostName(names, AllowEntryHost(entry));
++  }
++  if (public_host.has_value()) {
++    AppendIfHostName(names, public_host->host);
++  }
++  std::sort(names.begin(), names.end());
++  names.erase(std::unique(names.begin(), names.end()), names.end());
++  return names;
++}
++
++NameRefresh RefreshNames(const NameTable& previous, std::span<const std::string> names,
++                         const HostLookup& lookup) {
++  NameRefresh refresh;
++  for (const std::string& name : names) {
++    RecordLookup(refresh, name, lookup(name), KnownAddresses(previous, name));
++  }
++  return refresh;
++}
++
++std::vector<uint32_t> HostAddresses(const std::string& host, const NameTable& names) {
++  if (std::optional<uint32_t> ip = ParseIpv4(host); ip.has_value()) {
++    return {*ip};
++  }
++  return KnownAddresses(names, host);
++}
++
++std::vector<Endpoint> PeerEndpointsFrom(std::span<const HostPort> peers, const NameTable& names) {
++  std::vector<Endpoint> result;
++  for (const HostPort& peer : peers) {
++    for (uint32_t ip : HostAddresses(peer.host, names)) {
++      AppendUniqueEndpoint(result, Endpoint{ip, peer.port});
++    }
++  }
++  return result;
++}
++
++std::vector<Subnet> AllowListFrom(std::span<const std::string> allow_entries,
++                                  const NameTable& names) {
++  std::vector<Subnet> result;
++  for (const std::string& entry : allow_entries) {
++    for (const Subnet& subnet : AllowEntrySubnets(entry, names)) {
++      AppendUniqueSubnet(result, subnet);
++    }
++  }
++  return result;
++}
++
++std::optional<Endpoint> PublicEndpointFrom(const std::optional<HostPort>& public_host,
++                                           const NameTable& names) {
++  if (!public_host.has_value()) {
++    return std::nullopt;
++  }
++  std::vector<uint32_t> ips = HostAddresses(public_host->host, names);
++  if (ips.empty()) {
++    return std::nullopt;
++  }
++  return Endpoint{ips.front(), public_host->port};
 +}
 +
 +GuestSocketOption ClassifyGuestSocketOption(uint32_t level, uint32_t optname) {
@@ -1286,6 +1552,72 @@ index 2cc9af7..fd4cfec 100644
 +  return result;
 +}
 +
++std::vector<Endpoint> RecentSources::Latest(uint64_t now_ms, size_t max_count) const {
++  std::vector<Entry> active;
++  for (const Entry& entry : entries_) {
++    if (entry.seen_ms <= now_ms && now_ms - entry.seen_ms <= window_ms_) {
++      active.push_back(entry);
++    }
++  }
++  std::stable_sort(active.begin(), active.end(),
++                   [](const Entry& a, const Entry& b) { return a.seen_ms > b.seen_ms; });
++  std::vector<Endpoint> result;
++  for (size_t i = 0; i < active.size() && i < max_count; ++i) {
++    result.push_back(active[i].source);
++  }
++  return result;
++}
++
++ReplyBudget::ReplyBudget(uint32_t copies_per_second, size_t capacity)
++    : copies_per_second_(copies_per_second), capacity_(capacity) {}
++
++bool ReplyBudget::TryTake(const Endpoint& source, uint64_t now_ms) {
++  if (copies_per_second_ == 0 || capacity_ == kZeroCapacity) {
++    return false;
++  }
++  auto found = std::find_if(entries_.begin(), entries_.end(),
++                            [&source](const Entry& entry) { return entry.source == source; });
++  if (found == entries_.end()) {
++    EvictOldestIfFull();
++    entries_.push_back(Entry{source, copies_per_second_, now_ms});
++    found = entries_.end() - 1;
++  } else {
++    Refill(*found, now_ms);
++  }
++  if (found->tokens == 0) {
++    return false;
++  }
++  --found->tokens;
++  return true;
++}
++
++void ReplyBudget::EvictOldestIfFull() {
++  if (entries_.size() < capacity_) {
++    return;
++  }
++  auto oldest = std::min_element(entries_.begin(), entries_.end(),
++                                 [](const Entry& a, const Entry& b) {
++                                   return a.refilled_ms < b.refilled_ms;
++                                 });
++  entries_.erase(oldest);
++}
++
++void ReplyBudget::Refill(Entry& entry, uint64_t now_ms) const {
++  uint64_t interval_ms = kMillisecondsPerSecond / copies_per_second_;
++  if (now_ms > entry.refilled_ms && interval_ms > 0) {
++    uint64_t gained = (now_ms - entry.refilled_ms) / interval_ms;
++    if (gained > 0) {
++      uint64_t tokens = std::min<uint64_t>(copies_per_second_, entry.tokens + gained);
++      entry.tokens = static_cast<uint32_t>(tokens);
++      entry.refilled_ms += gained * interval_ms;
++    }
++  }
++  if (entry.tokens == copies_per_second_) {
++    // A full bucket banks nothing: the next refill counts from now.
++    entry.refilled_ms = std::max(entry.refilled_ms, now_ms);
++  }
++}
++
 +bool RecentSources::HeardFrom(uint32_t ip, uint64_t now_ms) const {
 +  for (const Endpoint& source : Active(now_ms)) {
 +    if (source.ip == ip) {
@@ -1345,58 +1677,55 @@ index 2cc9af7..fd4cfec 100644
 +
  }  // namespace rex::system::system_link
 diff --git a/src/system/system_link_settings.cpp b/src/system/system_link_settings.cpp
-index 636fc5f..ffd2173 100644
+index 9cabf47..91c5a02 100644
 --- a/src/system/system_link_settings.cpp
 +++ b/src/system/system_link_settings.cpp
-@@ -1,22 +1,42 @@
+@@ -1,14 +1,18 @@
  #include <algorithm>
 +#include <chrono>
-+#include <condition_variable>
  #include <cstring>
  #include <fstream>
-+#include <map>
++#include <memory>
  #include <mutex>
  #include <random>
- #include <set>
  #include <string>
  #include <system_error>
 +#include <thread>
  
  #include <rex/cvar.h>
  #include <rex/logging.h>
-+#include <rex/platform.h>
+ #include <rex/platform.h>
 +#include <rex/platform/env.h>
  #include <rex/system/system_link.h>
  
-+#if REX_PLATFORM_WIN32
-+#include <WinSock2.h>
-+
-+#include <WS2tcpip.h>
-+#else
-+#include <arpa/inet.h>
+ #if REX_PLATFORM_WIN32
+@@ -17,6 +21,7 @@
+ #include <WS2tcpip.h>
+ #else
+ #include <arpa/inet.h>
 +#include <netdb.h>
-+#include <netinet/in.h>
-+#include <sys/socket.h>
-+#include <unistd.h>
-+#endif
-+
- REXCVAR_DEFINE_BOOL(net_link_active, true, "Network",
-                     "Report an active 100 Mbps Ethernet link to the game. false reports an "
-                     "unplugged cable, which also turns campaign co-op (System Link) off");
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <unistd.h>
+@@ -28,9 +33,11 @@ REXCVAR_DEFINE_BOOL(net_link_active, false, "Network",
+                     "one; the game opens no LAN session and sees the fixed offline XUID")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
  REXCVAR_DEFINE_STRING(net_local_ip, "", "Network",
 -                      "IPv4 address this instance advertises to System Link peers (its XNADDR). "
--                      "Empty: net_bind_ip when set, else 127.0.0.1")
+-                      "Empty: net_bind_ip when set, else the address of the network adapter that "
+-                      "holds the default route, else 127.0.0.1")
 +                      "IPv4 address (a.b.c.d or a.b.c.d/prefix, prefix 24 by default) this "
 +                      "instance advertises to System Link peers (its XNADDR) and treats as its "
 +                      "local network. Empty: REX_DETECTED_LOCAL_IP (the Android app sets it), then "
-+                      "net_bind_ip, then the address of the default route, then 127.0.0.1")
++                      "net_bind_ip, then the address of the adapter that holds the default route, "
++                      "then 127.0.0.1")
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
  REXCVAR_DEFINE_STRING(net_bind_ip, "", "Network",
                        "Bind the game's sockets to this IPv4 address instead of 0.0.0.0, so several "
-@@ -27,6 +47,27 @@ REXCVAR_DEFINE_STRING(
-     "Comma-separated IPv4 addresses. Each broadcast the game sends goes out as one "
+@@ -42,6 +49,30 @@ REXCVAR_DEFINE_STRING(
      "unicast copy per address, skipping this instance's own. Needed with "
-     "net_bind_ip. Empty: broadcasts go out unchanged");
+     "net_bind_ip. Empty: broadcasts go out unchanged")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +REXCVAR_DEFINE_UINT32(net_port_offset, 40000, "Network",
 +                      "Guest ports below 1024 use port + this offset on the host (the game's UDP "
 +                      "1000 becomes 41000), so Android can bind them. Every peer needs the same "
@@ -1406,22 +1735,25 @@ index 636fc5f..ffd2173 100644
 +    net_peers, "", "Network",
 +    "Comma-separated host[:port] list (IPv4 addresses or DNS names such as "
 +    "gow2.example.com). Every broadcast the game sends also goes to each peer as a unicast "
-+    "copy: System Link over the internet. Names are resolved at start and every 5 minutes");
++    "copy: System Link over the internet. Names are resolved at start and every 5 minutes")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +REXCVAR_DEFINE_STRING(
 +    net_public_address, "", "Network",
 +    "host[:port] (IPv4 or DNS name) this instance advertises as its online address "
-+    "(XNADDR inaOnline/wPortOnline). Peers outside the local network connect to it. Empty: "
-+    "none");
++    "(XNADDR inaOnline/wPortOnline). Peers outside the local network connect to it. Set "
++    "net_allow_peers too: without it only the local network and net_peers may reach the game. "
++    "Empty: none")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 +REXCVAR_DEFINE_STRING(
 +    net_allow_peers, "", "Network",
-+    "Comma-separated IPv4 addresses, a.b.c.d/n ranges or DNS names. When set, datagrams "
-+    "from any other address are dropped before the game sees them (loopback always "
-+    "passes). Empty: the net_peers plus the local subnet when net_peers is set, else "
-+    "everyone");
++    "Comma-separated IPv4 addresses, a.b.c.d/n ranges or DNS names that may send datagrams to "
++    "the game; loopback and the local network always may. Empty: with net_peers or "
++    "net_public_address set, only the net_peers and the local network; else everyone")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
  REXCVAR_DEFINE_UINT64(net_random_seed, 0, "Network",
                        "Non-zero: XNetRandom, session keys and nonces come from a deterministic "
                        "stream with this seed (tests). 0: real randomness")
-@@ -41,12 +82,47 @@ REXCVAR_DEFINE_STRING(user_name, "User", "Kernel",
+@@ -57,6 +88,8 @@ REXCVAR_DEFINE_STRING(user_name, "User", "Kernel",
                        "Gamertag the game shows for the signed-in player (up to 15 characters)")
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
  
@@ -1430,11 +1762,10 @@ index 636fc5f..ffd2173 100644
  namespace rex::system::system_link {
  namespace {
  
- constexpr size_t kMaxGamertagLength = 15;
- constexpr const char* kDefaultGamertag = "User";
- constexpr size_t kRandomWordSize = sizeof(uint64_t);
-+constexpr uint32_t kDefaultRouteProbeIp = 0x08080808;
-+constexpr uint16_t kDefaultRouteProbePort = 53;
+@@ -67,15 +100,38 @@ constexpr size_t kRandomWordSize = sizeof(uint64_t);
+ // connect() on UDP sends nothing. 192.0.2.1 is TEST-NET-1 (RFC 5737).
+ constexpr uint32_t kRouteProbeIp = 0xC0000201;
+ constexpr uint16_t kRouteProbePort = 9;
 +constexpr size_t kHeardFromCapacity = 64;
 +#if REX_PLATFORM_WIN32
 +constexpr bool kPreferDirectedBroadcast = false;
@@ -1443,128 +1774,277 @@ index 636fc5f..ffd2173 100644
 +constexpr bool kPreferDirectedBroadcast = true;
 +#endif
 +
-+#if REX_PLATFORM_WIN32
-+using ProbeSocket = SOCKET;
-+constexpr ProbeSocket kInvalidProbeSocket = INVALID_SOCKET;
++struct PeerSettings {
++  bool peers_set = false;
++  bool allow_set = false;
++  bool public_set = false;
++  std::vector<HostPort> peers;
++  std::vector<std::string> allow_entries;
++  std::optional<HostPort> public_host;
++  std::string peers_text;
++  std::string allow_text;
++  std::string public_text;
++};
+ 
+ // The settings are read once, when the kernel starts: the network functions run on game threads
+ // while the settings panel can rewrite the cvars, and the advertised address must not move.
+ struct NetworkSettings {
+   bool link_active = false;
+   std::optional<uint32_t> bind_ip;
+-  uint32_t local_ip = kLoopbackIp;
++  Subnet local_subnet{kLoopbackIp, kLoopbackPrefixLength};
++  const char* local_origin = "";
+   std::vector<uint32_t> broadcast_targets;
++  std::vector<uint32_t> lan_broadcast_ips;
++  uint32_t port_offset = kDefaultPortOffset;
+   uint64_t random_seed = 0;
++  PeerSettings peers;
+ };
+ 
+ std::optional<uint32_t> ParseIpSetting(std::string_view setting_name, const std::string& value) {
+@@ -106,26 +162,112 @@ std::vector<uint32_t> ReadBroadcastTargets() {
+   return targets;
+ }
+ 
+-std::optional<uint32_t> DetectedIpWhenNeeded(bool link_active, std::optional<uint32_t> local_ip,
+-                                             std::optional<uint32_t> bind_ip) {
+-  if (!link_active || local_ip || bind_ip) {
++std::optional<Subnet> ParseSubnetSetting(std::string_view setting_name, std::string_view value) {
++  if (value.empty()) {
+     return std::nullopt;
+   }
+-  return DetectRoutedIpv4();
++  auto subnet = ParseIpv4Cidr(value, kDefaultLocalPrefixLength);
++  if (!subnet) {
++    REXLOG_WARN("{} '{}' is not an IPv4 address or a.b.c.d/n; ignored", setting_name, value);
++  }
++  return subnet;
++}
++
++std::optional<Subnet> ReadEnvironmentSubnet() {
++  std::optional<std::string> value = rex::platform::env::get(kLocalIpEnvironmentVariable);
++  if (!value) {
++    return std::nullopt;
++  }
++  return ParseSubnetSetting(kLocalIpEnvironmentVariable, *value);
++}
++
++uint32_t ReadPortOffset() {
++  uint32_t offset = REXCVAR_GET(net_port_offset);
++  if (!IsUsablePortOffset(offset)) {
++    REXLOG_WARN("net_port_offset {} is not 0 or 1024-64512; using {}", offset,
++                kDefaultPortOffset);
++    return kDefaultPortOffset;
++  }
++  return offset;
++}
++
++void WarnAboutUnusableAllowEntries(const std::vector<std::string>& entries) {
++  for (const std::string& entry : entries) {
++    if (!ParseIpv4Cidr(entry, kHostPrefixLength) && !ParseHostPort(entry)) {
++      REXLOG_WARN("net_allow_peers entry '{}' is not an address, range or host name; ignored",
++                  entry);
++    }
++  }
++}
++
++std::optional<HostPort> ReadPublicHost(const std::string& text) {
++  if (text.empty()) {
++    return std::nullopt;
++  }
++  auto host = ParseHostPort(text);
++  if (!host) {
++    REXLOG_WARN("net_public_address '{}' is not host[:port]; ignored", text);
++  }
++  return host;
++}
++
++PeerSettings ReadPeerSettings() {
++  PeerSettings p;
++  p.peers_text = REXCVAR_GET(net_peers);
++  p.allow_text = REXCVAR_GET(net_allow_peers);
++  p.public_text = REXCVAR_GET(net_public_address);
++  p.peers_set = !SplitListTokens(p.peers_text).empty();
++  p.allow_set = !SplitListTokens(p.allow_text).empty();
++  p.public_set = !p.public_text.empty();
++  p.peers = ParseHostPortList(p.peers_text);
++  for (std::string_view token : SplitListTokens(p.allow_text)) {
++    p.allow_entries.emplace_back(token);
++  }
++  WarnAboutUnusableAllowEntries(p.allow_entries);
++  p.public_host = ReadPublicHost(p.public_text);
++  return p;
+ }
+ 
+-const char* LocalIpOrigin(const NetworkSettings& s, std::optional<uint32_t> configured) {
++const char* LocalSubnetOrigin(std::optional<Subnet> configured, std::optional<Subnet> environment,
++                              std::optional<uint32_t> bind_ip, const Subnet& local_subnet) {
+   if (configured) {
+     return "net_local_ip";
+   }
+-  if (s.bind_ip) {
++  if (environment) {
++    return kLocalIpEnvironmentVariable;
++  }
++  if (bind_ip) {
+     return "net_bind_ip";
+   }
+-  return s.local_ip == kLoopbackIp ? "no network adapter found" : "default-route adapter";
++  return local_subnet.ip == kLoopbackIp ? "no network adapter found" : "default-route adapter";
++}
++
++std::optional<uint32_t> DetectedIpWhenNeeded(bool link_active, bool address_given) {
++  if (!link_active || address_given) {
++    return std::nullopt;
++  }
++  return DetectRoutedIpv4();
++}
++
++void ReadLocalSubnet(NetworkSettings& s) {
++  auto configured = ParseSubnetSetting("net_local_ip", REXCVAR_GET(net_local_ip));
++  auto environment = ReadEnvironmentSubnet();
++  bool address_given = configured || environment || s.bind_ip;
++  auto detected = DetectedIpWhenNeeded(s.link_active, address_given);
++  s.local_subnet = ResolveLocalSubnet(configured, environment, s.bind_ip, detected);
++  s.local_origin = LocalSubnetOrigin(configured, environment, s.bind_ip, s.local_subnet);
++}
++
++std::string FormatIpList(const std::vector<uint32_t>& ips) {
++  std::string list;
++  for (uint32_t ip : ips) {
++    list += (list.empty() ? "" : ", ") + FormatIpv4(ip);
++  }
++  return list.empty() ? "nothing" : list;
+ }
+ 
+ void WarnIfPeersCannotReach(const NetworkSettings& s) {
+-  if (!s.link_active || s.local_ip != kLoopbackIp || !s.broadcast_targets.empty()) {
++  if (s.local_subnet.ip != kLoopbackIp || !s.broadcast_targets.empty() || s.peers.peers_set) {
+     return;
+   }
+   REXLOG_WARN(
+@@ -133,28 +275,51 @@ void WarnIfPeersCannotReach(const NetworkSettings& s) {
+       "net_local_ip to this PC's LAN address");
+ }
+ 
+-void LogNetworkSettings(const NetworkSettings& s, std::optional<uint32_t> configured_local) {
++void WarnIfPublicWithoutAllowList(const NetworkSettings& s) {
++  if (!s.peers.public_set || s.peers.allow_set) {
++    return;
++  }
++  REXLOG_WARN(
++      "[netlink] net_public_address is set but net_allow_peers is empty: only the local network "
++      "and net_peers may send to the game. List your friends' addresses or DNS names in "
++      "net_allow_peers");
++}
++
++void LogInternetSettings(const PeerSettings& p) {
++  if (!p.peers_set && !p.allow_set && !p.public_set) {
++    return;
++  }
++  REXLOG_INFO("[netlink] net_peers '{}', net_public_address '{}', net_allow_peers '{}'",
++              p.peers_text, p.public_text, p.allow_text);
++}
++
++void LogNetworkSettings(const NetworkSettings& s) {
+   if (!s.link_active) {
+     REXLOG_INFO("[netlink] link reported down (net_link_active=false): no System Link");
+     return;
+   }
+-  REXLOG_INFO("[netlink] link active: local {} ({}), bind {}, {} broadcast target(s)",
+-              FormatIpv4(s.local_ip), LocalIpOrigin(s, configured_local),
+-              s.bind_ip ? FormatIpv4(*s.bind_ip) : std::string("0.0.0.0"),
+-              s.broadcast_targets.size());
++  REXLOG_INFO(
++      "[netlink] link active: local {} ({}), bind {}, {} broadcast target(s), LAN broadcast "
++      "{}, port offset {}",
++      FormatSubnet(s.local_subnet), s.local_origin,
++      s.bind_ip ? FormatIpv4(*s.bind_ip) : std::string("0.0.0.0"), s.broadcast_targets.size(),
++      FormatIpList(s.lan_broadcast_ips), s.port_offset);
++  LogInternetSettings(s.peers);
+   WarnIfPeersCannotReach(s);
++  WarnIfPublicWithoutAllowList(s);
+ }
+ 
+ NetworkSettings ReadNetworkSettings() {
+   NetworkSettings s;
+   s.link_active = REXCVAR_GET(net_link_active);
+   s.bind_ip = ReadBindIp();
+-  auto configured_local = ParseIpSetting("net_local_ip", REXCVAR_GET(net_local_ip));
+-  s.local_ip = ResolveLocalIp(configured_local, s.bind_ip,
+-                              DetectedIpWhenNeeded(s.link_active, configured_local, s.bind_ip));
++  ReadLocalSubnet(s);
+   s.broadcast_targets = ReadBroadcastTargets();
++  s.lan_broadcast_ips = LanBroadcastIps(s.local_subnet, kPreferDirectedBroadcast);
++  s.port_offset = ReadPortOffset();
+   s.random_seed = REXCVAR_GET(net_random_seed);
+-  LogNetworkSettings(s, configured_local);
++  s.peers = ReadPeerSettings();
++  LogNetworkSettings(s);
+   return s;
+ }
+ 
+@@ -253,12 +418,23 @@ constexpr ProbeSocket kNoProbeSocket = INVALID_SOCKET;
+ void CloseProbeSocket(ProbeSocket s) {
+   closesocket(s);
+ }
 +
 +void EnsureWinsockStarted() {
++  // The resolver thread may run before the game calls WSAStartup; Winsock counts the extra start.
 +  static std::once_flag flag;
 +  std::call_once(flag, []() {
 +    WSADATA data{};
 +    WSAStartup(MAKEWORD(2, 2), &data);
 +  });
 +}
+ #else
+ using ProbeSocket = int;
+ constexpr ProbeSocket kNoProbeSocket = -1;
+ void CloseProbeSocket(ProbeSocket s) {
+   close(s);
+ }
 +
-+void CloseProbeSocket(ProbeSocket sock) {
-+  closesocket(sock);
-+}
-+#else
-+using ProbeSocket = int;
-+constexpr ProbeSocket kInvalidProbeSocket = -1;
-+
-+void CloseProbeSocket(ProbeSocket sock) {
-+  close(sock);
-+}
-+#endif
++void EnsureWinsockStarted() {}
+ #endif
  
- void WarnOnce(const std::string& message) {
-   static std::mutex mutex;
-@@ -68,8 +144,82 @@ std::optional<uint32_t> ParseIpSetting(std::string_view setting_name, const std:
-   return ip;
+ std::optional<uint32_t> SourceIpTowards(uint32_t destination_ip, uint16_t port) {
+@@ -282,6 +458,144 @@ std::optional<uint32_t> SourceIpTowards(uint32_t destination_ip, uint16_t port)
+   return ntohl(source.sin_addr.s_addr);
  }
  
--std::optional<uint32_t> ConfiguredLocalIp() {
--  return ParseIpSetting("net_local_ip", REXCVAR_GET(net_local_ip));
-+std::optional<Subnet> ParseLocalSubnet(std::string_view setting_name, std::string_view value) {
-+  if (value.empty()) {
-+    return std::nullopt;
++std::vector<uint32_t> LookupHost(const std::string& host) {
++  EnsureWinsockStarted();
++  addrinfo hints{};
++  hints.ai_family = AF_INET;
++  hints.ai_socktype = SOCK_DGRAM;
++  addrinfo* results = nullptr;
++  if (getaddrinfo(host.c_str(), nullptr, &hints, &results) != 0) {
++    return {};
 +  }
-+  auto subnet = ParseIpv4Cidr(value, kDefaultLocalPrefixLength);
-+  if (!subnet) {
-+    WarnOnce(
-+        fmt::format("{} '{}' is not an IPv4 address or a.b.c.d/n; ignored", setting_name, value));
-+  }
-+  return subnet;
-+}
-+
-+std::optional<Subnet> ConfiguredLocalSubnet() {
-+  return ParseLocalSubnet("net_local_ip", REXCVAR_GET(net_local_ip));
-+}
-+
-+std::optional<Subnet> EnvironmentLocalSubnet() {
-+  std::optional<std::string> value = rex::platform::env::get(kLocalIpEnvironmentVariable);
-+  if (!value) {
-+    return std::nullopt;
-+  }
-+  return ParseLocalSubnet(kLocalIpEnvironmentVariable, *value);
-+}
-+
-+std::optional<uint32_t> ProbeDefaultRouteIp() {
-+  ProbeSocket sock = socket(AF_INET, SOCK_DGRAM, 0);
-+  if (sock == kInvalidProbeSocket) {
-+    return std::nullopt;
-+  }
-+  sockaddr_in remote{};
-+  remote.sin_family = AF_INET;
-+  remote.sin_port = htons(kDefaultRouteProbePort);
-+  remote.sin_addr.s_addr = htonl(kDefaultRouteProbeIp);
-+  // A UDP connect sends no packet; it only picks the route.
-+  bool connected =
-+      connect(sock, reinterpret_cast<const sockaddr*>(&remote), sizeof(remote)) == 0;
-+  sockaddr_in local{};
-+  socklen_t length = sizeof(local);
-+  bool named =
-+      connected && getsockname(sock, reinterpret_cast<sockaddr*>(&local), &length) == 0;
-+  CloseProbeSocket(sock);
-+  if (!named) {
-+    return std::nullopt;
-+  }
-+  uint32_t ip = ntohl(local.sin_addr.s_addr);
-+  if (ip == 0 || IsLoopbackIp(ip)) {
-+    return std::nullopt;
-+  }
-+  return ip;
-+}
-+
-+std::optional<uint32_t> DetectDefaultRouteIp() {
-+  static std::optional<uint32_t> detected = []() {
-+#if REX_PLATFORM_WIN32
-+    EnsureWinsockStarted();
-+    // The runtime keeps Winsock started for the game anyway.
-+#endif
-+    std::optional<uint32_t> ip = ProbeDefaultRouteIp();
-+    if (ip) {
-+      REXLOG_INFO("[netlink] local address {} (default route)", FormatIpv4(*ip));
-+    } else {
-+      REXLOG_WARN("[netlink] no default route; local address 127.0.0.1");
++  std::vector<uint32_t> ips;
++  for (addrinfo* node = results; node != nullptr; node = node->ai_next) {
++    if (node->ai_family != AF_INET || node->ai_addr == nullptr) {
++      continue;
 +    }
-+    return ip;
-+  }();
-+  return detected;
++    uint32_t ip = ntohl(reinterpret_cast<sockaddr_in*>(node->ai_addr)->sin_addr.s_addr);
++    if (std::find(ips.begin(), ips.end(), ip) == ips.end()) {
++      ips.push_back(ip);
++    }
++  }
++  freeaddrinfo(results);
++  return ips;
 +}
 +
-+void AppendUniqueIp(std::vector<uint32_t>& ips, uint32_t ip) {
-+  if (ip == 0) {
-+    return;
-+  }
-+  if (std::find(ips.begin(), ips.end(), ip) != ips.end()) {
-+    return;
-+  }
-+  ips.push_back(ip);
- }
- 
- std::optional<uint64_t> ConfiguredXuid() {
-@@ -153,6 +303,202 @@ void FillFromRandomDevice(std::span<uint8_t> out) {
-   }
- }
- 
-+struct ResolverState {
-+  std::mutex mutex;
-+  std::condition_variable wake;
++struct ResolvedPeers {
 +  std::vector<Endpoint> peers;
 +  std::vector<Subnet> allowed;
 +  std::optional<Endpoint> public_address;
-+  std::map<std::string, std::vector<uint32_t>> last_results;
++};
++
++struct ResolverState {
++  std::mutex mutex;
++  NameTable names;
++  std::shared_ptr<const ResolvedPeers> current = std::make_shared<const ResolvedPeers>();
 +};
 +
 +ResolverState& Resolver() {
@@ -1573,175 +2053,84 @@ index 636fc5f..ffd2173 100644
 +  return *state;
 +}
 +
-+std::vector<uint32_t> ResolveHost(const std::string& host, bool allow_dns) {
-+  if (auto ip = ParseIpv4(host)) {
-+    return {*ip};
-+  }
-+  if (!allow_dns) {
-+    return {};
-+  }
-+#if REX_PLATFORM_WIN32
-+  EnsureWinsockStarted();
-+#endif
-+  addrinfo hints{};
-+  hints.ai_family = AF_INET;
-+  hints.ai_socktype = SOCK_DGRAM;
-+  addrinfo* results = nullptr;
-+  if (getaddrinfo(host.c_str(), nullptr, &hints, &results) != 0) {
-+    WarnOnce(fmt::format("[netlink] cannot resolve {}", host));
-+    return {};
-+  }
++std::vector<uint32_t> PeerIps(const std::vector<Endpoint>& peers) {
 +  std::vector<uint32_t> ips;
-+  for (addrinfo* node = results; node != nullptr; node = node->ai_next) {
-+    if (node->ai_family != AF_INET || node->ai_addr == nullptr) {
-+      continue;
-+    }
-+    auto* addr = reinterpret_cast<sockaddr_in*>(node->ai_addr);
-+    AppendUniqueIp(ips, ntohl(addr->sin_addr.s_addr));
++  ips.reserve(peers.size());
++  for (const Endpoint& peer : peers) {
++    ips.push_back(peer.ip);
 +  }
-+  freeaddrinfo(results);
 +  return ips;
 +}
 +
-+std::vector<Endpoint> ResolvePeerList(std::string_view text, bool allow_dns) {
-+  std::vector<Endpoint> peers;
-+  for (const HostPort& host_port : ParseHostPortList(text)) {
-+    for (uint32_t ip : ResolveHost(host_port.host, allow_dns)) {
-+      peers.push_back({ip, host_port.port});
-+    }
-+  }
-+  return peers;
++ResolvedPeers BuildResolvedPeers(const NetworkSettings& s, const NameTable& names) {
++  const PeerSettings& p = s.peers;
++  ResolvedPeers resolved;
++  resolved.peers = PeerEndpointsFrom(p.peers, names);
++  AllowPolicyInput policy;
++  policy.allow_list_set = p.allow_set;
++  policy.allow_list = AllowListFrom(p.allow_entries, names);
++  policy.peers_set = p.peers_set;
++  policy.peer_ips = PeerIps(resolved.peers);
++  policy.public_address_set = p.public_set;
++  policy.local_subnet = s.local_subnet;
++  resolved.allowed = EffectiveAllowList(policy);
++  resolved.public_address = PublicEndpointFrom(p.public_host, names);
++  return resolved;
 +}
 +
-+std::vector<Subnet> ResolveAllowList(std::string_view text, bool allow_dns) {
-+  std::vector<Subnet> allowed;
-+  for (std::string_view token : SplitListTokens(text)) {
-+    if (auto subnet = ParseIpv4Cidr(token, kHostPrefixLength)) {
-+      allowed.push_back(*subnet);
-+      continue;
-+    }
-+    auto host_port = ParseHostPort(token);
-+    if (!host_port) {
-+      WarnOnce(fmt::format("net_allow_peers entry '{}' is not an address, range or host name; "
-+                           "ignored",
-+                           token));
-+      continue;
-+    }
-+    for (uint32_t ip : ResolveHost(host_port->host, allow_dns)) {
-+      allowed.push_back({ip, kHostPrefixLength});
-+    }
-+  }
-+  return allowed;
-+}
-+
-+std::optional<Endpoint> ResolvePublicAddress(std::string_view text, bool allow_dns) {
-+  auto host_port = ParseHostPort(text);
-+  if (!host_port) {
-+    return std::nullopt;
-+  }
-+  std::vector<uint32_t> ips = ResolveHost(host_port->host, allow_dns);
-+  if (ips.empty()) {
-+    return std::nullopt;
-+  }
-+  return Endpoint{ips.front(), host_port->port};
-+}
-+
-+void CollectPeerNames(std::string_view text, std::vector<std::string>& names) {
-+  for (const HostPort& host_port : ParseHostPortList(text)) {
-+    if (!ParseIpv4(host_port.host)) {
-+      names.push_back(host_port.host);
-+    }
-+  }
-+}
-+
-+void CollectAllowNames(std::string_view text, std::vector<std::string>& names) {
-+  for (std::string_view token : SplitListTokens(text)) {
-+    if (ParseIpv4Cidr(token, kHostPrefixLength)) {
-+      continue;
-+    }
-+    auto host_port = ParseHostPort(token);
-+    if (host_port && !ParseIpv4(host_port->host)) {
-+      names.push_back(host_port->host);
-+    }
-+  }
-+}
-+
-+void CollectPublicName(std::string_view text, std::vector<std::string>& names) {
-+  auto host_port = ParseHostPort(text);
-+  if (host_port && !ParseIpv4(host_port->host)) {
-+    names.push_back(host_port->host);
-+  }
-+}
-+
-+std::vector<std::string> DnsNames(std::string_view peers, std::string_view allowed,
-+                                  std::string_view public_address) {
-+  std::vector<std::string> names;
-+  CollectPeerNames(peers, names);
-+  CollectAllowNames(allowed, names);
-+  CollectPublicName(public_address, names);
-+  std::sort(names.begin(), names.end());
-+  names.erase(std::unique(names.begin(), names.end()), names.end());
-+  return names;
-+}
-+
-+std::string FormatResolvedIps(const std::vector<uint32_t>& ips) {
-+  if (ips.empty()) {
-+    return "nothing";
-+  }
-+  std::string list;
-+  for (uint32_t ip : ips) {
-+    list += (list.empty() ? "" : ", ") + FormatIpv4(ip);
-+  }
-+  return list;
-+}
-+
-+void ResolveOnce(bool allow_dns) {
-+  std::string peers_text = REXCVAR_GET(net_peers);
-+  std::string allow_text = REXCVAR_GET(net_allow_peers);
-+  std::string public_text = REXCVAR_GET(net_public_address);
-+  std::vector<Endpoint> peers = ResolvePeerList(peers_text, allow_dns);
-+  std::vector<Subnet> allowed = ResolveAllowList(allow_text, allow_dns);
-+  std::optional<Endpoint> public_address = ResolvePublicAddress(public_text, allow_dns);
-+  std::map<std::string, std::vector<uint32_t>> results;
-+  for (const std::string& name : DnsNames(peers_text, allow_text, public_text)) {
-+    results[name] = ResolveHost(name, allow_dns);
-+  }
-+  bool trace = TraceEnabled();
++void PublishNames(NameTable names) {
++  auto resolved = std::make_shared<const ResolvedPeers>(BuildResolvedPeers(Settings(), names));
 +  std::lock_guard lock(Resolver().mutex);
-+  static bool stored = false;
-+  bool store = allow_dns || !stored;
-+  for (const auto& [name, ips] : results) {
-+    std::vector<uint32_t>& previous = Resolver().last_results[name];
-+    if (trace || previous != ips) {
-+      REXLOG_INFO("[netlink] resolved {} -> {}", name, FormatResolvedIps(ips));
++  Resolver().names = std::move(names);
++  Resolver().current = std::move(resolved);
++}
++
++NameTable CurrentNames() {
++  std::lock_guard lock(Resolver().mutex);
++  return Resolver().names;
++}
++
++bool Contains(const std::vector<std::string>& names, const std::string& name) {
++  return std::find(names.begin(), names.end(), name) != names.end();
++}
++
++void LogUnchangedNames(const NameRefresh& refresh) {
++  for (const auto& [name, ips] : refresh.table) {
++    if (!Contains(refresh.changed, name) && !Contains(refresh.stale, name)) {
++      REXLOG_INFO("[netlink] resolved {} -> {} (unchanged)", name, FormatIpList(ips));
 +    }
-+    if (store) {
-+      previous = ips;
-+    }
-+  }
-+  if (store) {
-+    Resolver().peers = std::move(peers);
-+    Resolver().allowed = std::move(allowed);
-+    Resolver().public_address = public_address;
-+    stored = true;
 +  }
 +}
 +
-+bool HasDnsNames() {
-+  std::string peers = REXCVAR_GET(net_peers);
-+  std::string allowed = REXCVAR_GET(net_allow_peers);
-+  std::string public_address = REXCVAR_GET(net_public_address);
-+  return !DnsNames(peers, allowed, public_address).empty();
++void LogNameRefresh(const NameRefresh& refresh) {
++  for (const std::string& name : refresh.changed) {
++    REXLOG_INFO("[netlink] resolved {} -> {}", name, FormatIpList(refresh.table.at(name)));
++  }
++  for (const std::string& name : refresh.stale) {
++    REXLOG_WARN("[netlink] cannot resolve {}; keeping {} until it resolves again", name,
++                FormatIpList(refresh.table.at(name)));
++  }
++  for (const std::string& name : refresh.missing) {
++    REXLOG_WARN("[netlink] cannot resolve {}", name);
++  }
++  if (TraceEnabled()) {
++    LogUnchangedNames(refresh);
++  }
 +}
 +
-+void ResolverLoop() {
-+  ResolveOnce(true);
++void ResolverLoop(std::vector<std::string> names) {
 +  for (;;) {
-+    std::unique_lock lock(Resolver().mutex);
-+    Resolver().wake.wait_for(lock, std::chrono::milliseconds(kPeerResolveIntervalMs));
-+    lock.unlock();
-+    ResolveOnce(true);
++    NameRefresh refresh = RefreshNames(CurrentNames(), names, LookupHost);
++    LogNameRefresh(refresh);
++    PublishNames(std::move(refresh.table));
++    std::this_thread::sleep_for(std::chrono::milliseconds(kPeerResolveIntervalMs));
 +  }
++}
++
++std::shared_ptr<const ResolvedPeers> CurrentPeers() {
++  StartPeerResolver();
++  std::lock_guard lock(Resolver().mutex);
++  return Resolver().current;
 +}
 +
 +struct HeardFromTable {
@@ -1754,26 +2143,26 @@ index 636fc5f..ffd2173 100644
 +  return table;
 +}
 +
++void AppendUniqueIp(std::vector<uint32_t>& ips, uint32_t ip) {
++  if (ip == 0 || std::find(ips.begin(), ips.end(), ip) != ips.end()) {
++    return;
++  }
++  ips.push_back(ip);
++}
++
  }  // namespace
  
- bool LinkActive() {
-@@ -172,13 +518,34 @@ std::optional<uint32_t> BindIp() {
+ std::optional<uint32_t> DetectRoutedIpv4() {
+@@ -314,17 +628,87 @@ std::optional<uint32_t> BindIp() {
  }
  
  uint32_t LocalIp() {
--  return ResolveLocalIp(ConfiguredLocalIp(), BindIp());
-+  return LocalSubnet().ip;
+-  return Settings().local_ip;
++  return Settings().local_subnet.ip;
 +}
 +
 +Subnet LocalSubnet() {
-+  std::optional<Subnet> configured = ConfiguredLocalSubnet();
-+  std::optional<Subnet> environment = EnvironmentLocalSubnet();
-+  std::optional<uint32_t> bind = BindIp();
-+  std::optional<uint32_t> detected;
-+  if (!configured && !environment && !bind) {
-+    detected = DetectDefaultRouteIp();
-+  }
-+  return ResolveLocalSubnet(configured, environment, bind, detected);
++  return Settings().local_subnet;
  }
  
  uint32_t SelfIp() {
@@ -1791,69 +2180,40 @@ index 636fc5f..ffd2173 100644
 +}
 +
  std::vector<uint32_t> BroadcastTargets() {
-   std::string value = REXCVAR_GET(net_broadcast_targets);
-   auto targets = ParseIpv4List(value);
-@@ -188,6 +555,87 @@ std::vector<uint32_t> BroadcastTargets() {
-   return targets;
+   return Settings().broadcast_targets;
  }
  
-+uint32_t LanBroadcastIp() {
-+  return LanBroadcastIp(LocalSubnet(), kPreferDirectedBroadcast);
++std::vector<uint32_t> LanBroadcastIps() {
++  return Settings().lan_broadcast_ips;
 +}
 +
 +uint32_t PortOffset() {
-+  uint32_t offset = REXCVAR_GET(net_port_offset);
-+  if (!IsUsablePortOffset(offset)) {
-+    WarnOnce(fmt::format("net_port_offset {} is not 0 or 1024-64512; using {}", offset,
-+                         kDefaultPortOffset));
-+    return kDefaultPortOffset;
-+  }
-+  return offset;
++  return Settings().port_offset;
 +}
 +
 +std::vector<Endpoint> PeerEndpoints() {
-+  StartPeerResolver();
-+  std::lock_guard lock(Resolver().mutex);
-+  return Resolver().peers;
++  return CurrentPeers()->peers;
 +}
 +
 +std::vector<Subnet> AllowedSources() {
-+  StartPeerResolver();
-+  if (!REXCVAR_GET(net_allow_peers).empty()) {
-+    std::lock_guard lock(Resolver().mutex);
-+    if (!Resolver().allowed.empty()) {
-+      return Resolver().allowed;
-+    }
-+    // Nothing resolved: fail closed so only loopback passes.
-+    return {Subnet{0, kHostPrefixLength}};
-+  }
-+  std::vector<Endpoint> peers = PeerEndpoints();
-+  if (peers.empty()) {
-+    return {};
-+  }
-+  std::vector<uint32_t> peer_ips;
-+  peer_ips.reserve(peers.size());
-+  for (const Endpoint& peer : peers) {
-+    peer_ips.push_back(peer.ip);
-+  }
-+  return DefaultAllowList(peer_ips, LocalSubnet());
++  return CurrentPeers()->allowed;
 +}
 +
 +std::optional<Endpoint> PublicAddress() {
-+  StartPeerResolver();
-+  std::lock_guard lock(Resolver().mutex);
-+  return Resolver().public_address;
++  return CurrentPeers()->public_address;
 +}
 +
 +void StartPeerResolver() {
 +  static std::once_flag flag;
 +  std::call_once(flag, []() {
-+    ResolveOnce(false);
-+    if (HasDnsNames()) {
-+      std::thread(ResolverLoop).detach();
-+    } else {
-+      ResolveOnce(true);
++    // Literal addresses apply at once; a name allows nothing until its first lookup.
++    PublishNames({});
++    const PeerSettings& p = Settings().peers;
++    std::vector<std::string> names = NamesToResolve(p.peers, p.allow_entries, p.public_host);
++    if (!Settings().link_active || names.empty()) {
++      return;
 +    }
++    std::thread(ResolverLoop, std::move(names)).detach();
 +  });
 +}
 +
@@ -1871,7 +2231,8 @@ index 636fc5f..ffd2173 100644
 +
 +uint64_t NowMs() {
 +  auto elapsed = std::chrono::steady_clock::now().time_since_epoch();
-+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
++  return static_cast<uint64_t>(
++      std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
 +}
 +
 +bool TraceEnabled() {
@@ -1881,7 +2242,7 @@ index 636fc5f..ffd2173 100644
  std::string Gamertag() {
    std::string name = REXCVAR_GET(user_name);
    if (name.empty()) {
-@@ -210,7 +658,10 @@ uint64_t ResolveXuid(const std::filesystem::path& user_data_root) {
+@@ -348,7 +732,10 @@ uint64_t ResolveXuid(const std::filesystem::path& user_data_root) {
  
  XnAddrBytes TitleXnAddr(uint64_t xuid) {
    uint32_t ip = LocalIp();
@@ -1894,7 +2255,7 @@ index 636fc5f..ffd2173 100644
  
  void FillRandom(std::span<uint8_t> out) {
 diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
-index 11c3fbc..23ebaf0 100644
+index 11c3fbc..25e14f0 100644
 --- a/src/system/xsocket.cpp
 +++ b/src/system/xsocket.cpp
 @@ -12,6 +12,8 @@
@@ -1906,7 +2267,7 @@ index 11c3fbc..23ebaf0 100644
  
  #include <rex/kernel/xam/module.h>
  #include <rex/logging.h>
-@@ -37,11 +39,32 @@
+@@ -37,11 +39,33 @@
  #include <sys/socket.h>
  
  #include <cerrno>
@@ -1922,6 +2283,7 @@ index 11c3fbc..23ebaf0 100644
 +
 +constexpr uint32_t kWsaEWouldBlock = 10035;
 +constexpr uint32_t kWsaEFault = 10014;
++constexpr uint32_t kWsaEMsgSize = 10040;
 +constexpr uint32_t kGuestMsgPeek = 0x2;
 +constexpr int kMaxDroppedDatagramsPerCall = 64;
 +constexpr int kSockaddrInSize = 16;
@@ -1939,7 +2301,7 @@ index 11c3fbc..23ebaf0 100644
  sockaddr_in MakeHostSockaddr(uint32_t ip, uint16_t port) {
    sockaddr_in addr = {};
    addr.sin_family = AF_INET;
-@@ -66,19 +89,220 @@ void LogBindRewrite(uint32_t requested_ip, uint32_t effective_ip, uint16_t port)
+@@ -66,19 +90,248 @@ void LogBindRewrite(uint32_t requested_ip, uint32_t effective_ip, uint16_t port)
                port, system_link::FormatIpv4(effective_ip), port);
  }
  
@@ -2005,22 +2367,30 @@ index 11c3fbc..23ebaf0 100644
 +      list += ", ";
 +    }
 +    list += system_link::FormatEndpoint(endpoint);
-+  }
+   }
+-  REXLOG_INFO(
+-      "[netlink] broadcasts to port {} go out as unicast copies to [{}] "
+-      "(net_broadcast_targets)",
+-      port, list);
 +  return list;
 +}
 +
-+bool IsSingleLanBroadcast(uint16_t port, const std::vector<system_link::Endpoint>& endpoints) {
-+  if (endpoints.size() != 1) {
++bool IsPlainLanBroadcast(uint16_t port, const std::vector<uint32_t>& lan_ips,
++                         const std::vector<system_link::Endpoint>& endpoints) {
++  if (endpoints.size() != lan_ips.size()) {
 +    return false;
 +  }
-+  if (endpoints[0].ip != system_link::LanBroadcastIp()) {
-+    return false;
++  for (size_t i = 0; i < endpoints.size(); ++i) {
++    if (endpoints[i] != system_link::Endpoint{lan_ips[i], port}) {
++      return false;
++    }
 +  }
-+  return endpoints[0].port == port;
++  return true;
 +}
 +
-+void LogBroadcastFanOut(uint16_t port, const std::vector<system_link::Endpoint>& endpoints) {
-+  if (!endpoints.empty() && !IsSingleLanBroadcast(port, endpoints)) {
++void LogBroadcastFanOut(uint16_t port, const std::vector<uint32_t>& lan_ips,
++                        const std::vector<system_link::Endpoint>& endpoints) {
++  if (!endpoints.empty() && !IsPlainLanBroadcast(port, lan_ips, endpoints)) {
 +    static std::atomic<bool> logged{false};
 +    if (!logged.exchange(true)) {
 +      REXLOG_INFO("[netlink] broadcasts to port {} go out to [{}]", port,
@@ -2079,6 +2449,30 @@ index 11c3fbc..23ebaf0 100644
 +  out->sin_port =
 +      system_link::HostToGuestPort(ntohs(host_addr.sin_port), system_link::PortOffset());
 +  std::memset(out->x_sin_zero, 0, sizeof(out->x_sin_zero));
++}
++
++std::vector<uint8_t>& HostDatagramScratch() {
++  thread_local std::vector<uint8_t> scratch(system_link::kMaxUdpDatagramSize);
++  return scratch;
++}
++
++void WriteGuestSource(N_XSOCKADDR_IN* from, uint32_t* from_len, const sockaddr_in& nfrom,
++                      socklen_t nfromlen) {
++  if (from) {
++    FillGuestSockaddrIn(from, nfrom);
++  }
++  if (from_len) {
++    *from_len = nfromlen;
++  }
++}
++
++bool CopyDatagramToGuest(const uint8_t* data, int size, uint8_t* buf, uint32_t buf_len) {
++  uint32_t length = static_cast<uint32_t>(size);
++  uint32_t count = std::min(length, buf_len);
++  if (count > 0) {
++    std::memcpy(buf, data, count);
++  }
++  return length <= buf_len;
 +}
 +
 +uint16_t ReadInetSockaddrPort(const N_XSOCKADDR& addr) {
@@ -2146,11 +2540,7 @@ index 11c3fbc..23ebaf0 100644
 +  u_long count = 0;
 +  if (ioctlsocket(handle, FIONREAD, &count) != 0) {
 +    return IoctlOutcome::kHostError;
-   }
--  REXLOG_INFO(
--      "[netlink] broadcasts to port {} go out as unicast copies to [{}] "
--      "(net_broadcast_targets)",
--      port, list);
++  }
 +  system_link::WriteBigEndian32(std::span<uint8_t, 4>(arg_ptr, 4),
 +                                static_cast<uint32_t>(count));
 +#else
@@ -2169,7 +2559,7 @@ index 11c3fbc..23ebaf0 100644
  }
  
  }  // namespace
-@@ -92,6 +316,64 @@ XSocket::~XSocket() {
+@@ -92,6 +345,64 @@ XSocket::~XSocket() {
    Close();
  }
  
@@ -2234,7 +2624,7 @@ index 11c3fbc..23ebaf0 100644
  X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
    af_ = af;
    type_ = type;
-@@ -104,6 +386,7 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
+@@ -104,6 +415,7 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
  
    native_handle_ = socket(af, type, proto);
    if (native_handle_ == -1) {
@@ -2242,7 +2632,7 @@ index 11c3fbc..23ebaf0 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  #if REX_PLATFORM_WIN32
-@@ -115,14 +398,6 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
+@@ -115,14 +427,6 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
    return X_STATUS_SUCCESS;
  }
  
@@ -2257,7 +2647,7 @@ index 11c3fbc..23ebaf0 100644
  X_STATUS XSocket::Close() {
    if (native_handle_ == uint64_t(-1)) {
      return X_STATUS_SUCCESS;
-@@ -131,6 +406,7 @@ X_STATUS XSocket::Close() {
+@@ -131,6 +435,7 @@ X_STATUS XSocket::Close() {
    int ret = rex::net::socket_close(native_handle_);
    native_handle_ = -1;
    if (ret != 0) {
@@ -2265,7 +2655,7 @@ index 11c3fbc..23ebaf0 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -138,46 +414,129 @@ X_STATUS XSocket::Close() {
+@@ -138,46 +443,129 @@ X_STATUS XSocket::Close() {
  }
  
  X_STATUS XSocket::SetOption(uint32_t level, uint32_t optname, void* optval_ptr, uint32_t optlen) {
@@ -2405,7 +2795,7 @@ index 11c3fbc..23ebaf0 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -188,19 +547,25 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
+@@ -188,19 +576,25 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
    uint32_t requested_ip = name->sin_addr;
    uint32_t effective_ip =
        system_link::RewriteBindAddress(requested_ip, system_link::BindIp().value_or(0));
@@ -2434,7 +2824,7 @@ index 11c3fbc..23ebaf0 100644
  
    return X_STATUS_SUCCESS;
  }
-@@ -208,6 +573,7 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
+@@ -208,6 +602,7 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
  X_STATUS XSocket::Listen(int backlog) {
    int ret = listen(native_handle_, backlog);
    if (ret < 0) {
@@ -2442,7 +2832,7 @@ index 11c3fbc..23ebaf0 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -215,15 +581,21 @@ X_STATUS XSocket::Listen(int backlog) {
+@@ -215,15 +610,21 @@ X_STATUS XSocket::Listen(int backlog) {
  }
  
  object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
@@ -2466,7 +2856,7 @@ index 11c3fbc..23ebaf0 100644
    std::memcpy(name, &n_sockaddr, n_name_len);
    *name_len = n_name_len;
  
-@@ -238,11 +610,19 @@ object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
+@@ -238,11 +639,19 @@ object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
  }
  
  int XSocket::Shutdown(int how) {
@@ -2488,17 +2878,74 @@ index 11c3fbc..23ebaf0 100644
  }
  
  int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* from,
-@@ -270,29 +650,46 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
+@@ -270,29 +679,79 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
    }
    */
  
 -  sockaddr_in nfrom;
--  socklen_t nfromlen = sizeof(sockaddr_in);
--  int ret = recvfrom(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,
--                     (sockaddr*)&nfrom, &nfromlen);
--  if (ret < 0) {
--    return ret;
--  }
++  if (type_ == X_SOCK_DGRAM) {
++    return RecvFromDatagram(buf, buf_len, flags, from, from_len);
++  }
++  return RecvFromStream(buf, buf_len, flags, from, from_len);
++}
++
++int XSocket::RecvFromDatagram(uint8_t* buf, uint32_t buf_len, uint32_t flags,
++                              N_XSOCKADDR_IN* from, uint32_t* from_len) {
++  // The allow check runs before any byte reaches guest memory, and a datagram larger than the
++  // guest buffer cannot fail the call before its source is known (WSAEMSGSIZE on Windows).
++  std::vector<uint8_t>& scratch = HostDatagramScratch();
++  sockaddr_in nfrom = {};
++  for (int attempt = 0; attempt < kMaxDroppedDatagramsPerCall; ++attempt) {
++    socklen_t nfromlen = sizeof(sockaddr_in);
++    int ret = recvfrom(native_handle_, reinterpret_cast<char*>(scratch.data()),
++                       static_cast<int>(scratch.size()), flags, (sockaddr*)&nfrom, &nfromlen);
++    if (ret < 0) {
++      CaptureHostError();
++      return ret;
++    }
++    system_link::Endpoint source{ntohl(nfrom.sin_addr.s_addr), ntohs(nfrom.sin_port)};
++    if (AcceptDatagram(source, scratch.data(), ret)) {
++      WriteGuestSource(from, from_len, nfrom, nfromlen);
++      if (!CopyDatagramToGuest(scratch.data(), ret, buf, buf_len)) {
++        // Winsock semantics: the truncated datagram is in the buffer and the call fails.
++        SetHostError(kWsaEMsgSize);
++        return -1;
++      }
++      return ret;
++    }
++    if ((flags & kGuestMsgPeek) != 0 && !DiscardPeekedDatagram(flags)) {
++      return -1;
++    }
++  }
++  SetHostError(kWsaEWouldBlock);
++  return -1;
++}
++
++bool XSocket::DiscardPeekedDatagram(uint32_t flags) {
++  std::vector<uint8_t>& discard = HostDatagramScratch();
++  sockaddr_in nfrom = {};
++  socklen_t nfromlen = sizeof(sockaddr_in);
++  int ret = recvfrom(native_handle_, reinterpret_cast<char*>(discard.data()),
++                     static_cast<int>(discard.size()), flags & ~kGuestMsgPeek, (sockaddr*)&nfrom,
++                     &nfromlen);
++  if (ret < 0) {
++    CaptureHostError();
++    return false;
++  }
++  return true;
++}
++
++int XSocket::RecvFromStream(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* from,
++                            uint32_t* from_len) {
++  // A stream's bytes are not datagrams: the allow list and the duplicate filter do not apply.
++  sockaddr_in nfrom = {};
+   socklen_t nfromlen = sizeof(sockaddr_in);
+   int ret = recvfrom(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,
+                      (sockaddr*)&nfrom, &nfromlen);
+   if (ret < 0) {
++    CaptureHostError();
+     return ret;
+   }
 -  if (from) {
 -    from->sin_family = nfrom.sin_family;
 -    from->sin_addr = ntohl(nfrom.sin_addr.s_addr);
@@ -2508,40 +2955,10 @@ index 11c3fbc..23ebaf0 100644
 -
 -  if (from_len) {
 -    *from_len = nfromlen;
-+  sockaddr_in nfrom = {};
-+  for (int attempt = 0; attempt < kMaxDroppedDatagramsPerCall; ++attempt) {
-+    socklen_t nfromlen = sizeof(sockaddr_in);
-+    int ret = recvfrom(native_handle_, reinterpret_cast<char*>(buf), buf_len, flags,
-+                       (sockaddr*)&nfrom, &nfromlen);
-+    if (ret < 0) {
-+      CaptureHostError();
-+      return ret;
-+    }
-+    system_link::Endpoint source{ntohl(nfrom.sin_addr.s_addr), ntohs(nfrom.sin_port)};
-+    if (AcceptDatagram(source, buf, ret)) {
-+      if (from) {
-+        FillGuestSockaddrIn(from, nfrom);
-+      }
-+      if (from_len) {
-+        *from_len = nfromlen;
-+      }
-+      return ret;
-+    }
-+    if ((flags & kGuestMsgPeek) == 0) {
-+      continue;
-+    }
-+    socklen_t discard_len = sizeof(sockaddr_in);
-+    int discard = recvfrom(native_handle_, reinterpret_cast<char*>(buf), buf_len,
-+                           flags & ~kGuestMsgPeek, (sockaddr*)&nfrom, &discard_len);
-+    if (discard < 0) {
-+      CaptureHostError();
-+      return discard;
-+    }
-   }
+-  }
 -
--  return ret;
-+  SetHostError(kWsaEWouldBlock);
-+  return -1;
++  WriteGuestSource(from, from_len, nfrom, nfromlen);
+   return ret;
  }
  
  int XSocket::Send(const uint8_t* buf, uint32_t buf_len, uint32_t flags) {
@@ -2554,7 +2971,7 @@ index 11c3fbc..23ebaf0 100644
  }
  
  int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* to,
-@@ -309,34 +706,52 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
+@@ -309,34 +768,55 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
    */
  
    if (!to) {
@@ -2592,25 +3009,28 @@ index 11c3fbc..23ebaf0 100644
 +  }
 +  LogFirstSend(native_handle_, system_link::Endpoint{ip, port}, ret);
 +  return ret;
++}
++
++std::vector<system_link::Endpoint> XSocket::TakeReplyCopyTargets(uint64_t now_ms) {
++  std::lock_guard<std::mutex> lock(peers_mutex_);
++  auto latest = recent_sources_.Latest(now_ms, system_link::kMaxReplyCopiesPerBroadcast);
++  return system_link::ReplyCopyTargets(bound_port_, latest, reply_budget_, now_ms);
  }
  
  int XSocket::SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags, uint16_t port) {
--  auto targets = system_link::BroadcastTargets();
++  std::vector<system_link::Endpoint> reply_to = TakeReplyCopyTargets(system_link::NowMs());
++  auto lan_ips = system_link::LanBroadcastIps();
+   auto targets = system_link::BroadcastTargets();
 -  auto destinations =
 -      system_link::SendDestinations(system_link::kBroadcastIp, targets, system_link::SelfIp());
 -  if (!targets.empty()) {
 -    LogFirstBroadcastFanOut(port, destinations);
-+  std::vector<system_link::Endpoint> recent;
-+  {
-+    std::lock_guard<std::mutex> lock(peers_mutex_);
-+    recent = recent_sources_.Active(system_link::NowMs());
-   }
-+  auto targets = system_link::BroadcastTargets();
+-  }
 +  auto peers = system_link::PeerEndpoints();
 +  auto self_ips = system_link::SelfIps();
-+  std::vector<system_link::Endpoint> endpoints = system_link::BroadcastFanOut(
-+      port, system_link::LanBroadcastIp(), targets, peers, recent, self_ips);
-+  LogBroadcastFanOut(port, endpoints);
++  std::vector<system_link::Endpoint> endpoints =
++      system_link::BroadcastFanOut(port, lan_ips, targets, peers, reply_to, self_ips);
++  LogBroadcastFanOut(port, lan_ips, endpoints);
    // Every listed peer being this instance is a broadcast nobody else hears: still a success.
    int result = static_cast<int>(buf_len);
 -  bool any_sent = destinations.empty();
@@ -2622,7 +3042,7 @@ index 11c3fbc..23ebaf0 100644
      if (ret >= 0) {
        any_sent = true;
        result = ret;
-@@ -345,6 +760,70 @@ int XSocket::SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags,
+@@ -345,6 +825,70 @@ int XSocket::SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags,
    return any_sent ? result : -1;
  }
  
@@ -2694,10 +3114,29 @@ index 11c3fbc..23ebaf0 100644
    packet* pkt = reinterpret_cast<packet*>(new uint8_t[sizeof(packet) + len]);
    pkt->src_ip = src_ip;
 diff --git a/tests/unit/system/system_link_test.cpp b/tests/unit/system/system_link_test.cpp
-index 54fc84f..71cfb47 100644
+index 4d7592c..4641a7d 100644
 --- a/tests/unit/system/system_link_test.cpp
 +++ b/tests/unit/system/system_link_test.cpp
-@@ -235,3 +235,503 @@ TEST_CASE("system_link: WsaErrorFromErrno maps errnos", "[system][system_link]")
+@@ -3,6 +3,7 @@
+ #include <array>
+ #include <cerrno>
+ #include <cstdint>
++#include <map>
+ #include <optional>
+ #include <span>
+ #include <string>
+@@ -12,6 +13,10 @@
+ 
+ using namespace rex::system::system_link;
+ 
++namespace {
++const std::vector<uint32_t> kLan{0xC0A80AFFu /* 192.168.10.255 */};
++}  // namespace
++
+ TEST_CASE("system_link: ParseIpv4 parses valid addresses and rejects malformed ones",
+           "[system][system_link]") {
+   CHECK(ParseIpv4("127.0.0.1") == 0x7F000001u);
+@@ -264,3 +269,768 @@ TEST_CASE("system_link: WsaErrorFromErrno maps errnos", "[system][system_link]")
  #endif
    CHECK(WsaErrorFromErrno(999999) == 10022u);
  }
@@ -2957,7 +3396,7 @@ index 54fc84f..71cfb47 100644
 +  std::vector<uint32_t> no_self{};
 +  std::vector<Endpoint> expected{{0xC0A80AFFu /* 192.168.10.255 */, 14001}};
 +
-+  CHECK(BroadcastFanOut(14001, 0xC0A80AFFu /* 192.168.10.255 */, no_targets, no_peers,
++  CHECK(BroadcastFanOut(14001, kLan, no_targets, no_peers,
 +                        no_sources, no_self) == expected);
 +}
 +
@@ -2969,7 +3408,7 @@ index 54fc84f..71cfb47 100644
 +  std::vector<Endpoint> no_sources{};
 +  std::vector<Endpoint> expected{{0x7F000001u, 14001}, {0x7F000003u, 14001}};
 +
-+  CHECK(BroadcastFanOut(14001, 0xC0A80AFFu /* 192.168.10.255 */, targets, no_peers,
++  CHECK(BroadcastFanOut(14001, kLan, targets, no_peers,
 +                        no_sources, self) == expected);
 +}
 +
@@ -2984,7 +3423,7 @@ index 54fc84f..71cfb47 100644
 +                                 {0x01020304u /* 1.2.3.4 */, 14001},
 +                                 {0x05060708u /* 5.6.7.8 */, 24001}};
 +
-+  CHECK(BroadcastFanOut(14001, 0xC0A80AFFu /* 192.168.10.255 */, no_targets, peers,
++  CHECK(BroadcastFanOut(14001, kLan, no_targets, peers,
 +                        no_sources, no_self) == expected);
 +}
 +
@@ -2998,7 +3437,7 @@ index 54fc84f..71cfb47 100644
 +  std::vector<Endpoint> expected{{0xC0A80AFFu /* 192.168.10.255 */, 14001},
 +                                 {0x09090909u /* 9.9.9.9 */, 51234}};
 +
-+  CHECK(BroadcastFanOut(14001, 0xC0A80AFFu /* 192.168.10.255 */, no_targets, no_peers,
++  CHECK(BroadcastFanOut(14001, kLan, no_targets, no_peers,
 +                        sources, no_self) == expected);
 +}
 +
@@ -3014,7 +3453,7 @@ index 54fc84f..71cfb47 100644
 +                                 {0x05060708u /* 5.6.7.8 */, 24001},
 +                                 {0x09090909u /* 9.9.9.9 */, 1111}};
 +
-+  CHECK(BroadcastFanOut(14001, 0xC0A80AFFu /* 192.168.10.255 */, no_targets, peers,
++  CHECK(BroadcastFanOut(14001, kLan, no_targets, peers,
 +                        sources, self) == expected);
 +}
 +
@@ -3200,4 +3639,269 @@ index 54fc84f..71cfb47 100644
 +
 +  CHECK(contacts.IsFirst(1, a));
 +  CHECK(!contacts.IsFirst(1, a));
++}
++
++TEST_CASE("system_link: LanBroadcastIps adds the directed broadcast on a real LAN",
++          "[system][system_link]") {
++  Subnet lan{0xC0A80A0Au /* 192.168.10.10 */, 24};
++  std::vector<uint32_t> limited{0xFFFFFFFFu};
++  std::vector<uint32_t> directed{0xC0A80AFFu /* 192.168.10.255 */};
++  std::vector<uint32_t> both{0xC0A80AFFu /* 192.168.10.255 */, 0xFFFFFFFFu};
++
++  CHECK(LanBroadcastIps(Subnet{0x7F000001u, 8}, false) == limited);
++  CHECK(LanBroadcastIps(Subnet{0x7F000001u, 8}, true) == limited);
++  CHECK(LanBroadcastIps(lan, true) == directed);
++  CHECK(LanBroadcastIps(lan, false) == both);
++  CHECK(LanBroadcastIps(Subnet{0xC0A80A0Au /* 192.168.10.10 */, 32}, false) == limited);
++  CHECK(LanBroadcastIps(Subnet{0u, 24}, false) == limited);
++}
++
++TEST_CASE("system_link: BroadcastFanOut sends to every LAN broadcast address",
++          "[system][system_link]") {
++  std::vector<uint32_t> lan{0xC0A80AFFu /* 192.168.10.255 */, 0xFFFFFFFFu};
++  std::vector<uint32_t> no_targets{};
++  std::vector<uint32_t> targets{0x7F000002u};
++  std::vector<Endpoint> none{};
++  std::vector<uint32_t> no_self{};
++  std::vector<Endpoint> expected_lan{{0xC0A80AFFu /* 192.168.10.255 */, 14001},
++                                     {0xFFFFFFFFu, 14001}};
++  std::vector<Endpoint> expected_targets{{0x7F000002u, 14001}};
++
++  CHECK(BroadcastFanOut(14001, lan, no_targets, none, none, no_self) == expected_lan);
++  CHECK(BroadcastFanOut(14001, lan, targets, none, none, no_self) == expected_targets);
++}
++
++TEST_CASE("system_link: ResolveLocalSubnet ignores a detected address that is not on a LAN",
++          "[system][system_link]") {
++  Subnet fallback{0x7F000001u, 8};
++
++  CHECK(ResolveLocalSubnet(std::nullopt, std::nullopt, std::nullopt, 0x7F000001u) == fallback);
++  CHECK(ResolveLocalSubnet(std::nullopt, std::nullopt, std::nullopt, 0u) == fallback);
++  CHECK(ResolveLocalSubnet(std::nullopt, std::nullopt, std::nullopt, 0xFFFFFFFFu) == fallback);
++  CHECK(ResolveLocalSubnet(std::nullopt, std::nullopt, std::nullopt, 0xE0000001u) == fallback);
++  CHECK(ResolveLocalSubnet(std::nullopt, std::nullopt, std::nullopt,
++                           0xC0A80A0Au /* 192.168.10.10 */) ==
++        Subnet{0xC0A80A0Au /* 192.168.10.10 */, 24});
++  CHECK(ResolveLocalSubnet(std::nullopt, std::nullopt, 0x7F000002u, std::nullopt) ==
++        Subnet{0x7F000002u, 24});
++}
++
++TEST_CASE("system_link: EffectiveAllowList fails closed when the host is public",
++          "[system][system_link]") {
++  AllowPolicyInput input;
++  input.public_address_set = true;
++  input.local_subnet = Subnet{0xC0A80A0Au /* 192.168.10.10 */, 24};
++  std::vector<Subnet> expected{input.local_subnet};
++
++  std::vector<Subnet> allowed = EffectiveAllowList(input);
++
++  CHECK(allowed == expected);
++  CHECK(!IsAllowedSource(0x08080808u /* 8.8.8.8 */, allowed));
++  CHECK(IsAllowedSource(0xC0A80A72u /* 192.168.10.114 */, allowed));
++  CHECK(IsAllowedSource(0x7F000001u, allowed));
++}
++
++TEST_CASE("system_link: EffectiveAllowList never opens up while names are unresolved",
++          "[system][system_link]") {
++  Subnet local{0xC0A80A0Au /* 192.168.10.10 */, 24};
++  std::vector<Subnet> only_local{local};
++  AllowPolicyInput peers_only;
++  peers_only.peers_set = true;
++  peers_only.local_subnet = local;
++  AllowPolicyInput allow_only;
++  allow_only.allow_list_set = true;
++  allow_only.local_subnet = local;
++
++  CHECK(EffectiveAllowList(peers_only) == only_local);
++  CHECK(EffectiveAllowList(allow_only) == only_local);
++}
++
++TEST_CASE("system_link: EffectiveAllowList adds the allow list after the local subnet",
++          "[system][system_link]") {
++  Subnet local{0xC0A80A0Au /* 192.168.10.10 */, 24};
++  Subnet friend_ip{0xCB007107u /* 203.0.113.7 */, 32};
++  Subnet friend_net{0xC6336400u /* 198.51.100.0 */, 24};
++  AllowPolicyInput input;
++  input.allow_list_set = true;
++  input.allow_list = {friend_ip, friend_net, friend_ip};
++  input.peers_set = true;
++  input.peer_ips = {0x01020304u /* 1.2.3.4 */};
++  input.local_subnet = local;
++  std::vector<Subnet> expected{local, friend_ip, friend_net};
++
++  std::vector<Subnet> allowed = EffectiveAllowList(input);
++
++  CHECK(allowed == expected);
++  CHECK(IsAllowedSource(0xCB007107u /* 203.0.113.7 */, allowed));
++  CHECK(!IsAllowedSource(0xCB007108u /* 203.0.113.8 */, allowed));
++  CHECK(!IsAllowedSource(0x01020304u /* 1.2.3.4 */, allowed));
++}
++
++TEST_CASE("system_link: EffectiveAllowList lets everyone in on a plain LAN",
++          "[system][system_link]") {
++  AllowPolicyInput input;
++  input.local_subnet = Subnet{0xC0A80A0Au /* 192.168.10.10 */, 24};
++
++  std::vector<Subnet> allowed = EffectiveAllowList(input);
++
++  CHECK(allowed.empty());
++  CHECK(IsAllowedSource(0x08080808u /* 8.8.8.8 */, allowed));
++}
++
++TEST_CASE("system_link: EffectiveAllowList with peers allows them and the local subnet",
++          "[system][system_link]") {
++  Subnet local{0xC0A80A0Au /* 192.168.10.10 */, 24};
++  AllowPolicyInput input;
++  input.peers_set = true;
++  input.public_address_set = true;
++  input.peer_ips = {0x01020304u /* 1.2.3.4 */};
++  input.local_subnet = local;
++  std::vector<Subnet> expected{local, {0x01020304u /* 1.2.3.4 */, 32}};
++
++  CHECK(EffectiveAllowList(input) == expected);
++}
++
++TEST_CASE("system_link: RecentSources::Latest lists the newest senders first",
++          "[system][system_link]") {
++  RecentSources sources(1000, 8);
++  Endpoint a{0x0A000001u /* 10.0.0.1 */, 14001};
++  Endpoint b{0x0A000002u /* 10.0.0.2 */, 14001};
++  Endpoint c{0x0A000003u /* 10.0.0.3 */, 14001};
++  sources.Note(a, 100);
++  sources.Note(b, 1500);
++  sources.Note(c, 1800);
++  std::vector<Endpoint> newest_two{c, b};
++  std::vector<Endpoint> newest_one{c};
++
++  CHECK(sources.Latest(2000, 4) == newest_two);
++  CHECK(sources.Latest(2000, 1) == newest_one);
++  CHECK(sources.Latest(2000, 0).empty());
++  CHECK(sources.Latest(3000, 4).empty());
++}
++
++TEST_CASE("system_link: ReplyBudget allows two copies per second per source",
++          "[system][system_link]") {
++  ReplyBudget budget(2, 64);
++  Endpoint a{0x0A000001u /* 10.0.0.1 */, 14001};
++  Endpoint b{0x0A000002u /* 10.0.0.2 */, 14001};
++
++  CHECK(budget.TryTake(a, 1000));
++  CHECK(budget.TryTake(a, 1000));
++  CHECK(!budget.TryTake(a, 1000));
++  CHECK(budget.TryTake(b, 1000));
++  CHECK(!budget.TryTake(a, 1499));
++  CHECK(budget.TryTake(a, 1500));
++  CHECK(!budget.TryTake(a, 1500));
++  CHECK(budget.TryTake(a, 2600));
++  CHECK(budget.TryTake(a, 2600));
++  CHECK(!budget.TryTake(a, 2600));
++}
++
++TEST_CASE("system_link: ReplyBudget limits and edge cases", "[system][system_link]") {
++  Endpoint a{0x0A000001u /* 10.0.0.1 */, 14001};
++  Endpoint b{0x0A000002u /* 10.0.0.2 */, 14001};
++  ReplyBudget no_rate(0, 64);
++  ReplyBudget no_room(2, 0);
++  ReplyBudget one_slot(2, 1);
++  ReplyBudget clock(2, 64);
++
++  CHECK(!no_rate.TryTake(a, 1000));
++  CHECK(!no_room.TryTake(a, 1000));
++
++  CHECK(one_slot.TryTake(a, 1000));
++  CHECK(one_slot.TryTake(a, 1000));
++  CHECK(!one_slot.TryTake(a, 1000));
++  CHECK(one_slot.TryTake(b, 1000));
++  CHECK(one_slot.TryTake(a, 1000));
++
++  CHECK(clock.TryTake(a, 1000));
++  CHECK(clock.TryTake(a, 1000));
++  CHECK(!clock.TryTake(a, 500));
++}
++
++TEST_CASE("system_link: ReplyCopyTargets copies only beacon broadcasts within budget",
++          "[system][system_link]") {
++  Endpoint a{0x0A000001u /* 10.0.0.1 */, 14001};
++  Endpoint no_port{0x0A000002u /* 10.0.0.2 */, 0};
++  Endpoint c{0x0A000003u /* 10.0.0.3 */, 50000};
++  std::vector<Endpoint> latest{a, no_port, c};
++  std::vector<Endpoint> expected{a, c};
++  ReplyBudget budget(2, 64);
++
++  CHECK(ReplyCopyTargets(1000, latest, budget, 1000).empty());
++  CHECK(ReplyCopyTargets(14001, latest, budget, 1000) == expected);
++  CHECK(ReplyCopyTargets(14001, latest, budget, 1000) == expected);
++  CHECK(ReplyCopyTargets(14001, latest, budget, 1000).empty());
++}
++
++TEST_CASE("system_link: NamesToResolve collects host names only", "[system][system_link]") {
++  std::vector<HostPort> peers{{"gow2.suruworks.com", 0}, {"1.2.3.4", 14001}, {"b.example", 0}};
++  std::vector<std::string> allow{"10.0.0.0/8", "5.6.7.8", "a.example", "gow2.suruworks.com",
++                                 "bad name!"};
++  std::optional<HostPort> public_host = HostPort{"c.example", 14001};
++  std::vector<std::string> expected{"a.example", "b.example", "c.example",
++                                    "gow2.suruworks.com"};
++
++  CHECK(NamesToResolve(peers, allow, public_host) == expected);
++  CHECK(NamesToResolve({}, {}, HostPort{"9.9.9.9", 0}).empty());
++}
++
++TEST_CASE("system_link: RefreshNames keeps the last good addresses", "[system][system_link]") {
++  std::map<std::string, std::vector<uint32_t>> answers{
++      {"fresh.example", {0x01010101u /* 1.1.1.1 */}},
++      {"same.example", {0x02020202u /* 2.2.2.2 */}},
++  };
++  int calls = 0;
++  HostLookup lookup = [&answers, &calls](const std::string& host) {
++    ++calls;
++    auto found = answers.find(host);
++    return found == answers.end() ? std::vector<uint32_t>{} : found->second;
++  };
++  NameTable previous{
++      {"fresh.example", {0x09090909u /* 9.9.9.9 */}},
++      {"same.example", {0x02020202u /* 2.2.2.2 */}},
++      {"down.example", {0x03030303u /* 3.3.3.3 */}},
++      {"dropped.example", {0x04040404u /* 4.4.4.4 */}},
++  };
++  std::vector<std::string> names{"down.example", "fresh.example", "never.example",
++                                 "same.example"};
++  NameTable expected_table{
++      {"down.example", {0x03030303u /* 3.3.3.3 */}},
++      {"fresh.example", {0x01010101u /* 1.1.1.1 */}},
++      {"same.example", {0x02020202u /* 2.2.2.2 */}},
++  };
++
++  NameRefresh refresh = RefreshNames(previous, names, lookup);
++
++  CHECK(calls == 4);
++  CHECK(refresh.table == expected_table);
++  CHECK(refresh.changed == std::vector<std::string>{"fresh.example"});
++  CHECK(refresh.stale == std::vector<std::string>{"down.example"});
++  CHECK(refresh.missing == std::vector<std::string>{"never.example"});
++  CHECK(previous.count("dropped.example") == 1);
++}
++
++TEST_CASE("system_link: peer, allow and public lists come from the name table",
++          "[system][system_link]") {
++  NameTable names{{"friend.example", {0xCB007107u /* 203.0.113.7 */,
++                                      0xCB007108u /* 203.0.113.8 */}}};
++  std::vector<HostPort> peers{{"friend.example", 14001}, {"1.2.3.4", 0},
++                              {"unknown.example", 0}};
++  std::vector<std::string> allow{"10.0.0.0/8", "friend.example", "unknown.example", "bad name!",
++                                 "10.0.0.0/8"};
++  std::vector<Endpoint> expected_peers{{0xCB007107u /* 203.0.113.7 */, 14001},
++                                       {0xCB007108u /* 203.0.113.8 */, 14001},
++                                       {0x01020304u /* 1.2.3.4 */, 0}};
++  std::vector<Subnet> expected_allow{{0x0A000000u /* 10.0.0.0 */, 8},
++                                     {0xCB007107u /* 203.0.113.7 */, 32},
++                                     {0xCB007108u /* 203.0.113.8 */, 32}};
++
++  CHECK(HostAddresses("5.6.7.8", names) == std::vector<uint32_t>{0x05060708u});
++  CHECK(HostAddresses("unknown.example", names).empty());
++  CHECK(PeerEndpointsFrom(peers, names) == expected_peers);
++  CHECK(AllowListFrom(allow, names) == expected_allow);
++  CHECK(PublicEndpointFrom(HostPort{"friend.example", 14001}, names) ==
++        Endpoint{0xCB007107u /* 203.0.113.7 */, 14001});
++  CHECK(!PublicEndpointFrom(std::nullopt, names).has_value());
++  CHECK(!PublicEndpointFrom(HostPort{"unknown.example", 0}, names).has_value());
 +}
