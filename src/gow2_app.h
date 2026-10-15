@@ -297,6 +297,10 @@ class Gow2App : public rex::ReXApp {
 #if defined(__ANDROID__)
     UseAttachedKeyboardAndMouse();
     AddTouchControls(config);
+    const bool unlock_fps = rex::cvar::Query<bool>("gow2_unlock_fps");
+    if (unlock_fps) SetLaunchDefault("present_android_frame_rate", "0");
+    REXLOG_INFO("DISPLAY frame rate hint {} Hz (gow2_unlock_fps {})",
+                rex::cvar::Query<int32_t>("present_android_frame_rate"), unlock_fps);
 #else
     SetIfUnset("mnk_mode", "true");
 #endif

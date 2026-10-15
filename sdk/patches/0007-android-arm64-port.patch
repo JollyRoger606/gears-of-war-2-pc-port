@@ -1041,6 +1041,60 @@ index a570fa0..f0fabd8 100644
  
    double frame_time_tick_frequency_;
    uint64_t last_frame_time_ticks_;
+diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
+index afb4a30..87f38a5 100644
+--- a/include/rex/ui/presenter.h
++++ b/include/rex/ui/presenter.h
+@@ -225,6 +225,9 @@ class Presenter {
+       // where available; currently still experimental due to limited temporal
+       // inputs in the presenter path.
+       kFsr3,
++#endif
++#if REX_PLATFORM_ANDROID
++      kSgsr1,
+ #endif
+     };
+ 
+@@ -436,6 +439,9 @@ class Presenter {
+     kFsrRcas,
+     kFsrRcasDither,
+ #endif
++#if REX_PLATFORM_ANDROID
++    kSgsr1,
++#endif
+ 
+     kCount,
+   };
+@@ -548,6 +554,29 @@ class Presenter {
+     }
+   };
+ 
++#if REX_PLATFORM_ANDROID
++  struct Sgsr1Constants {
++    int32_t output_offset[2];
++    float output_size_inv[2];
++    // Snapdragon GSR's ViewportInfo[0]: 1 / input size, input size.
++    float viewport_info[4];
++
++    void Initialize(const GuestOutputPaintFlow& flow, size_t effect_index) {
++      flow.GetEffectOutputOffset(effect_index, output_offset[0], output_offset[1]);
++      const std::pair<uint32_t, uint32_t>& output_size = flow.effect_output_sizes[effect_index];
++      output_size_inv[0] = 1.0f / float(output_size.first);
++      output_size_inv[1] = 1.0f / float(output_size.second);
++      uint32_t input_width, input_height;
++      flow.GetEffectInputSize(effect_index, input_width, input_height);
++      viewport_info[0] = 1.0f / float(input_width);
++      viewport_info[1] = 1.0f / float(input_height);
++      viewport_info[2] = float(input_width);
++      viewport_info[3] = float(input_height);
++    }
++  };
++  static_assert(sizeof(Sgsr1Constants) == 32);
++#endif
++
+ #if defined(REX_HAS_FIDELITYFX_SDK)
+   static constexpr float CalculateCasPostSetupSharpness(float sharpness) {
+     // CasSetup const1.x.
 diff --git a/include/rex/ui/surface_android.h b/include/rex/ui/surface_android.h
 new file mode 100644
 index 0000000..120ace9
@@ -1095,6 +1149,31 @@ index 0000000..120ace9
 +}  // namespace rex
 +
 +#endif  // REX_PLATFORM_ANDROID
+diff --git a/include/rex/ui/vulkan/presenter.h b/include/rex/ui/vulkan/presenter.h
+index 56ee43b..edf4be1 100644
+--- a/include/rex/ui/vulkan/presenter.h
++++ b/include/rex/ui/vulkan/presenter.h
+@@ -237,6 +237,9 @@ class VulkanPresenter final : public Presenter {
+     kGuestOutputPaintPipelineLayoutIndexFsrRcas,
+ #endif
+ 
++#if REX_PLATFORM_ANDROID
++    kGuestOutputPaintPipelineLayoutIndexSgsr1,
++#endif
+     kGuestOutputPaintPipelineLayoutCount,
+   };
+ 
+@@ -258,6 +261,10 @@ class VulkanPresenter final : public Presenter {
+       case GuestOutputPaintEffect::kFsrRcas:
+       case GuestOutputPaintEffect::kFsrRcasDither:
+         return kGuestOutputPaintPipelineLayoutIndexFsrRcas;
++#endif
++#if REX_PLATFORM_ANDROID
++      case GuestOutputPaintEffect::kSgsr1:
++        return kGuestOutputPaintPipelineLayoutIndexSgsr1;
+ #endif
+       default:
+         assert_unhandled_case(effect);
 diff --git a/include/rex/ui/window_sdl.h b/include/rex/ui/window_sdl.h
 index 5079d0f..bc3e7e5 100644
 --- a/include/rex/ui/window_sdl.h
@@ -3900,7 +3979,7 @@ index 6b1f6b9..117a1f2 100644
      return X_STATUS_UNSUCCESSFUL;
    }
 diff --git a/src/ui/CMakeLists.txt b/src/ui/CMakeLists.txt
-index 5bd3dc5..64b7f6a 100644
+index 5bd3dc5..d1046ca 100644
 --- a/src/ui/CMakeLists.txt
 +++ b/src/ui/CMakeLists.txt
 @@ -72,6 +72,12 @@ elseif(APPLE)
@@ -3916,7 +3995,22 @@ index 5bd3dc5..64b7f6a 100644
  else()
      set(REXUI_PLATFORM_SOURCES
          surface_gnulinux.cpp
-@@ -143,10 +149,18 @@ if(REXGLUE_USE_VULKAN)
+@@ -124,6 +130,14 @@ if(REXGLUE_FIDELITYFX_SOURCE_DIR AND EXISTS "${REXGLUE_FIDELITYFX_SOURCE_DIR}/sd
+     target_compile_definitions(rexui PRIVATE REX_HAS_FIDELITYFX_SDK=1)
+ endif()
+ 
++if(ANDROID)
++    # FSR 1 / CAS SPIR-V is in-tree; Android fetches no FidelityFX SDK and has no temporal runtime.
++    get_target_property(REXUI_COMPILE_DEFINITIONS rexui COMPILE_DEFINITIONS)
++    if(NOT "REX_HAS_FIDELITYFX_SDK=1" IN_LIST REXUI_COMPILE_DEFINITIONS)
++        target_compile_definitions(rexui PRIVATE REX_HAS_FIDELITYFX_SDK=1)
++    endif()
++endif()
++
+ set(REXUI_HAS_FIDELITYFX_RUNTIME OFF)
+ if(TARGET amd_fidelityfx_vk)
+     target_link_libraries(rexui PRIVATE amd_fidelityfx_vk)
+@@ -143,10 +157,18 @@ if(REXGLUE_USE_VULKAN)
          GPUOpen::VulkanMemoryAllocator
          spirv-tools-headers
      )
@@ -4017,6 +4111,627 @@ index f270f3c..2277b79 100644
  
  void ImGuiDrawer::OnKey(KeyEvent& e, bool is_down) {
    auto& io = GetIO();
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+index 7360ed9..57e8c7a 100644
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -41,10 +41,17 @@ REXCVAR_DEFINE_INT32(present_safe_area_y, 90, "UI/Presenter",
+     .range(0, 100);
+ 
+ #if defined(REX_HAS_FIDELITYFX_SDK)
++#if REX_PLATFORM_ANDROID
++REXCVAR_DEFINE_STRING(present_effect, "fsr", "UI/Presenter",
++                      "Guest output effect: bilinear, cas, fsr, sgsr")
++    .allowed({"bilinear", "cas", "fsr", "sgsr"})
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++#else
+ REXCVAR_DEFINE_STRING(present_effect, "bilinear", "UI/Presenter",
+                       "Guest output effect: bilinear, cas, fsr, fsr2, fsr3")
+     .allowed({"bilinear", "cas", "fsr", "fsr2", "fsr3"})
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++#endif
+ 
+ REXCVAR_DEFINE_DOUBLE(present_cas_additional_sharpness,
+                       rex::ui::Presenter::GuestOutputPaintConfig::kCasAdditionalSharpnessDefault,
+@@ -59,12 +66,20 @@ REXCVAR_DEFINE_INT32(present_fsr_max_upsampling_passes,
+     .range(1, int32_t(rex::ui::Presenter::GuestOutputPaintConfig::kFsrMaxUpscalingPassesMax))
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
++#if REX_PLATFORM_ANDROID
++REXCVAR_DEFINE_DOUBLE(present_fsr_sharpness_reduction, 0.3,
++                      "UI/Presenter", "FSR RCAS sharpness reduction in stops")
++    .range(rex::ui::Presenter::GuestOutputPaintConfig::kFsrSharpnessReductionMin,
++           rex::ui::Presenter::GuestOutputPaintConfig::kFsrSharpnessReductionMax)
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++#else
+ REXCVAR_DEFINE_DOUBLE(present_fsr_sharpness_reduction,
+                       rex::ui::Presenter::GuestOutputPaintConfig::kFsrSharpnessReductionDefault,
+                       "UI/Presenter", "FSR RCAS sharpness reduction in stops")
+     .range(rex::ui::Presenter::GuestOutputPaintConfig::kFsrSharpnessReductionMin,
+            rex::ui::Presenter::GuestOutputPaintConfig::kFsrSharpnessReductionMax)
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++#endif
+ 
+ REXCVAR_DEFINE_STRING(
+     present_fsr_quality_mode, "auto", "UI/Presenter",
+@@ -77,9 +92,15 @@ REXCVAR_DEFINE_STRING(present_effect, "bilinear", "UI/Presenter", "Guest output
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ #endif
+ 
++#if REX_PLATFORM_ANDROID
++REXCVAR_DEFINE_BOOL(present_dither, true, "UI/Presenter",
++                    "Enable output dithering in the final present pass")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++#else
+ REXCVAR_DEFINE_BOOL(present_dither, false, "UI/Presenter",
+                     "Enable output dithering in the final present pass")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++#endif
+ 
+ REXCVAR_DEFINE_BOOL(present_allow_overscan_cutoff, false, "UI/Presenter",
+                     "Allow overscan cutoff based on safe area settings")
+@@ -105,6 +126,11 @@ GuestOutputPaintConfig::Effect ParsePresentEffect(const std::string& effect_name
+   if (lowered == "fsr3") {
+     return GuestOutputPaintConfig::Effect::kFsr3;
+   }
++#endif
++#if REX_PLATFORM_ANDROID
++  if (lowered == "sgsr") {
++    return GuestOutputPaintConfig::Effect::kSgsr1;
++  }
+ #endif
+   return GuestOutputPaintConfig::Effect::kBilinear;
+ }
+@@ -1147,6 +1173,16 @@ Presenter::GuestOutputPaintFlow Presenter::GetGuestOutputPaintFlow(
+   }
+ #endif  // defined(REX_HAS_FIDELITYFX_SDK)
+ 
++#if REX_PLATFORM_ANDROID
++  if (config.GetEffect() == GuestOutputPaintConfig::Effect::kSgsr1 &&
++      (properties.frontbuffer_width < output_width ||
++       properties.frontbuffer_height < output_height)) {
++    assert_true(flow.effect_count < flow.effects.size());
++    flow.effect_output_sizes[flow.effect_count] = std::make_pair(output_width, output_height);
++    flow.effects[flow.effect_count++] = GuestOutputPaintEffect::kSgsr1;
++  }
++#endif
++
+   std::pair<uint32_t, uint32_t>* last_pre_bilinear_effect_size =
+       flow.effect_count ? &flow.effect_output_sizes[flow.effect_count - 1] : nullptr;
+   if (!last_pre_bilinear_effect_size || last_pre_bilinear_effect_size->first != output_width ||
+diff --git a/src/ui/shaders/sgsr/LICENSE b/src/ui/shaders/sgsr/LICENSE
+new file mode 100644
+index 0000000..d9d513c
+--- /dev/null
++++ b/src/ui/shaders/sgsr/LICENSE
+@@ -0,0 +1,29 @@
++Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are met:
++
++1. Redistributions of source code must retain the above copyright notice,
++   this list of conditions and the following disclaimer.
++
++2. Redistributions in binary form must reproduce the above copyright notice,
++   this list of conditions and the following disclaimer in the documentation
++   and/or other materials provided with the distribution.
++
++3. Neither the name of the copyright holder nor the names of its contributors
++   may be used to endorse or promote products derived from this software
++   without specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++POSSIBILITY OF SUCH DAMAGE.
++
++SPDX-License-Identifier: BSD-3-Clause
+\ No newline at end of file
+diff --git a/src/ui/shaders/sgsr/guest_output_sgsr1_ps.frag b/src/ui/shaders/sgsr/guest_output_sgsr1_ps.frag
+new file mode 100644
+index 0000000..019f9d5
+--- /dev/null
++++ b/src/ui/shaders/sgsr/guest_output_sgsr1_ps.frag
+@@ -0,0 +1,141 @@
++#version 310 es
++
++//============================================================================================================
++//
++//
++//                  Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
++//                              SPDX-License-Identifier: BSD-3-Clause
++//
++//============================================================================================================
++// Modified 2026 for the ReXGlue presenter: Vulkan GLSL ES 3.1, push constants, separate image and sampler.
++
++precision mediump float;
++precision highp int;
++precision mediump sampler;
++
++////////////////////////
++// USER CONFIGURATION //
++////////////////////////
++
++/*
++* Operation modes:
++* RGBA -> 1
++* RGBY -> 3
++* LERP -> 4
++*/
++#define OperationMode 1
++
++#define EdgeThreshold 8.0/255.0
++
++#define EdgeSharpness 2.0
++
++
++////////////////////////
++////////////////////////
++////////////////////////
++
++layout(push_constant) uniform PushConstants {
++  layout(offset = 16) highp ivec2 output_offset;
++  layout(offset = 24) highp vec2 output_size_inv;
++  layout(offset = 32) highp vec4 viewport_info;  // 1/in_w, 1/in_h, in_w, in_h
++} push_constants;
++layout(set = 0, binding = 0) uniform mediump texture2D source_texture;
++layout(set = 0, binding = 1) uniform sampler source_sampler;
++#define ps0 sampler2D(source_texture, source_sampler)
++#define ViewportInfo0 push_constants.viewport_info
++
++layout(location = 0) out vec4 out_Target0;
++
++float fastLanczos2(float x)
++{
++	float wA = x-4.0;
++	float wB = x*wA-wA;
++	wA *= wA;
++	return wB*wA;
++}
++vec2 weightY(float dx, float dy,float c, float std)
++{
++	float x = ((dx*dx)+(dy* dy))* 0.55 + clamp(abs(c)*std, 0.0, 1.0);
++	float w = fastLanczos2(x);
++	return vec2(w, w * c);	
++}
++
++void main()
++{
++	highp vec4 in_TEXCOORD0 = vec4((vec2(ivec2(gl_FragCoord.xy) - push_constants.output_offset) + 0.5) * push_constants.output_size_inv, 0.0, 0.0);
++	const int mode = OperationMode;
++	float edgeThreshold = EdgeThreshold;
++	float edgeSharpness = EdgeSharpness;
++
++	vec4 color;
++	if(mode == 1)
++		color.xyz = textureLod(ps0,in_TEXCOORD0.xy,0.0).xyz;
++	else
++		color.xyzw = textureLod(ps0,in_TEXCOORD0.xy,0.0).xyzw;
++
++	highp float xCenter;
++	xCenter = abs(in_TEXCOORD0.x+-0.5);
++	highp float yCenter;
++	yCenter = abs(in_TEXCOORD0.y+-0.5);
++
++	//if ( mode!=4 && xCenter*xCenter+yCenter*yCenter<=0.4 * 0.4)
++	if ( mode!=4)
++	{
++		highp vec2 imgCoord = ((in_TEXCOORD0.xy*ViewportInfo0.zw)+vec2(-0.5,0.5));
++		highp vec2 imgCoordPixel = floor(imgCoord);
++		highp vec2 coord = (imgCoordPixel*ViewportInfo0.xy);
++		vec2 pl = (imgCoord+(-imgCoordPixel));
++		vec4  left = textureGather(ps0,coord, mode);
++
++		float edgeVote = abs(left.z - left.y) + abs(color[mode] - left.y)  + abs(color[mode] - left.z) ;
++		if(edgeVote > edgeThreshold)
++		{
++			coord.x += ViewportInfo0.x;
++
++			vec4 right = textureGather(ps0,coord + vec2(ViewportInfo0.x, 0.0), mode);
++			vec4 upDown;
++			upDown.xy = textureGather(ps0,coord + vec2(0.0, -ViewportInfo0.y),mode).wz;
++			upDown.zw  = textureGather(ps0,coord+ vec2(0.0, ViewportInfo0.y), mode).yx;
++
++			float mean = (left.y+left.z+right.x+right.w)*0.25;
++			left = left - vec4(mean);
++			right = right - vec4(mean);
++			upDown = upDown - vec4(mean);
++			color.w =color[mode] - mean;
++
++			float sum = (((((abs(left.x)+abs(left.y))+abs(left.z))+abs(left.w))+(((abs(right.x)+abs(right.y))+abs(right.z))+abs(right.w)))+(((abs(upDown.x)+abs(upDown.y))+abs(upDown.z))+abs(upDown.w)));				
++			float std = 2.181818/sum;
++			
++			vec2 aWY = weightY(pl.x, pl.y+1.0, upDown.x,std);				
++			aWY += weightY(pl.x-1.0, pl.y+1.0, upDown.y,std);
++			aWY += weightY(pl.x-1.0, pl.y-2.0, upDown.z,std);
++			aWY += weightY(pl.x, pl.y-2.0, upDown.w,std);			
++			aWY += weightY(pl.x+1.0, pl.y-1.0, left.x,std);
++			aWY += weightY(pl.x, pl.y-1.0, left.y,std);
++			aWY += weightY(pl.x, pl.y, left.z,std);
++			aWY += weightY(pl.x+1.0, pl.y, left.w,std);
++			aWY += weightY(pl.x-1.0, pl.y-1.0, right.x,std);
++			aWY += weightY(pl.x-2.0, pl.y-1.0, right.y,std);
++			aWY += weightY(pl.x-2.0, pl.y, right.z,std);
++			aWY += weightY(pl.x-1.0, pl.y, right.w,std);
++
++			float finalY = aWY.y/aWY.x;
++
++			float maxY = max(max(left.y,left.z),max(right.x,right.w));
++			float minY = min(min(left.y,left.z),min(right.x,right.w));
++			finalY = clamp(edgeSharpness*finalY, minY, maxY);
++					
++			float deltaY = finalY -color.w;	
++			
++			//smooth high contrast input
++			deltaY = clamp(deltaY, -23.0 / 255.0, 23.0 / 255.0);
++
++			color.x = clamp((color.x+deltaY),0.0,1.0);
++			color.y = clamp((color.y+deltaY),0.0,1.0);
++			color.z = clamp((color.z+deltaY),0.0,1.0);
++		}
++	}
++
++	color.w = 1.0;  //assume alpha channel is not used
++	out_Target0.xyzw = color;
++}
+\ No newline at end of file
+diff --git a/src/ui/shaders/vulkan_spirv/guest_output_sgsr1_ps.h b/src/ui/shaders/vulkan_spirv/guest_output_sgsr1_ps.h
+new file mode 100644
+index 0000000..5c2b060
+--- /dev/null
++++ b/src/ui/shaders/vulkan_spirv/guest_output_sgsr1_ps.h
+@@ -0,0 +1,343 @@
++// Generated from ../sgsr/guest_output_sgsr1_ps.frag with glslc -fshader-stage=frag --target-env=vulkan1.0 -O
++// Snapdragon Game Super Resolution 1, Copyright (c) 2025 Qualcomm Innovation Center, Inc.
++// SPDX-License-Identifier: BSD-3-Clause (see ../sgsr/LICENSE)
++const uint32_t guest_output_sgsr1_ps[] = {
++    0x07230203, 0x00010000, 0x000D000A, 0x000004C8, 0x00000000, 0x00020011, 0x00000001, 0x0006000B,
++    0x00000001, 0x4C534C47, 0x6474732E, 0x3035342E, 0x00000000, 0x0003000E, 0x00000000, 0x00000001,
++    0x0007000F, 0x00000004, 0x00000004, 0x6E69616D, 0x00000000, 0x00000047, 0x0000024C, 0x00030010,
++    0x00000004, 0x00000007, 0x00040047, 0x00000047, 0x0000000B, 0x0000000F, 0x00050048, 0x0000004D,
++    0x00000000, 0x00000023, 0x00000010, 0x00050048, 0x0000004D, 0x00000001, 0x00000023, 0x00000018,
++    0x00050048, 0x0000004D, 0x00000002, 0x00000023, 0x00000020, 0x00030047, 0x0000004D, 0x00000002,
++    0x00030047, 0x0000006C, 0x00000000, 0x00040047, 0x0000006C, 0x00000022, 0x00000000, 0x00040047,
++    0x0000006C, 0x00000021, 0x00000000, 0x00030047, 0x0000006D, 0x00000000, 0x00030047, 0x00000070,
++    0x00000000, 0x00040047, 0x00000070, 0x00000022, 0x00000000, 0x00040047, 0x00000070, 0x00000021,
++    0x00000001, 0x00030047, 0x00000071, 0x00000000, 0x00030047, 0x00000076, 0x00000000, 0x00030047,
++    0x000000B6, 0x00000000, 0x00030047, 0x000000B9, 0x00000000, 0x00030047, 0x000000BB, 0x00000000,
++    0x00030047, 0x000000BC, 0x00000000, 0x00030047, 0x000000BD, 0x00000000, 0x00030047, 0x000000C2,
++    0x00000000, 0x00030047, 0x000000C3, 0x00000000, 0x00030047, 0x000000C4, 0x00000000, 0x00030047,
++    0x000000C9, 0x00000000, 0x00030047, 0x000000CA, 0x00000000, 0x00030047, 0x000000CB, 0x00000000,
++    0x00030047, 0x000000E1, 0x00000000, 0x00030047, 0x000000EC, 0x00000000, 0x00030047, 0x000000FA,
++    0x00000000, 0x00030047, 0x00000106, 0x00000000, 0x00030047, 0x00000108, 0x00000000, 0x00030047,
++    0x00000109, 0x00000000, 0x00030047, 0x0000010B, 0x00000000, 0x00030047, 0x0000010C, 0x00000000,
++    0x00030047, 0x0000010E, 0x00000000, 0x00030047, 0x00000111, 0x00000000, 0x00030047, 0x00000112,
++    0x00000000, 0x00030047, 0x00000116, 0x00000000, 0x00030047, 0x0000011A, 0x00000000, 0x00030047,
++    0x0000011E, 0x00000000, 0x00030047, 0x00000122, 0x00000000, 0x00030047, 0x00000123, 0x00000000,
++    0x00030047, 0x00000125, 0x00000000, 0x00030047, 0x00000126, 0x00000000, 0x00030047, 0x00000127,
++    0x00000000, 0x00030047, 0x00000129, 0x00000000, 0x00030047, 0x0000012A, 0x00000000, 0x00030047,
++    0x0000012B, 0x00000000, 0x00030047, 0x0000012D, 0x00000000, 0x00030047, 0x0000012E, 0x00000000,
++    0x00030047, 0x0000012F, 0x00000000, 0x00030047, 0x00000131, 0x00000000, 0x00030047, 0x00000132,
++    0x00000000, 0x00030047, 0x00000134, 0x00000000, 0x00030047, 0x00000135, 0x00000000, 0x00030047,
++    0x00000136, 0x00000000, 0x00030047, 0x00000138, 0x00000000, 0x00030047, 0x00000139, 0x00000000,
++    0x00030047, 0x0000013A, 0x00000000, 0x00030047, 0x0000013C, 0x00000000, 0x00030047, 0x0000013D,
++    0x00000000, 0x00030047, 0x0000013E, 0x00000000, 0x00030047, 0x0000013F, 0x00000000, 0x00030047,
++    0x00000141, 0x00000000, 0x00030047, 0x00000142, 0x00000000, 0x00030047, 0x00000144, 0x00000000,
++    0x00030047, 0x00000145, 0x00000000, 0x00030047, 0x00000146, 0x00000000, 0x00030047, 0x00000148,
++    0x00000000, 0x00030047, 0x00000149, 0x00000000, 0x00030047, 0x0000014A, 0x00000000, 0x00030047,
++    0x0000014C, 0x00000000, 0x00030047, 0x0000014D, 0x00000000, 0x00030047, 0x0000014E, 0x00000000,
++    0x00030047, 0x0000014F, 0x00000000, 0x00030047, 0x00000153, 0x00000000, 0x00030047, 0x00000156,
++    0x00000000, 0x00030047, 0x00000157, 0x00000000, 0x00030047, 0x0000015A, 0x00000000, 0x00030047,
++    0x00000164, 0x00000000, 0x00030047, 0x00000171, 0x00000000, 0x00030047, 0x00000177, 0x00000000,
++    0x00030047, 0x00000181, 0x00000000, 0x00030047, 0x00000190, 0x00000000, 0x00030047, 0x00000193,
++    0x00000000, 0x00030047, 0x00000196, 0x00000000, 0x00030047, 0x000001A0, 0x00000000, 0x00030047,
++    0x000001AF, 0x00000000, 0x00030047, 0x000001BD, 0x00000000, 0x00030047, 0x000001CC, 0x00000000,
++    0x00030047, 0x000001DC, 0x00000000, 0x00030047, 0x000001DF, 0x00000000, 0x00030047, 0x000001EC,
++    0x00000000, 0x00030047, 0x000001FB, 0x00000000, 0x00030047, 0x0000020A, 0x00000000, 0x00030047,
++    0x0000020D, 0x00000000, 0x00030047, 0x0000020F, 0x00000000, 0x00030047, 0x00000210, 0x00000000,
++    0x00030047, 0x00000216, 0x00000000, 0x00030047, 0x0000021B, 0x00000000, 0x00030047, 0x0000021C,
++    0x00000000, 0x00030047, 0x00000222, 0x00000000, 0x00030047, 0x00000227, 0x00000000, 0x00030047,
++    0x00000228, 0x00000000, 0x00030047, 0x0000022B, 0x00000000, 0x00030047, 0x0000022E, 0x00000000,
++    0x00030047, 0x00000233, 0x00000000, 0x00030047, 0x00000237, 0x00000000, 0x00030047, 0x0000023B,
++    0x00000000, 0x00030047, 0x0000023C, 0x00000000, 0x00030047, 0x00000241, 0x00000000, 0x00030047,
++    0x00000242, 0x00000000, 0x00030047, 0x00000247, 0x00000000, 0x00030047, 0x00000248, 0x00000000,
++    0x00030047, 0x0000024C, 0x00000000, 0x00040047, 0x0000024C, 0x0000001E, 0x00000000, 0x00030047,
++    0x00000258, 0x00000000, 0x00030047, 0x00000259, 0x00000000, 0x00030047, 0x0000025E, 0x00000000,
++    0x00030047, 0x0000025F, 0x00000000, 0x00030047, 0x00000260, 0x00000000, 0x00030047, 0x00000266,
++    0x00000000, 0x00030047, 0x00000267, 0x00000000, 0x00030047, 0x0000026D, 0x00000000, 0x00030047,
++    0x00000272, 0x00000000, 0x00030047, 0x00000275, 0x00000000, 0x00030047, 0x00000278, 0x00000000,
++    0x00030047, 0x00000284, 0x00000000, 0x00030047, 0x00000289, 0x00000000, 0x00030047, 0x0000028A,
++    0x00000000, 0x00030047, 0x0000028B, 0x00000000, 0x00030047, 0x00000291, 0x00000000, 0x00030047,
++    0x00000292, 0x00000000, 0x00030047, 0x00000298, 0x00000000, 0x00030047, 0x0000029D, 0x00000000,
++    0x00030047, 0x000002A0, 0x00000000, 0x00030047, 0x000002A3, 0x00000000, 0x00030047, 0x000002AE,
++    0x00000000, 0x00030047, 0x000002AF, 0x00000000, 0x00030047, 0x000002B4, 0x00000000, 0x00030047,
++    0x000002B5, 0x00000000, 0x00030047, 0x000002B6, 0x00000000, 0x00030047, 0x000002BC, 0x00000000,
++    0x00030047, 0x000002BD, 0x00000000, 0x00030047, 0x000002C3, 0x00000000, 0x00030047, 0x000002C8,
++    0x00000000, 0x00030047, 0x000002CB, 0x00000000, 0x00030047, 0x000002CE, 0x00000000, 0x00030047,
++    0x000002DA, 0x00000000, 0x00030047, 0x000002DF, 0x00000000, 0x00030047, 0x000002E0, 0x00000000,
++    0x00030047, 0x000002E1, 0x00000000, 0x00030047, 0x000002E7, 0x00000000, 0x00030047, 0x000002E8,
++    0x00000000, 0x00030047, 0x000002EE, 0x00000000, 0x00030047, 0x000002F3, 0x00000000, 0x00030047,
++    0x000002F6, 0x00000000, 0x00030047, 0x000002F9, 0x00000000, 0x00030047, 0x00000304, 0x00000000,
++    0x00030047, 0x00000305, 0x00000000, 0x00030047, 0x0000030A, 0x00000000, 0x00030047, 0x0000030B,
++    0x00000000, 0x00030047, 0x0000030C, 0x00000000, 0x00030047, 0x00000312, 0x00000000, 0x00030047,
++    0x00000313, 0x00000000, 0x00030047, 0x00000319, 0x00000000, 0x00030047, 0x0000031E, 0x00000000,
++    0x00030047, 0x00000321, 0x00000000, 0x00030047, 0x00000324, 0x00000000, 0x00030047, 0x00000330,
++    0x00000000, 0x00030047, 0x00000335, 0x00000000, 0x00030047, 0x00000336, 0x00000000, 0x00030047,
++    0x00000337, 0x00000000, 0x00030047, 0x0000033D, 0x00000000, 0x00030047, 0x0000033E, 0x00000000,
++    0x00030047, 0x00000344, 0x00000000, 0x00030047, 0x00000349, 0x00000000, 0x00030047, 0x0000034C,
++    0x00000000, 0x00030047, 0x0000034F, 0x00000000, 0x00030047, 0x0000035A, 0x00000000, 0x00030047,
++    0x0000035B, 0x00000000, 0x00030047, 0x00000360, 0x00000000, 0x00030047, 0x00000361, 0x00000000,
++    0x00030047, 0x00000362, 0x00000000, 0x00030047, 0x00000368, 0x00000000, 0x00030047, 0x00000369,
++    0x00000000, 0x00030047, 0x0000036F, 0x00000000, 0x00030047, 0x00000374, 0x00000000, 0x00030047,
++    0x00000377, 0x00000000, 0x00030047, 0x0000037A, 0x00000000, 0x00030047, 0x00000386, 0x00000000,
++    0x00030047, 0x0000038B, 0x00000000, 0x00030047, 0x0000038C, 0x00000000, 0x00030047, 0x0000038D,
++    0x00000000, 0x00030047, 0x00000393, 0x00000000, 0x00030047, 0x00000394, 0x00000000, 0x00030047,
++    0x0000039A, 0x00000000, 0x00030047, 0x0000039F, 0x00000000, 0x00030047, 0x000003A2, 0x00000000,
++    0x00030047, 0x000003A5, 0x00000000, 0x00030047, 0x000003B1, 0x00000000, 0x00030047, 0x000003B6,
++    0x00000000, 0x00030047, 0x000003B7, 0x00000000, 0x00030047, 0x000003B8, 0x00000000, 0x00030047,
++    0x000003BE, 0x00000000, 0x00030047, 0x000003BF, 0x00000000, 0x00030047, 0x000003C5, 0x00000000,
++    0x00030047, 0x000003CA, 0x00000000, 0x00030047, 0x000003CD, 0x00000000, 0x00030047, 0x000003D0,
++    0x00000000, 0x00030047, 0x000003DC, 0x00000000, 0x00030047, 0x000003E1, 0x00000000, 0x00030047,
++    0x000003E2, 0x00000000, 0x00030047, 0x000003E3, 0x00000000, 0x00030047, 0x000003E9, 0x00000000,
++    0x00030047, 0x000003EA, 0x00000000, 0x00030047, 0x000003F0, 0x00000000, 0x00030047, 0x000003F5,
++    0x00000000, 0x00030047, 0x000003F8, 0x00000000, 0x00030047, 0x000003FB, 0x00000000, 0x00030047,
++    0x00000407, 0x00000000, 0x00030047, 0x0000040C, 0x00000000, 0x00030047, 0x0000040D, 0x00000000,
++    0x00030047, 0x0000040E, 0x00000000, 0x00030047, 0x00000414, 0x00000000, 0x00030047, 0x00000415,
++    0x00000000, 0x00030047, 0x0000041B, 0x00000000, 0x00030047, 0x00000420, 0x00000000, 0x00030047,
++    0x00000423, 0x00000000, 0x00030047, 0x00000426, 0x00000000, 0x00030047, 0x00000432, 0x00000000,
++    0x00030047, 0x00000437, 0x00000000, 0x00030047, 0x00000438, 0x00000000, 0x00030047, 0x00000439,
++    0x00000000, 0x00030047, 0x0000043F, 0x00000000, 0x00030047, 0x00000440, 0x00000000, 0x00030047,
++    0x00000446, 0x00000000, 0x00030047, 0x0000044B, 0x00000000, 0x00030047, 0x0000044E, 0x00000000,
++    0x00030047, 0x00000451, 0x00000000, 0x00030047, 0x00000453, 0x00000000, 0x00030047, 0x00000455,
++    0x00000000, 0x00030047, 0x00000457, 0x00000000, 0x00030047, 0x000004AD, 0x00000000, 0x00030047,
++    0x000004B0, 0x00000000, 0x00030047, 0x000004B3, 0x00000000, 0x00030047, 0x000004B5, 0x00000000,
++    0x00030047, 0x000004B7, 0x00000000, 0x00020013, 0x00000002, 0x00030021, 0x00000003, 0x00000002,
++    0x00030016, 0x00000006, 0x00000020, 0x00040017, 0x0000000C, 0x00000006, 0x00000002, 0x0004002B,
++    0x00000006, 0x00000016, 0x40800000, 0x0004002B, 0x00000006, 0x0000002E, 0x3F0CCCCD, 0x0004002B,
++    0x00000006, 0x00000034, 0x00000000, 0x0004002B, 0x00000006, 0x00000035, 0x3F800000, 0x00040017,
++    0x00000043, 0x00000006, 0x00000004, 0x00040020, 0x00000046, 0x00000001, 0x00000043, 0x0004003B,
++    0x00000046, 0x00000047, 0x00000001, 0x00040015, 0x0000004A, 0x00000020, 0x00000001, 0x00040017,
++    0x0000004B, 0x0000004A, 0x00000002, 0x0005001E, 0x0000004D, 0x0000004B, 0x0000000C, 0x00000043,
++    0x00040020, 0x0000004E, 0x00000009, 0x0000004D, 0x0004003B, 0x0000004E, 0x0000004F, 0x00000009,
++    0x0004002B, 0x0000004A, 0x00000050, 0x00000000, 0x00040020, 0x00000051, 0x00000009, 0x0000004B,
++    0x0004002B, 0x00000006, 0x00000056, 0x3F000000, 0x0004002B, 0x0000004A, 0x00000059, 0x00000001,
++    0x00040020, 0x0000005A, 0x00000009, 0x0000000C, 0x0004002B, 0x00000006, 0x00000062, 0x3D008081,
++    0x0004002B, 0x00000006, 0x00000064, 0x40000000, 0x00020014, 0x00000065, 0x00090019, 0x0000006A,
++    0x00000006, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00040020,
++    0x0000006B, 0x00000000, 0x0000006A, 0x0004003B, 0x0000006B, 0x0000006C, 0x00000000, 0x0002001A,
++    0x0000006E, 0x00040020, 0x0000006F, 0x00000000, 0x0000006E, 0x0004003B, 0x0000006F, 0x00000070,
++    0x00000000, 0x0003001B, 0x00000072, 0x0000006A, 0x00040015, 0x00000079, 0x00000020, 0x00000000,
++    0x0004002B, 0x00000079, 0x0000007A, 0x00000000, 0x0004002B, 0x00000079, 0x0000007D, 0x00000001,
++    0x0004002B, 0x00000006, 0x0000008D, 0xBF000000, 0x0004002B, 0x0000004A, 0x0000009B, 0x00000002,
++    0x00040020, 0x0000009C, 0x00000009, 0x00000043, 0x0005002C, 0x0000000C, 0x000000A1, 0x0000008D,
++    0x00000056, 0x00040020, 0x000000D1, 0x00000009, 0x00000006, 0x0004002B, 0x00000006, 0x0000010D,
++    0x3E800000, 0x0004002B, 0x00000006, 0x00000151, 0x400BA2E8, 0x0004002B, 0x00000006, 0x00000235,
++    0xBDB8B8B9, 0x0004002B, 0x00000006, 0x00000236, 0x3DB8B8B9, 0x00040020, 0x0000024B, 0x00000003,
++    0x00000043, 0x0004003B, 0x0000024B, 0x0000024C, 0x00000003, 0x00030001, 0x00000043, 0x000004B6,
++    0x0005002C, 0x0000000C, 0x000004B8, 0x00000056, 0x00000056, 0x00050036, 0x00000002, 0x00000004,
++    0x00000000, 0x00000003, 0x000200F8, 0x00000005, 0x0004003D, 0x00000043, 0x00000048, 0x00000047,
++    0x0007004F, 0x0000000C, 0x00000049, 0x00000048, 0x00000048, 0x00000000, 0x00000001, 0x0004006E,
++    0x0000004B, 0x0000004C, 0x00000049, 0x00050041, 0x00000051, 0x00000052, 0x0000004F, 0x00000050,
++    0x0004003D, 0x0000004B, 0x00000053, 0x00000052, 0x00050082, 0x0000004B, 0x00000054, 0x0000004C,
++    0x00000053, 0x0004006F, 0x0000000C, 0x00000055, 0x00000054, 0x00050081, 0x0000000C, 0x00000058,
++    0x00000055, 0x000004B8, 0x00050041, 0x0000005A, 0x0000005B, 0x0000004F, 0x00000059, 0x0004003D,
++    0x0000000C, 0x0000005C, 0x0000005B, 0x00050085, 0x0000000C, 0x0000005D, 0x00000058, 0x0000005C,
++    0x00050051, 0x00000006, 0x0000005E, 0x0000005D, 0x00000000, 0x00050051, 0x00000006, 0x0000005F,
++    0x0000005D, 0x00000001, 0x00070050, 0x00000043, 0x00000060, 0x0000005E, 0x0000005F, 0x00000034,
++    0x00000034, 0x0004003D, 0x0000006A, 0x0000006D, 0x0000006C, 0x0004003D, 0x0000006E, 0x00000071,
++    0x00000070, 0x00050056, 0x00000072, 0x00000073, 0x0000006D, 0x00000071, 0x0007004F, 0x0000000C,
++    0x00000075, 0x00000060, 0x00000060, 0x00000000, 0x00000001, 0x00070058, 0x00000043, 0x00000076,
++    0x00000073, 0x00000075, 0x00000002, 0x00000034, 0x00050051, 0x00000006, 0x0000007C, 0x00000076,
++    0x00000000, 0x00060052, 0x00000043, 0x00000453, 0x0000007C, 0x000004B6, 0x00000000, 0x00050051,
++    0x00000006, 0x0000007F, 0x00000076, 0x00000001, 0x00060052, 0x00000043, 0x00000455, 0x0000007F,
++    0x00000453, 0x00000001, 0x00050051, 0x00000006, 0x00000082, 0x00000076, 0x00000002, 0x00060052,
++    0x00000043, 0x00000457, 0x00000082, 0x00000455, 0x00000002, 0x00050041, 0x0000009C, 0x0000009D,
++    0x0000004F, 0x0000009B, 0x0004003D, 0x00000043, 0x0000009E, 0x0000009D, 0x0007004F, 0x0000000C,
++    0x0000009F, 0x0000009E, 0x0000009E, 0x00000002, 0x00000003, 0x0008000C, 0x0000000C, 0x000000A2,
++    0x00000001, 0x00000032, 0x00000075, 0x0000009F, 0x000000A1, 0x0006000C, 0x0000000C, 0x000000A5,
++    0x00000001, 0x00000008, 0x000000A2, 0x0007004F, 0x0000000C, 0x000000AA, 0x0000009E, 0x0000009E,
++    0x00000000, 0x00000001, 0x00050085, 0x0000000C, 0x000000AB, 0x000000A5, 0x000000AA, 0x0004007F,
++    0x0000000C, 0x000000AF, 0x000000A5, 0x00050081, 0x0000000C, 0x000000B0, 0x000000A2, 0x000000AF,
++    0x00050056, 0x00000072, 0x000000B4, 0x0000006D, 0x00000071, 0x00060060, 0x00000043, 0x000000B6,
++    0x000000B4, 0x000000AB, 0x00000059, 0x00050051, 0x00000006, 0x000000B9, 0x000000B6, 0x00000002,
++    0x00050051, 0x00000006, 0x000000BB, 0x000000B6, 0x00000001, 0x00050083, 0x00000006, 0x000000BC,
++    0x000000B9, 0x000000BB, 0x0006000C, 0x00000006, 0x000000BD, 0x00000001, 0x00000004, 0x000000BC,
++    0x00050083, 0x00000006, 0x000000C2, 0x0000007F, 0x000000BB, 0x0006000C, 0x00000006, 0x000000C3,
++    0x00000001, 0x00000004, 0x000000C2, 0x00050081, 0x00000006, 0x000000C4, 0x000000BD, 0x000000C3,
++    0x00050083, 0x00000006, 0x000000C9, 0x0000007F, 0x000000B9, 0x0006000C, 0x00000006, 0x000000CA,
++    0x00000001, 0x00000004, 0x000000C9, 0x00050081, 0x00000006, 0x000000CB, 0x000000C4, 0x000000CA,
++    0x000500BA, 0x00000065, 0x000000CE, 0x000000CB, 0x00000062, 0x000300F7, 0x000000D0, 0x00000000,
++    0x000400FA, 0x000000CE, 0x000000CF, 0x000000D0, 0x000200F8, 0x000000CF, 0x00060041, 0x000000D1,
++    0x000000D2, 0x0000004F, 0x0000009B, 0x0000007A, 0x0004003D, 0x00000006, 0x000000D3, 0x000000D2,
++    0x00050051, 0x00000006, 0x000000D5, 0x000000AB, 0x00000000, 0x00050081, 0x00000006, 0x000000D6,
++    0x000000D5, 0x000000D3, 0x00060052, 0x0000000C, 0x00000460, 0x000000D6, 0x000000AB, 0x00000000,
++    0x00050056, 0x00000072, 0x000000DB, 0x0000006D, 0x00000071, 0x00050050, 0x0000000C, 0x000000DF,
++    0x000000D3, 0x00000034, 0x00050081, 0x0000000C, 0x000000E0, 0x00000460, 0x000000DF, 0x00060060,
++    0x00000043, 0x000000E1, 0x000000DB, 0x000000E0, 0x00000059, 0x00050056, 0x00000072, 0x000000E5,
++    0x0000006D, 0x00000071, 0x00060041, 0x000000D1, 0x000000E7, 0x0000004F, 0x0000009B, 0x0000007D,
++    0x0004003D, 0x00000006, 0x000000E8, 0x000000E7, 0x0004007F, 0x00000006, 0x000000E9, 0x000000E8,
++    0x00050050, 0x0000000C, 0x000000EA, 0x00000034, 0x000000E9, 0x00050081, 0x0000000C, 0x000000EB,
++    0x00000460, 0x000000EA, 0x00060060, 0x00000043, 0x000000EC, 0x000000E5, 0x000000EB, 0x00000059,
++    0x00050051, 0x00000006, 0x000000EF, 0x000000EC, 0x00000003, 0x00050051, 0x00000006, 0x000000F1,
++    0x000000EC, 0x00000002, 0x00050056, 0x00000072, 0x000000F4, 0x0000006D, 0x00000071, 0x00050050,
++    0x0000000C, 0x000000F8, 0x00000034, 0x000000E8, 0x00050081, 0x0000000C, 0x000000F9, 0x00000460,
++    0x000000F8, 0x00060060, 0x00000043, 0x000000FA, 0x000000F4, 0x000000F9, 0x00000059, 0x00050051,
++    0x00000006, 0x000000FD, 0x000000FA, 0x00000001, 0x00050051, 0x00000006, 0x00000100, 0x000000FA,
++    0x00000000, 0x00070050, 0x00000043, 0x000004B9, 0x000000EF, 0x000000F1, 0x000000FD, 0x00000100,
++    0x00050081, 0x00000006, 0x00000106, 0x000000BB, 0x000000B9, 0x00050051, 0x00000006, 0x00000108,
++    0x000000E1, 0x00000000, 0x00050081, 0x00000006, 0x00000109, 0x00000106, 0x00000108, 0x00050051,
++    0x00000006, 0x0000010B, 0x000000E1, 0x00000003, 0x00050081, 0x00000006, 0x0000010C, 0x00000109,
++    0x0000010B, 0x00050085, 0x00000006, 0x0000010E, 0x0000010C, 0x0000010D, 0x00070050, 0x00000043,
++    0x00000111, 0x0000010E, 0x0000010E, 0x0000010E, 0x0000010E, 0x00050083, 0x00000043, 0x00000112,
++    0x000000B6, 0x00000111, 0x00050083, 0x00000043, 0x00000116, 0x000000E1, 0x00000111, 0x00050083,
++    0x00000043, 0x0000011A, 0x000004B9, 0x00000111, 0x0004007F, 0x00000006, 0x000004BA, 0x0000010C,
++    0x0008000C, 0x00000006, 0x0000011E, 0x00000001, 0x00000032, 0x000004BA, 0x0000010D, 0x0000007F,
++    0x00070050, 0x00000043, 0x000004BB, 0x0000007C, 0x0000007F, 0x00000082, 0x0000011E, 0x00050051,
++    0x00000006, 0x00000122, 0x00000112, 0x00000000, 0x0006000C, 0x00000006, 0x00000123, 0x00000001,
++    0x00000004, 0x00000122, 0x00050051, 0x00000006, 0x00000125, 0x00000112, 0x00000001, 0x0006000C,
++    0x00000006, 0x00000126, 0x00000001, 0x00000004, 0x00000125, 0x00050081, 0x00000006, 0x00000127,
++    0x00000123, 0x00000126, 0x00050051, 0x00000006, 0x00000129, 0x00000112, 0x00000002, 0x0006000C,
++    0x00000006, 0x0000012A, 0x00000001, 0x00000004, 0x00000129, 0x00050081, 0x00000006, 0x0000012B,
++    0x00000127, 0x0000012A, 0x00050051, 0x00000006, 0x0000012D, 0x00000112, 0x00000003, 0x0006000C,
++    0x00000006, 0x0000012E, 0x00000001, 0x00000004, 0x0000012D, 0x00050081, 0x00000006, 0x0000012F,
++    0x0000012B, 0x0000012E, 0x00050051, 0x00000006, 0x00000131, 0x00000116, 0x00000000, 0x0006000C,
++    0x00000006, 0x00000132, 0x00000001, 0x00000004, 0x00000131, 0x00050051, 0x00000006, 0x00000134,
++    0x00000116, 0x00000001, 0x0006000C, 0x00000006, 0x00000135, 0x00000001, 0x00000004, 0x00000134,
++    0x00050081, 0x00000006, 0x00000136, 0x00000132, 0x00000135, 0x00050051, 0x00000006, 0x00000138,
++    0x00000116, 0x00000002, 0x0006000C, 0x00000006, 0x00000139, 0x00000001, 0x00000004, 0x00000138,
++    0x00050081, 0x00000006, 0x0000013A, 0x00000136, 0x00000139, 0x00050051, 0x00000006, 0x0000013C,
++    0x00000116, 0x00000003, 0x0006000C, 0x00000006, 0x0000013D, 0x00000001, 0x00000004, 0x0000013C,
++    0x00050081, 0x00000006, 0x0000013E, 0x0000013A, 0x0000013D, 0x00050081, 0x00000006, 0x0000013F,
++    0x0000012F, 0x0000013E, 0x00050051, 0x00000006, 0x00000141, 0x0000011A, 0x00000000, 0x0006000C,
++    0x00000006, 0x00000142, 0x00000001, 0x00000004, 0x00000141, 0x00050051, 0x00000006, 0x00000144,
++    0x0000011A, 0x00000001, 0x0006000C, 0x00000006, 0x00000145, 0x00000001, 0x00000004, 0x00000144,
++    0x00050081, 0x00000006, 0x00000146, 0x00000142, 0x00000145, 0x00050051, 0x00000006, 0x00000148,
++    0x0000011A, 0x00000002, 0x0006000C, 0x00000006, 0x00000149, 0x00000001, 0x00000004, 0x00000148,
++    0x00050081, 0x00000006, 0x0000014A, 0x00000146, 0x00000149, 0x00050051, 0x00000006, 0x0000014C,
++    0x0000011A, 0x00000003, 0x0006000C, 0x00000006, 0x0000014D, 0x00000001, 0x00000004, 0x0000014C,
++    0x00050081, 0x00000006, 0x0000014E, 0x0000014A, 0x0000014D, 0x00050081, 0x00000006, 0x0000014F,
++    0x0000013F, 0x0000014E, 0x00050088, 0x00000006, 0x00000153, 0x00000151, 0x0000014F, 0x00050051,
++    0x00000006, 0x00000156, 0x000000B0, 0x00000001, 0x00050081, 0x00000006, 0x00000157, 0x00000156,
++    0x00000035, 0x00050051, 0x00000006, 0x0000015A, 0x000000B0, 0x00000000, 0x00050085, 0x00000006,
++    0x00000258, 0x00000157, 0x00000157, 0x0008000C, 0x00000006, 0x00000259, 0x00000001, 0x00000032,
++    0x0000015A, 0x0000015A, 0x00000258, 0x00050085, 0x00000006, 0x0000025E, 0x00000142, 0x00000153,
++    0x0008000C, 0x00000006, 0x0000025F, 0x00000001, 0x0000002B, 0x0000025E, 0x00000034, 0x00000035,
++    0x0008000C, 0x00000006, 0x00000260, 0x00000001, 0x00000032, 0x00000259, 0x0000002E, 0x0000025F,
++    0x00050083, 0x00000006, 0x0000026D, 0x00000260, 0x00000016, 0x00050083, 0x00000006, 0x000004BC,
++    0x00000016, 0x00000260, 0x0008000C, 0x00000006, 0x00000272, 0x00000001, 0x00000032, 0x00000260,
++    0x0000026D, 0x000004BC, 0x00050085, 0x00000006, 0x00000275, 0x0000026D, 0x0000026D, 0x00050085,
++    0x00000006, 0x00000278, 0x00000272, 0x00000275, 0x00050085, 0x00000006, 0x00000266, 0x00000278,
++    0x00000141, 0x00050050, 0x0000000C, 0x00000267, 0x00000278, 0x00000266, 0x00050083, 0x00000006,
++    0x00000164, 0x0000015A, 0x00000035, 0x0008000C, 0x00000006, 0x00000284, 0x00000001, 0x00000032,
++    0x00000164, 0x00000164, 0x00000258, 0x00050085, 0x00000006, 0x00000289, 0x00000145, 0x00000153,
++    0x0008000C, 0x00000006, 0x0000028A, 0x00000001, 0x0000002B, 0x00000289, 0x00000034, 0x00000035,
++    0x0008000C, 0x00000006, 0x0000028B, 0x00000001, 0x00000032, 0x00000284, 0x0000002E, 0x0000028A,
++    0x00050083, 0x00000006, 0x00000298, 0x0000028B, 0x00000016, 0x00050083, 0x00000006, 0x000004BD,
++    0x00000016, 0x0000028B, 0x0008000C, 0x00000006, 0x0000029D, 0x00000001, 0x00000032, 0x0000028B,
++    0x00000298, 0x000004BD, 0x00050085, 0x00000006, 0x000002A0, 0x00000298, 0x00000298, 0x00050085,
++    0x00000006, 0x000002A3, 0x0000029D, 0x000002A0, 0x00050085, 0x00000006, 0x00000291, 0x000002A3,
++    0x00000144, 0x00050050, 0x0000000C, 0x00000292, 0x000002A3, 0x00000291, 0x00050081, 0x0000000C,
++    0x00000171, 0x00000267, 0x00000292, 0x00050083, 0x00000006, 0x00000177, 0x00000156, 0x00000064,
++    0x00050085, 0x00000006, 0x000002AE, 0x00000177, 0x00000177, 0x0008000C, 0x00000006, 0x000002AF,
++    0x00000001, 0x00000032, 0x00000164, 0x00000164, 0x000002AE, 0x00050085, 0x00000006, 0x000002B4,
++    0x00000149, 0x00000153, 0x0008000C, 0x00000006, 0x000002B5, 0x00000001, 0x0000002B, 0x000002B4,
++    0x00000034, 0x00000035, 0x0008000C, 0x00000006, 0x000002B6, 0x00000001, 0x00000032, 0x000002AF,
++    0x0000002E, 0x000002B5, 0x00050083, 0x00000006, 0x000002C3, 0x000002B6, 0x00000016, 0x00050083,
++    0x00000006, 0x000004BE, 0x00000016, 0x000002B6, 0x0008000C, 0x00000006, 0x000002C8, 0x00000001,
++    0x00000032, 0x000002B6, 0x000002C3, 0x000004BE, 0x00050085, 0x00000006, 0x000002CB, 0x000002C3,
++    0x000002C3, 0x00050085, 0x00000006, 0x000002CE, 0x000002C8, 0x000002CB, 0x00050085, 0x00000006,
++    0x000002BC, 0x000002CE, 0x00000148, 0x00050050, 0x0000000C, 0x000002BD, 0x000002CE, 0x000002BC,
++    0x00050081, 0x0000000C, 0x00000181, 0x00000171, 0x000002BD, 0x0008000C, 0x00000006, 0x000002DA,
++    0x00000001, 0x00000032, 0x0000015A, 0x0000015A, 0x000002AE, 0x00050085, 0x00000006, 0x000002DF,
++    0x0000014D, 0x00000153, 0x0008000C, 0x00000006, 0x000002E0, 0x00000001, 0x0000002B, 0x000002DF,
++    0x00000034, 0x00000035, 0x0008000C, 0x00000006, 0x000002E1, 0x00000001, 0x00000032, 0x000002DA,
++    0x0000002E, 0x000002E0, 0x00050083, 0x00000006, 0x000002EE, 0x000002E1, 0x00000016, 0x00050083,
++    0x00000006, 0x000004BF, 0x00000016, 0x000002E1, 0x0008000C, 0x00000006, 0x000002F3, 0x00000001,
++    0x00000032, 0x000002E1, 0x000002EE, 0x000004BF, 0x00050085, 0x00000006, 0x000002F6, 0x000002EE,
++    0x000002EE, 0x00050085, 0x00000006, 0x000002F9, 0x000002F3, 0x000002F6, 0x00050085, 0x00000006,
++    0x000002E7, 0x000002F9, 0x0000014C, 0x00050050, 0x0000000C, 0x000002E8, 0x000002F9, 0x000002E7,
++    0x00050081, 0x0000000C, 0x00000190, 0x00000181, 0x000002E8, 0x00050081, 0x00000006, 0x00000193,
++    0x0000015A, 0x00000035, 0x00050083, 0x00000006, 0x00000196, 0x00000156, 0x00000035, 0x00050085,
++    0x00000006, 0x00000304, 0x00000196, 0x00000196, 0x0008000C, 0x00000006, 0x00000305, 0x00000001,
++    0x00000032, 0x00000193, 0x00000193, 0x00000304, 0x00050085, 0x00000006, 0x0000030A, 0x00000123,
++    0x00000153, 0x0008000C, 0x00000006, 0x0000030B, 0x00000001, 0x0000002B, 0x0000030A, 0x00000034,
++    0x00000035, 0x0008000C, 0x00000006, 0x0000030C, 0x00000001, 0x00000032, 0x00000305, 0x0000002E,
++    0x0000030B, 0x00050083, 0x00000006, 0x00000319, 0x0000030C, 0x00000016, 0x00050083, 0x00000006,
++    0x000004C0, 0x00000016, 0x0000030C, 0x0008000C, 0x00000006, 0x0000031E, 0x00000001, 0x00000032,
++    0x0000030C, 0x00000319, 0x000004C0, 0x00050085, 0x00000006, 0x00000321, 0x00000319, 0x00000319,
++    0x00050085, 0x00000006, 0x00000324, 0x0000031E, 0x00000321, 0x00050085, 0x00000006, 0x00000312,
++    0x00000324, 0x00000122, 0x00050050, 0x0000000C, 0x00000313, 0x00000324, 0x00000312, 0x00050081,
++    0x0000000C, 0x000001A0, 0x00000190, 0x00000313, 0x0008000C, 0x00000006, 0x00000330, 0x00000001,
++    0x00000032, 0x0000015A, 0x0000015A, 0x00000304, 0x00050085, 0x00000006, 0x00000335, 0x00000126,
++    0x00000153, 0x0008000C, 0x00000006, 0x00000336, 0x00000001, 0x0000002B, 0x00000335, 0x00000034,
++    0x00000035, 0x0008000C, 0x00000006, 0x00000337, 0x00000001, 0x00000032, 0x00000330, 0x0000002E,
++    0x00000336, 0x00050083, 0x00000006, 0x00000344, 0x00000337, 0x00000016, 0x00050083, 0x00000006,
++    0x000004C1, 0x00000016, 0x00000337, 0x0008000C, 0x00000006, 0x00000349, 0x00000001, 0x00000032,
++    0x00000337, 0x00000344, 0x000004C1, 0x00050085, 0x00000006, 0x0000034C, 0x00000344, 0x00000344,
++    0x00050085, 0x00000006, 0x0000034F, 0x00000349, 0x0000034C, 0x00050085, 0x00000006, 0x0000033D,
++    0x0000034F, 0x00000125, 0x00050050, 0x0000000C, 0x0000033E, 0x0000034F, 0x0000033D, 0x00050081,
++    0x0000000C, 0x000001AF, 0x000001A0, 0x0000033E, 0x00050085, 0x00000006, 0x0000035A, 0x00000156,
++    0x00000156, 0x0008000C, 0x00000006, 0x0000035B, 0x00000001, 0x00000032, 0x0000015A, 0x0000015A,
++    0x0000035A, 0x00050085, 0x00000006, 0x00000360, 0x0000012A, 0x00000153, 0x0008000C, 0x00000006,
++    0x00000361, 0x00000001, 0x0000002B, 0x00000360, 0x00000034, 0x00000035, 0x0008000C, 0x00000006,
++    0x00000362, 0x00000001, 0x00000032, 0x0000035B, 0x0000002E, 0x00000361, 0x00050083, 0x00000006,
++    0x0000036F, 0x00000362, 0x00000016, 0x00050083, 0x00000006, 0x000004C2, 0x00000016, 0x00000362,
++    0x0008000C, 0x00000006, 0x00000374, 0x00000001, 0x00000032, 0x00000362, 0x0000036F, 0x000004C2,
++    0x00050085, 0x00000006, 0x00000377, 0x0000036F, 0x0000036F, 0x00050085, 0x00000006, 0x0000037A,
++    0x00000374, 0x00000377, 0x00050085, 0x00000006, 0x00000368, 0x0000037A, 0x00000129, 0x00050050,
++    0x0000000C, 0x00000369, 0x0000037A, 0x00000368, 0x00050081, 0x0000000C, 0x000001BD, 0x000001AF,
++    0x00000369, 0x0008000C, 0x00000006, 0x00000386, 0x00000001, 0x00000032, 0x00000193, 0x00000193,
++    0x0000035A, 0x00050085, 0x00000006, 0x0000038B, 0x0000012E, 0x00000153, 0x0008000C, 0x00000006,
++    0x0000038C, 0x00000001, 0x0000002B, 0x0000038B, 0x00000034, 0x00000035, 0x0008000C, 0x00000006,
++    0x0000038D, 0x00000001, 0x00000032, 0x00000386, 0x0000002E, 0x0000038C, 0x00050083, 0x00000006,
++    0x0000039A, 0x0000038D, 0x00000016, 0x00050083, 0x00000006, 0x000004C3, 0x00000016, 0x0000038D,
++    0x0008000C, 0x00000006, 0x0000039F, 0x00000001, 0x00000032, 0x0000038D, 0x0000039A, 0x000004C3,
++    0x00050085, 0x00000006, 0x000003A2, 0x0000039A, 0x0000039A, 0x00050085, 0x00000006, 0x000003A5,
++    0x0000039F, 0x000003A2, 0x00050085, 0x00000006, 0x00000393, 0x000003A5, 0x0000012D, 0x00050050,
++    0x0000000C, 0x00000394, 0x000003A5, 0x00000393, 0x00050081, 0x0000000C, 0x000001CC, 0x000001BD,
++    0x00000394, 0x0008000C, 0x00000006, 0x000003B1, 0x00000001, 0x00000032, 0x00000164, 0x00000164,
++    0x00000304, 0x00050085, 0x00000006, 0x000003B6, 0x00000132, 0x00000153, 0x0008000C, 0x00000006,
++    0x000003B7, 0x00000001, 0x0000002B, 0x000003B6, 0x00000034, 0x00000035, 0x0008000C, 0x00000006,
++    0x000003B8, 0x00000001, 0x00000032, 0x000003B1, 0x0000002E, 0x000003B7, 0x00050083, 0x00000006,
++    0x000003C5, 0x000003B8, 0x00000016, 0x00050083, 0x00000006, 0x000004C4, 0x00000016, 0x000003B8,
++    0x0008000C, 0x00000006, 0x000003CA, 0x00000001, 0x00000032, 0x000003B8, 0x000003C5, 0x000004C4,
++    0x00050085, 0x00000006, 0x000003CD, 0x000003C5, 0x000003C5, 0x00050085, 0x00000006, 0x000003D0,
++    0x000003CA, 0x000003CD, 0x00050085, 0x00000006, 0x000003BE, 0x000003D0, 0x00000131, 0x00050050,
++    0x0000000C, 0x000003BF, 0x000003D0, 0x000003BE, 0x00050081, 0x0000000C, 0x000001DC, 0x000001CC,
++    0x000003BF, 0x00050083, 0x00000006, 0x000001DF, 0x0000015A, 0x00000064, 0x0008000C, 0x00000006,
++    0x000003DC, 0x00000001, 0x00000032, 0x000001DF, 0x000001DF, 0x00000304, 0x00050085, 0x00000006,
++    0x000003E1, 0x00000135, 0x00000153, 0x0008000C, 0x00000006, 0x000003E2, 0x00000001, 0x0000002B,
++    0x000003E1, 0x00000034, 0x00000035, 0x0008000C, 0x00000006, 0x000003E3, 0x00000001, 0x00000032,
++    0x000003DC, 0x0000002E, 0x000003E2, 0x00050083, 0x00000006, 0x000003F0, 0x000003E3, 0x00000016,
++    0x00050083, 0x00000006, 0x000004C5, 0x00000016, 0x000003E3, 0x0008000C, 0x00000006, 0x000003F5,
++    0x00000001, 0x00000032, 0x000003E3, 0x000003F0, 0x000004C5, 0x00050085, 0x00000006, 0x000003F8,
++    0x000003F0, 0x000003F0, 0x00050085, 0x00000006, 0x000003FB, 0x000003F5, 0x000003F8, 0x00050085,
++    0x00000006, 0x000003E9, 0x000003FB, 0x00000134, 0x00050050, 0x0000000C, 0x000003EA, 0x000003FB,
++    0x000003E9, 0x00050081, 0x0000000C, 0x000001EC, 0x000001DC, 0x000003EA, 0x0008000C, 0x00000006,
++    0x00000407, 0x00000001, 0x00000032, 0x000001DF, 0x000001DF, 0x0000035A, 0x00050085, 0x00000006,
++    0x0000040C, 0x00000139, 0x00000153, 0x0008000C, 0x00000006, 0x0000040D, 0x00000001, 0x0000002B,
++    0x0000040C, 0x00000034, 0x00000035, 0x0008000C, 0x00000006, 0x0000040E, 0x00000001, 0x00000032,
++    0x00000407, 0x0000002E, 0x0000040D, 0x00050083, 0x00000006, 0x0000041B, 0x0000040E, 0x00000016,
++    0x00050083, 0x00000006, 0x000004C6, 0x00000016, 0x0000040E, 0x0008000C, 0x00000006, 0x00000420,
++    0x00000001, 0x00000032, 0x0000040E, 0x0000041B, 0x000004C6, 0x00050085, 0x00000006, 0x00000423,
++    0x0000041B, 0x0000041B, 0x00050085, 0x00000006, 0x00000426, 0x00000420, 0x00000423, 0x00050085,
++    0x00000006, 0x00000414, 0x00000426, 0x00000138, 0x00050050, 0x0000000C, 0x00000415, 0x00000426,
++    0x00000414, 0x00050081, 0x0000000C, 0x000001FB, 0x000001EC, 0x00000415, 0x0008000C, 0x00000006,
++    0x00000432, 0x00000001, 0x00000032, 0x00000164, 0x00000164, 0x0000035A, 0x00050085, 0x00000006,
++    0x00000437, 0x0000013D, 0x00000153, 0x0008000C, 0x00000006, 0x00000438, 0x00000001, 0x0000002B,
++    0x00000437, 0x00000034, 0x00000035, 0x0008000C, 0x00000006, 0x00000439, 0x00000001, 0x00000032,
++    0x00000432, 0x0000002E, 0x00000438, 0x00050083, 0x00000006, 0x00000446, 0x00000439, 0x00000016,
++    0x00050083, 0x00000006, 0x000004C7, 0x00000016, 0x00000439, 0x0008000C, 0x00000006, 0x0000044B,
++    0x00000001, 0x00000032, 0x00000439, 0x00000446, 0x000004C7, 0x00050085, 0x00000006, 0x0000044E,
++    0x00000446, 0x00000446, 0x00050085, 0x00000006, 0x00000451, 0x0000044B, 0x0000044E, 0x00050085,
++    0x00000006, 0x0000043F, 0x00000451, 0x0000013C, 0x00050050, 0x0000000C, 0x00000440, 0x00000451,
++    0x0000043F, 0x00050081, 0x0000000C, 0x0000020A, 0x000001FB, 0x00000440, 0x00050051, 0x00000006,
++    0x0000020D, 0x0000020A, 0x00000001, 0x00050051, 0x00000006, 0x0000020F, 0x0000020A, 0x00000000,
++    0x00050088, 0x00000006, 0x00000210, 0x0000020D, 0x0000020F, 0x0007000C, 0x00000006, 0x00000216,
++    0x00000001, 0x00000028, 0x00000125, 0x00000129, 0x0007000C, 0x00000006, 0x0000021B, 0x00000001,
++    0x00000028, 0x00000131, 0x0000013C, 0x0007000C, 0x00000006, 0x0000021C, 0x00000001, 0x00000028,
++    0x00000216, 0x0000021B, 0x0007000C, 0x00000006, 0x00000222, 0x00000001, 0x00000025, 0x00000125,
++    0x00000129, 0x0007000C, 0x00000006, 0x00000227, 0x00000001, 0x00000025, 0x00000131, 0x0000013C,
++    0x0007000C, 0x00000006, 0x00000228, 0x00000001, 0x00000025, 0x00000222, 0x00000227, 0x00050085,
++    0x00000006, 0x0000022B, 0x00000064, 0x00000210, 0x0008000C, 0x00000006, 0x0000022E, 0x00000001,
++    0x0000002B, 0x0000022B, 0x00000228, 0x0000021C, 0x00050083, 0x00000006, 0x00000233, 0x0000022E,
++    0x0000011E, 0x0008000C, 0x00000006, 0x00000237, 0x00000001, 0x0000002B, 0x00000233, 0x00000235,
++    0x00000236, 0x00050081, 0x00000006, 0x0000023B, 0x0000007C, 0x00000237, 0x0008000C, 0x00000006,
++    0x0000023C, 0x00000001, 0x0000002B, 0x0000023B, 0x00000034, 0x00000035, 0x00060052, 0x00000043,
++    0x000004AD, 0x0000023C, 0x000004BB, 0x00000000, 0x00050081, 0x00000006, 0x00000241, 0x0000007F,
++    0x00000237, 0x0008000C, 0x00000006, 0x00000242, 0x00000001, 0x0000002B, 0x00000241, 0x00000034,
++    0x00000035, 0x00060052, 0x00000043, 0x000004B0, 0x00000242, 0x000004AD, 0x00000001, 0x00050081,
++    0x00000006, 0x00000247, 0x00000082, 0x00000237, 0x0008000C, 0x00000006, 0x00000248, 0x00000001,
++    0x0000002B, 0x00000247, 0x00000034, 0x00000035, 0x00060052, 0x00000043, 0x000004B3, 0x00000248,
++    0x000004B0, 0x00000002, 0x000200F9, 0x000000D0, 0x000200F8, 0x000000D0, 0x000700F5, 0x00000043,
++    0x000004B7, 0x00000457, 0x00000005, 0x000004B3, 0x000000CF, 0x00060052, 0x00000043, 0x000004B5,
++    0x00000035, 0x000004B7, 0x00000003, 0x0003003E, 0x0000024C, 0x000004B5, 0x000100FD, 0x00010038,
++};
 diff --git a/src/ui/surface_android.cpp b/src/ui/surface_android.cpp
 new file mode 100644
 index 0000000..5cfd233
@@ -4061,6 +4776,154 @@ index 0000000..5cfd233
 +}  // namespace rex
 +
 +#endif  // REX_PLATFORM_ANDROID
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+index 23645ef..37534db 100644
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -34,6 +34,9 @@
+ #endif
+ 
+ #if REX_PLATFORM_ANDROID
++#include <android/native_window.h>
++#include <dlfcn.h>
++
+ #include <rex/ui/surface_android.h>
+ #endif
+ #if REX_PLATFORM_GNU_LINUX
+@@ -49,6 +52,24 @@
+ REXCVAR_DEFINE_BOOL(present_render_pass_clear, true, "UI/Presenter",
+                     "Clear render pass during presentation");
+ 
++#if REX_PLATFORM_ANDROID
++// FIFO lets the compositor pace the panel; implicit vsync paints on the UI, freeing the GPU thread.
++REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_immediate, false, "UI/Vulkan",
++                    "Allow immediate present mode (no vsync)");
++
++REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_mailbox, false, "UI/Vulkan",
++                    "Allow mailbox present mode (triple buffering)");
++
++REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_fifo_relaxed, false, "UI/Vulkan",
++                    "Allow FIFO relaxed present mode");
++
++REXCVAR_DEFINE_INT32(present_android_frame_rate, 30, "UI/Vulkan",
++                     "Frame rate in Hz the window asks Android for "
++                     "(ANativeWindow_setFrameRate, Android 11+), so the panel can run at a lower "
++                     "refresh rate than 120 Hz; 0 asks for nothing")
++    .range(0, 240)
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++#else
+ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_immediate, true, "UI/Vulkan",
+                     "Allow immediate present mode (no vsync)");
+ 
+@@ -57,11 +78,37 @@ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_mailbox, true, "UI/Vulkan",
+ 
+ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_fifo_relaxed, true, "UI/Vulkan",
+                     "Allow FIFO relaxed present mode");
++#endif
+ 
+ namespace rex {
+ namespace ui {
+ namespace vulkan {
+ 
++#if REX_PLATFORM_ANDROID
++namespace {
++
++void RequestAndroidFrameRate(ANativeWindow* window) {
++  using SetFrameRate = int32_t (*)(ANativeWindow*, float, int8_t);
++  static const SetFrameRate set_frame_rate = [] {
++    auto function = reinterpret_cast<SetFrameRate>(
++        dlsym(RTLD_DEFAULT, "ANativeWindow_setFrameRate"));
++    if (!function) {
++      REXLOG_INFO("VulkanPresenter: ANativeWindow_setFrameRate is not available (Android 10)");
++    }
++    return function;
++  }();
++  if (!set_frame_rate) {
++    return;
++  }
++  int32_t rate = REXCVAR_GET(present_android_frame_rate);
++  int32_t result =
++      set_frame_rate(window, float(rate), 0 /* ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT */);
++  REXLOG_INFO("VulkanPresenter: ANativeWindow_setFrameRate({} Hz) returned {}", rate, result);
++}
++
++}  // namespace
++#endif
++
+ #if defined(REX_HAS_FIDELITYFX_RUNTIME) && REX_HAS_FIDELITYFX_RUNTIME
+ namespace {
+ 
+@@ -109,6 +156,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL FfxVkGetDeviceProcAddrCompat(VkDevice d
+ namespace shaders {
+ #include "../shaders/vulkan_spirv/guest_output_bilinear_dither_ps.h"
+ #include "../shaders/vulkan_spirv/guest_output_bilinear_ps.h"
++#if REX_PLATFORM_ANDROID
++#include "../shaders/vulkan_spirv/guest_output_sgsr1_ps.h"
++#endif
+ #if defined(REX_HAS_FIDELITYFX_SDK)
+ #include "../shaders/vulkan_spirv/guest_output_ffx_cas_resample_dither_ps.h"
+ #include "../shaders/vulkan_spirv/guest_output_ffx_cas_resample_ps.h"
+@@ -885,6 +935,12 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
+     // Successfully attached (at least for now).
+   }
+ 
++#if REX_PLATFORM_ANDROID
++  if (new_surface.GetType() == Surface::kTypeIndex_AndroidNativeWindow) {
++    RequestAndroidFrameRate(static_cast<const AndroidNativeWindowSurface&>(new_surface).window());
++  }
++#endif
++
+   // From now on, in case of failure,
+   // paint_context_.DestroySwapchainAndVulkanSurface must be called before
+   // returning.
+@@ -2027,6 +2083,9 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+           uint32_t effect_constants_size = 0;
+           union {
+             BilinearConstants bilinear;
++#if REX_PLATFORM_ANDROID
++            Sgsr1Constants sgsr1;
++#endif
+ #if defined(REX_HAS_FIDELITYFX_SDK)
+             CasSharpenConstants cas_sharpen;
+             CasResampleConstants cas_resample;
+@@ -2035,6 +2094,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+ #endif
+           } effect_constants;
+           switch (guest_output_paint_pipeline_layout_index) {
++#if REX_PLATFORM_ANDROID
++            case kGuestOutputPaintPipelineLayoutIndexSgsr1: {
++              effect_constants_size = sizeof(effect_constants.sgsr1);
++              effect_constants.sgsr1.Initialize(guest_output_flow, i);
++            } break;
++#endif
+             case kGuestOutputPaintPipelineLayoutIndexBilinear: {
+               effect_constants_size = sizeof(effect_constants.bilinear);
+               effect_constants.bilinear.Initialize(guest_output_flow, i);
+@@ -2331,6 +2396,11 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+       guest_output_paint_push_constant_ranges;
+   for (size_t i = 0; i < size_t(kGuestOutputPaintPipelineLayoutCount); ++i) {
+     switch (GuestOutputPaintPipelineLayoutIndex(i)) {
++#if REX_PLATFORM_ANDROID
++      case kGuestOutputPaintPipelineLayoutIndexSgsr1:
++        guest_output_paint_push_constant_range_ffx.size = sizeof(Sgsr1Constants);
++        break;
++#endif
+       case kGuestOutputPaintPipelineLayoutIndexBilinear:
+         guest_output_paint_push_constant_range_ffx.size = sizeof(BilinearConstants);
+         break;
+@@ -2381,6 +2451,12 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+   for (size_t i = 0; i < size_t(GuestOutputPaintEffect::kCount); ++i) {
+     GuestOutputPaintEffect guest_output_paint_effect = GuestOutputPaintEffect(i);
+     switch (guest_output_paint_effect) {
++#if REX_PLATFORM_ANDROID
++      case GuestOutputPaintEffect::kSgsr1:
++        shader_module_create_info.codeSize = sizeof(shaders::guest_output_sgsr1_ps);
++        shader_module_create_info.pCode = shaders::guest_output_sgsr1_ps;
++        break;
++#endif
+       case GuestOutputPaintEffect::kBilinear:
+         shader_module_create_info.codeSize = sizeof(shaders::guest_output_bilinear_ps);
+         shader_module_create_info.pCode = shaders::guest_output_bilinear_ps;
 diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
 index 6782cce..24549f8 100644
 --- a/src/ui/window_sdl.cpp

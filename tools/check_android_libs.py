@@ -11,8 +11,9 @@ It takes either a folder holding .so files (for example
 out/android/jniLibs/arm64-v8a) or an .apk file, in which case the
 lib/arm64-v8a/*.so entries are extracted to a temporary directory and the
 zip itself is checked for uncompressed, page-aligned storage, and for the
-license notices (assets/licenses/THIRD_PARTY_NOTICES.md and
-assets/licenses/LICENSE, unless --no-notices is given):
+license notices (assets/licenses/THIRD_PARTY_NOTICES.md,
+assets/licenses/LICENSE and assets/licenses/LICENSE.SGSR.txt, unless
+--no-notices is given):
 
   python tools/check_android_libs.py <folder-or-apk> [--ndk <ndk folder>]
       [--api 29] [--expect NAME ...] [--main libgow2.so]
@@ -58,7 +59,11 @@ _TOOL_TIMEOUT_S = 900
 _MAX_MISSING_SHOWN = 20
 _COPY_CHUNK = 1 << 20
 _APK_LIB_PREFIX = "lib/arm64-v8a/"
-_APK_REQUIRED_ENTRIES = ("assets/licenses/THIRD_PARTY_NOTICES.md", "assets/licenses/LICENSE")
+_APK_REQUIRED_ENTRIES = (
+    "assets/licenses/THIRD_PARTY_NOTICES.md",
+    "assets/licenses/LICENSE",
+    "assets/licenses/LICENSE.SGSR.txt",
+)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _NEEDED_RE = re.compile(r"\(NEEDED\)\s*Shared library: \[(?P<name>[^\]]+)\]")
 _HOSTS = ("windows-x86_64", "linux-x86_64", "darwin-x86_64")

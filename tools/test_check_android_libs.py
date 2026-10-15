@@ -327,6 +327,7 @@ def test_apk_notice_errors_present(tmp_path):
     with zipfile.ZipFile(apk, "w") as archive:
         archive.writestr("assets/licenses/THIRD_PARTY_NOTICES.md", "notices")
         archive.writestr("assets/licenses/LICENSE", "license")
+        archive.writestr("assets/licenses/LICENSE.SGSR.txt", "Qualcomm license")
     assert cal.apk_notice_errors(apk) == []
 
 
@@ -335,9 +336,20 @@ def test_apk_notice_errors_missing(tmp_path):
     with zipfile.ZipFile(apk, "w") as archive:
         archive.writestr("lib/arm64-v8a/liba.so", b"data")
     errors = cal.apk_notice_errors(apk)
-    assert len(errors) == 2
+    assert len(errors) == 3
+    assert any("LICENSE.SGSR.txt" in error for error in errors)
     assert any("THIRD_PARTY_NOTICES.md" in error for error in errors)
     assert any("assets/licenses/LICENSE" in error for error in errors)
+
+
+def test_apk_notice_errors_missing_sgsr_license(tmp_path):
+    apk = tmp_path / "app.apk"
+    with zipfile.ZipFile(apk, "w") as archive:
+        archive.writestr("assets/licenses/THIRD_PARTY_NOTICES.md", "notices")
+        archive.writestr("assets/licenses/LICENSE", "license")
+    errors = cal.apk_notice_errors(apk)
+    assert len(errors) == 1
+    assert "assets/licenses/LICENSE.SGSR.txt: missing from the APK" in errors[0]
 
 
 def test_check_main_exports_accepts_only_allowed():

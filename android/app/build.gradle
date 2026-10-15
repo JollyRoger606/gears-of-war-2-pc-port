@@ -121,7 +121,7 @@ abstract class CopyLicenseAssets extends DefaultTask {
 // one copy of each.
 def copyLicenseAssets = tasks.register('copyLicenseAssets', CopyLicenseAssets) {
     licenseFiles.from(rootProject.file('../LICENSE'), rootProject.file('../THIRD_PARTY_NOTICES.md'),
-            rootProject.file('LICENSE.SDL3.txt'))
+            rootProject.file('LICENSE.SDL3.txt'), rootProject.file('LICENSE.SGSR.txt'))
 }
 
 androidComponents {

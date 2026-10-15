@@ -145,9 +145,9 @@ Not included in the release. The DLSS SDK license does not allow it to become pa
 
 The APK (`lib/arm64-v8a`) holds five native libraries built from source by
 `scripts/build-android.ps1`, the Java activity of the port with SDL's Java classes,
-and the license texts in `assets/licenses/` (`LICENSE`, this file and
-`LICENSE.SDL3.txt`). It holds no game files. The libraries contain the components
-below; components already described above (ReXGlue SDK, gears-judgement-recomp,
+and the license texts in `assets/licenses/` (`LICENSE`, this file,
+`LICENSE.SDL3.txt` and `LICENSE.SGSR.txt`). It holds no game files. The libraries contain the
+components below; components already described above (ReXGlue SDK, gears-judgement-recomp,
 TinySHA1, the SDL3 Android project template) apply to the APK as well.
 
 ### libgow2.so
@@ -164,6 +164,8 @@ TinySHA1, the SDL3 Android project template) apply to the APK as well.
 ### librexruntime.so
 
 - The ReXGlue SDK runtime with the patches in `sdk/patches/`.
+- AMD FidelityFX FSR 1 and CAS (the present shaders' SPIR-V).
+- Snapdragon Game Super Resolution 1 (a present shader's SPIR-V; `assets/licenses/LICENSE.SGSR.txt`).
 - Dear ImGui, with the ProggyClean and ProggyTiny fonts.
 - {fmt}.
 - spdlog.
@@ -232,6 +234,7 @@ this file, `README.md`, `gow2.toml` and `tools/texpack.py`. It holds no game fil
 ### rexruntime.dll
 
 - The ReXGlue SDK runtime with the patches in `sdk/patches/`.
+- AMD FidelityFX FSR 1 and CAS (the present shaders' DXBC/SPIR-V).
 - Dear ImGui, with the ProggyClean and ProggyTiny fonts.
 - SDL 3.4.14, linked statically, with the code it bundles (HIDAPI, yuv2rgb, stb_image, miniz,
   the uClibc-derived math library, SDL_qsort).
@@ -280,6 +283,39 @@ Licenses of the components listed under Android APK and Windows release zip.
 MIT License
 
 Copyright (c) 2017 LuoPeng
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### AMD FidelityFX FSR 1 and CAS
+
+- Projects: [GPUOpen-Effects/FidelityFX-FSR](https://github.com/GPUOpen-Effects/FidelityFX-FSR)
+  and [GPUOpen-Effects/FidelityFX-CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS).
+- Description: present shaders carried by the ReXGlue SDK from Xenia, built from AMD's headers;
+  SPIR-V in `librexruntime.so`, DXBC/SPIR-V in `rexruntime.dll`.
+- Copyright: Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved. (FSR 1);
+  Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved. (CAS).
+- License: MIT (full text below).
+
+```
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1097,6 +1133,49 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Snapdragon Game Super Resolution
+
+- Project: [SnapdragonStudios/snapdragon-gsr](https://github.com/SnapdragonStudios/snapdragon-gsr),
+  version 1 shader.
+- Description: present shader compiled to SPIR-V in `librexruntime.so`. Its header records the
+  modifications for the ReXGlue presenter: Vulkan GLSL ES 3.1, push constants, separate image
+  and sampler.
+- Copyright: Copyright (c) 2023 and 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+  The LICENSE below carries 2023; the shader header carries 2025.
+- License: BSD-3-Clause (full text below; also `assets/licenses/LICENSE.SGSR.txt`).
+
+```
+Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+SPDX-License-Identifier: BSD-3-Clause
 ```
 
 ### SPIRV-Headers
