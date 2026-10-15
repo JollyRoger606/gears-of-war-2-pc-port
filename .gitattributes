@@ -3,3 +3,8 @@
 *.sh text eol=lf
 # rexglue codegen rewrites gow2_manifest.toml with LF; a CRLF checkout would show it as modified.
 *.toml text eol=lf
+# The APK and the Windows zip ship these files; one line ending in every checkout keeps their bytes
+# the same wherever the repository is cloned.
+LICENSE text eol=lf
+THIRD_PARTY_NOTICES.md text eol=lf
+android/LICENSE.SDL3.txt text eol=lf

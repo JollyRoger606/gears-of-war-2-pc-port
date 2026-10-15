@@ -184,7 +184,12 @@ The steps, each skipped when its output is current:
 Every source is compiled with `-ffile-prefix-map` for the repository (`gow2-recomp/...`), the SDK
 tree (`rexglue-sdk/...`) and the NDK (`android-ndk/...`), so `__FILE__` strings and debug info hold
 no absolute paths: the libraries do not depend on where the checkout lives and carry none of the
-builder's folders.
+builder's folders. For debug info Clang applies the last matching map, so the SDK tree's map comes
+last. The configure step also sets `SOURCE_DATE_EPOCH` to the time of the SDK commit (unless it is
+already set), which CMake uses for the build stamp the SDK writes into `librexruntime.so`, and the
+license files the APK copies are checked out with LF everywhere (`.gitattributes`). Two builds of
+one commit, from checkouts in `C:\personal\gow2-recomp` and `C:\personal\gow2-recomp-repro`, gave
+byte-identical libraries, stripped and unstripped.
 
 Logs are in `out\android\logs`. A first build took 10 minutes on a busy 24-thread PC, plus the SDK
 clone; a rebuild after a source change takes about a minute.

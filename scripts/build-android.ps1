@@ -457,6 +457,14 @@ function Get-StaleCodegenInputs([hashtable]$deps) {
     return $stale
 }
 
+# The SDK writes the configure time into librexruntime.so (string(TIMESTAMP)); CMake takes
+# SOURCE_DATE_EPOCH instead, and the SDK commit's time keeps two builds of one commit identical.
+function Set-SourceDateEpoch([string]$tree) {
+    if ($env:SOURCE_DATE_EPOCH) { return }
+    $epoch = (Invoke-TreeGit $tree @('log', '-1', '--format=%ct', $SdkCommit)).Out
+    if ($epoch.Count -gt 0) { $env:SOURCE_DATE_EPOCH = $epoch[0] }
+}
+
 function Write-CodegenWarning([string]$problem) {
     Write-Host ("  warning: $problem; give -Sdk <folder> (bin\rexglue.exe) and game\default.xex to " +
         'regenerate it. Building the existing generated code.') -ForegroundColor Yellow
@@ -622,6 +630,7 @@ Get-Content (Join-Path $logs 'prepare-sources.log') | Select-Object -Last 1 | Fo
 
 # ---- 3. configure ----------------------------------------------------------------------------
 Repair-SymlinkStubs $SdkSource
+Set-SourceDateEpoch $SdkSource
 $cacheWanted = @{
     'CMAKE_TOOLCHAIN_FILE' = $toolchain
     'ANDROID_PLATFORM'     = "android-$Api"
