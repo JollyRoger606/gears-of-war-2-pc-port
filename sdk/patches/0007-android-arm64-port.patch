@@ -169,6 +169,32 @@ index 352af67..f5e7787 100644
  #endif
  };
  
+diff --git a/include/rex/ui/imgui_dialog.h b/include/rex/ui/imgui_dialog.h
+index a7ab6b3..5620e12 100644
+--- a/include/rex/ui/imgui_dialog.h
++++ b/include/rex/ui/imgui_dialog.h
+@@ -15,6 +15,7 @@
+ #include <memory>
+ #include <vector>
+ 
++#include <rex/platform.h>
+ #include <rex/thread.h>
+ #include <rex/ui/imgui_drawer.h>
+ #include <rex/ui/window_listener.h>
+@@ -39,6 +40,13 @@ class ImGuiDialog {
+ 
+   void Draw();
+ 
++#if REX_PLATFORM_ANDROID
++  // False for a passive overlay (on-screen controls) that can wait for the next guest frame: while
++  // only such dialogs are open, the drawer stops repainting at the display's refresh rate, which
++  // costs a phone GPU a full extra present every refresh.
++  virtual bool WantsContinuousPaint() const { return true; }
++#endif
++
+  protected:
+   ImGuiDialog(ImGuiDrawer* imgui_drawer);
+ 
 diff --git a/include/rex/ui/surface_android.h b/include/rex/ui/surface_android.h
 new file mode 100644
 index 0000000..120ace9
@@ -1222,6 +1248,36 @@ index 5bd3dc5..64b7f6a 100644
      find_package(PkgConfig REQUIRED)
      pkg_check_modules(X11_XCB REQUIRED x11-xcb)
      # Required, not optional: vulkan/api.h pulls in <wayland-client.h> on every
+diff --git a/src/ui/imgui_drawer.cpp b/src/ui/imgui_drawer.cpp
+index f270f3c..a859990 100644
+--- a/src/ui/imgui_drawer.cpp
++++ b/src/ui/imgui_drawer.cpp
+@@ -86,6 +86,13 @@ void ApplyDefaultStyle(ImGuiStyle& style) {
+   style.Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
+ }
+ 
++#if REX_PLATFORM_ANDROID
++bool AnyDialogWantsContinuousPaint(const std::vector<ImGuiDialog*>& dialogs) {
++  return std::any_of(dialogs.cbegin(), dialogs.cend(),
++                     [](const ImGuiDialog* dialog) { return dialog->WantsContinuousPaint(); });
++}
++#endif
++
+ }  // namespace
+ 
+ ImGuiDrawer::ImGuiDrawer(rex::ui::Window* window, size_t z_order, FontSetupCallback font_setup,
+@@ -439,7 +446,11 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
+   if (!dialogs_.empty()) {
+     // Repaint (and handle input) continuously if still active. In detached mode
+     // there is no presenter; the app drives repaint via its own present loop.
++#if REX_PLATFORM_ANDROID
++    if (presenter_ && AnyDialogWantsContinuousPaint(dialogs_)) {
++#else
+     if (presenter_) {
++#endif
+       presenter_->RequestUIPaintFromUIThread();
+     }
+   }
 diff --git a/src/ui/surface_android.cpp b/src/ui/surface_android.cpp
 new file mode 100644
 index 0000000..5cfd233

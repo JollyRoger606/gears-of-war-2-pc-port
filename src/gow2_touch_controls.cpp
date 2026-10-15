@@ -22,6 +22,7 @@
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
 #include <rex/logging.h>
+#include <rex/platform.h>
 #include <rex/runtime.h>
 #include <rex/ui/imgui_dialog.h>
 #include <rex/ui/imgui_drawer.h>
@@ -444,6 +445,11 @@ class TouchOverlay final : public rex::ui::ImGuiDialog {
  public:
   TouchOverlay(rex::ui::ImGuiDrawer* drawer, std::shared_ptr<TouchControls> touch)
       : ImGuiDialog(drawer), touch_(std::move(touch)) {}
+
+#if REX_PLATFORM_ANDROID
+  // Redrawn with each guest frame; a repaint at the phone's 120 Hz cost the game GPU time.
+  bool WantsContinuousPaint() const override { return false; }
+#endif
 
  protected:
   void OnDraw(ImGuiIO& io) override {
