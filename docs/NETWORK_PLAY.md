@@ -214,11 +214,13 @@ script seeds each copy with a copy of the real one), its own log, XUID
 `--net_link_active=true`, `--net_bind_ip`, `--net_broadcast_targets`
 listing every copy, `--system_link_trace=true`, and a windowed 1152x648
 window placed side by side. Each copy also gets
-`--gow2_save_dir=<run>\<name>\saves`: once the `gow2_save_dir` setting is
-in the build, a `gow2_save_dir` in `gow2.toml` (for example a cloud
-folder) would otherwise make every copy write the same real save at once.
-The command line wins over `gow2.toml`, and a build without the setting
-starts normally and ignores the option (out\pcpc-test\run4, 2026-10-15).
+`--gow2_save_dir=<run>\<name>\saves`: the build has the `gow2_save_dir`
+setting ([SAVES.md](SAVES.md)), and a `gow2_save_dir` in `gow2.toml` (for
+example a cloud folder) would otherwise make every copy write the same real
+save at once. The command line wins over `gow2.toml`, and on its first
+start each copy copies the save seeded into its own `LOCALAPPDATA` into
+that folder. A build without the setting starts normally and ignores the
+option (out\pcpc-test\run4, 2026-10-15).
 The script stops every
 copy it started when the file `stop` appears in the run folder, when all
 copies exit, or after `-MaxSeconds` (600 by default). It writes

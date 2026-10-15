@@ -10,24 +10,23 @@ desync check, and anything on Android. There, patch 0010 and the co-op `src/` fi
 passed NDK arm64 `-fsyntax-only` checks, and the newest additions (`getsockname`, the traffic log,
 the census and the test input) have not had even that. Stages 2-4 are design only.
 
-Before this branch merges: rebase on master, check that 0002-0010 still apply in order on
-`923c1a5` (`git apply --check`, one patch after the other), and run `scripts/build-android.ps1` once
-on the merged tree. After the merge, the Android build applies every `sdk/patches/*.patch` and globs
-`src/*.cpp`, so it is the first build to see this code.
+Merged on the `integration` branch (2026-10-15): master, then `saves`, `coop-stage1` and
+`crossplay`. The SDK series 0002-0011 applies in order on `923c1a5` (`git apply --check`, one patch
+after the other). Master's 0007 shifts Android guest ports 1-1023 by 30000 and translates socket
+options and FIONBIO/FIONREAD on Android. 0010 is this branch's latest (getsockname,
+`net_traffic_log_sec`) rebased onto that 0007; it keeps the shift inside its own `Bind` rewrite.
+0011-network-crossplay (Stage 4 networking) was re-created on that 0010: it removes 0007's Android
+shift, option table and ioctl code from `src/system/xsocket.cpp`, so `net_port_offset` is the one
+port mapping on Android, Windows and Linux (a phone that bound 31000 and a PC that sent to 41000
+would never meet); its option table gained SO_KEEPALIVE and SO_OOBINLINE, the two 0007 options it
+lacked; its `getsockname` replaces 0010's; and `net_traffic_log_sec` counts the datagrams that pass
+its filters, by host port. The Android build applies every `sdk/patches/*.patch` and globs
+`src/*.cpp`.
 
-On the `crossplay` branch, SDK patch 0011-network-crossplay (Stage 4 networking) sits on top of
-this 0010, and `scripts/build-android.ps1` has built and linked 0002-0011 there. Two copies of the
-crossplay build have joined each other's campaign over loopback on one PC, and on 2026-10-15 a PC
-and a Galaxy S25 Ultra joined each other's campaign on one Wi-Fi network, with either one hosting.
-See [NETWORK_PLAY.md](NETWORK_PLAY.md).
-
-Merge order: this 0010 first, then 0011. Master's 0007 (6fe0d18, 2026-10-15) shifts Android
-guest ports 1-1023 by 30000 and translates socket options and FIONBIO/FIONREAD on Android. On
-`crossplay` both later patches are rebased onto it: 0010 keeps that shift inside its own `Bind`
-rewrite, and 0011 removes 0007's Android shift, option table and ioctl code from
-`src/system/xsocket.cpp`, so `net_port_offset` is the one port mapping on Android, Windows and
-Linux (a phone that bound 31000 and a PC that sent to 41000 would never meet). 0011's option table
-gained SO_KEEPALIVE and SO_OOBINLINE, the two 0007 options it lacked.
+On the `crossplay` branch `scripts/build-android.ps1` built and linked 0002-0011 (with the
+getsockname 0010, before the traffic log). Two copies of the crossplay build joined each other's
+campaign over loopback on one PC, and on 2026-10-15 a PC and a Galaxy S25 Ultra joined each other's
+campaign on one Wi-Fi network, with either one hosting. See [NETWORK_PLAY.md](NETWORK_PLAY.md).
 
 This document condenses four read-only investigations from 2026-10-14 (join and spawn path,
 campaign systems, patch mechanism, network). A second pass re-checked each one, and the corrections
@@ -501,8 +500,11 @@ Network (needs SDK patch 0010):
    Done 2026-10-14 [V] with the crossplay build (patches 0010 and 0011): the client found the host in
    the System Link Browser, joined the lobby, loaded chapter 2 with the host and spawned as Dom on
    Right Trigger. Harness: scripts/run-instances.ps1 and scripts/instance-input.ps1; steps and log
-   lines in docs/NETWORK_PLAY.md, "Testing on one PC". Separate user data comes from a per-copy
-   LOCALAPPDATA, because the app sets user_data_root from %LOCALAPPDATA% and ignores --user_data_root.
+   lines in docs/NETWORK_PLAY.md, "Testing on one PC". Separate user data came from a per-copy
+   LOCALAPPDATA, because that build set user_data_root from %LOCALAPPDATA% and ignored
+   --user_data_root; since fdbfc4e an explicit --user_data_root works as well
+   (scripts/coop-instances.ps1), and on the command line it outranks a `gow2_save_dir` in
+   `gow2.toml` (docs/SAVES.md).
 7. Host and player 2 play into Act 1 chapter 2. One way to get there is to play chapter 1 first; a
    profile with chapter 2 unlocked also works. `GearGameSP_Base.InitGame+0x0063` reads `?chapter=`,
    but nobody has tested passing it.
