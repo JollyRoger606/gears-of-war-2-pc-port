@@ -147,8 +147,20 @@ bool SafeInvoke(PPCFunc* fn, PPCContext* call, uint8_t* base) {
 #endif
 }
 
-bool CallClientInputAxis(PPCContext& ctx, uint8_t* base, PPCFunc* fn, uint32_t client,
-                         uint32_t viewport, uint64_t key, double value, double delta_time) {
+struct AxisCall {
+  bool ran = false;      // the guest call returned without a fault
+  bool handled = false;  // InputAxis returned nonzero
+};
+
+struct AxisSent {
+  double x = 0;
+  double y = 0;
+  uint32_t calls = 0;
+  uint32_t handled = 0;
+};
+
+AxisCall CallClientInputAxis(PPCContext& ctx, uint8_t* base, PPCFunc* fn, uint32_t client,
+                             uint32_t viewport, uint64_t key, double value, double delta_time) {
   PPCContext call = ctx;
   call.r3.u64 = client;
   call.r4.u64 = viewport;
@@ -157,13 +169,17 @@ bool CallClientInputAxis(PPCContext& ctx, uint8_t* base, PPCFunc* fn, uint32_t c
   call.r9.u64 = 0;
   call.f1.f64 = double(float(value));
   call.f2.f64 = delta_time;
-  return SafeInvoke(fn, &call, base);
+  AxisCall out;
+  out.ran = SafeInvoke(fn, &call, base);
+  out.handled = out.ran && call.r3.u32 != 0;
+  return out;
 }
 
-struct AxisSent {
-  double x = 0;
-  double y = 0;
-};
+void CountAxisCall(const AxisCall& call, AxisSent& sent) {
+  if (!call.ran) return;
+  ++sent.calls;
+  if (call.handled) ++sent.handled;
+}
 
 PPCFunc* g_process_input_orig = nullptr;
 PPCFunc* g_friction_orig = nullptr;
@@ -188,10 +204,16 @@ AxisSent InjectMouseLook(PPCContext& ctx, uint8_t* base, uint32_t viewport, Mous
   const double x = counts.dx * scale;
   double y = -counts.dy * scale;
   if (REXCVAR_GET(gow2_mouse_invert_y)) y = -y;
-  if (x != 0 && CallClientInputAxis(ctx, base, fn, client, viewport, mouse_x, x, delta_time))
-    sent.x = x;
-  if (y != 0 && CallClientInputAxis(ctx, base, fn, client, viewport, mouse_y, y, delta_time))
-    sent.y = y;
+  if (x != 0) {
+    const AxisCall cx = CallClientInputAxis(ctx, base, fn, client, viewport, mouse_x, x, delta_time);
+    if (cx.ran) sent.x = x;
+    CountAxisCall(cx, sent);
+  }
+  if (y != 0) {
+    const AxisCall cy = CallClientInputAxis(ctx, base, fn, client, viewport, mouse_y, y, delta_time);
+    if (cy.ran) sent.y = y;
+    CountAxisCall(cy, sent);
+  }
   return sent;
 }
 
@@ -199,6 +221,8 @@ void MaybeLogMouseAim(AxisSent sent) {
   if (!REXCVAR_GET(gow2_mouse_aim_log)) return;
   static double acc_x = 0;
   static double acc_y = 0;
+  static uint64_t calls = 0;
+  static uint64_t handled = 0;
   static uint64_t frames = 0;
   static uint64_t last_suppressed = 0;
   static int64_t window_start = 0;
@@ -206,18 +230,23 @@ void MaybeLogMouseAim(AxisSent sent) {
   if (sent.x != 0 || sent.y != 0) {
     acc_x += sent.x;
     acc_y += sent.y;
+    calls += sent.calls;
+    handled += sent.handled;
     ++frames;
   }
   if (window_start == 0) window_start = now;
   if (now - window_start < kLogWindowTicks) return;
   if (frames > 0) {
     const uint64_t suppressed = g_friction_suppressed.load(std::memory_order_relaxed);
-    REXLOG_INFO("MOUSEAIM sent x={:.1f} y={:.1f} frames={} friction_suppressed={} last={}", acc_x,
-                acc_y, frames, suppressed - last_suppressed, MouseLookedLast() ? "mouse" : "pad");
+    REXLOG_INFO("MOUSEAIM sent x={:.1f} y={:.1f} frames={} handled={}/{} friction_suppressed={} last={}",
+                acc_x, acc_y, frames, handled, calls, suppressed - last_suppressed,
+                MouseLookedLast() ? "mouse" : "pad");
     last_suppressed = suppressed;
   }
   acc_x = 0;
   acc_y = 0;
+  calls = 0;
+  handled = 0;
   frames = 0;
   window_start = now;
 }

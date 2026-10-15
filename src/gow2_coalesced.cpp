@@ -8,8 +8,12 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#if defined(__ANDROID__)
+#include "gow2_android_devices.h"
+#endif
 
 #include <rex/cvar.h>
+#include <rex/logging.h>
 
 #include <algorithm>
 #include <cctype>
@@ -22,9 +26,17 @@
 #include <unordered_map>
 #include <vector>
 
-REXCVAR_DEFINE_STRING(gow2_prompts, "auto", "input",
-                      "Menu button prompts: auto (keyboard labels unless a controller is connected at "
-                      "launch), keyboard or controller.");
+#if defined(__ANDROID__)
+#define GOW2_PROMPTS_HELP                                                                   \
+  "Menu button prompts: auto (controller glyphs unless a physical keyboard is connected and " \
+  "mnk_mode is on), keyboard or controller."
+#else
+#define GOW2_PROMPTS_HELP                                                         \
+  "Menu button prompts: auto (keyboard labels unless a controller is connected at " \
+  "launch), keyboard or controller."
+#endif
+REXCVAR_DEFINE_STRING(gow2_prompts, "auto", "input", GOW2_PROMPTS_HELP);
+#undef GOW2_PROMPTS_HELP
 
 namespace rex::glue {
 
@@ -427,8 +439,8 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
 
 namespace {
 
-bool AnyPhysicalGamepad() {
 #ifdef _WIN32
+bool AnyPhysicalGamepad() {
   HMODULE m = LoadLibraryW(L"xinput1_4.dll");
   if (!m) m = LoadLibraryW(L"xinput9_1_0.dll");
   if (!m) return false;
@@ -449,12 +461,28 @@ bool AnyPhysicalGamepad() {
   }
   FreeLibrary(m);
   return any;
+}
+#endif
+
+#if defined(__ANDROID__)
+bool AndroidKeyboardPromptsWanted() {
+  const bool keyboard = PhysicalKeyboardConnected();
+  // Without mnk_mode the keyboard does not reach the game, so its labels would be wrong.
+  const bool mnk = rex::cvar::Query<bool>("mnk_mode");
+  REXLOG_INFO("PROMPTS gow2_prompts=auto: physical keyboard {}, mnk_mode {} -> {} labels",
+              keyboard ? "connected" : "not connected", mnk ? "on" : "off",
+              keyboard && mnk ? "keyboard" : "controller");
+  return keyboard && mnk;
+}
+#endif
+
+bool AutoPromptsUseKeyboard() {
+#ifdef _WIN32
+  return !AnyPhysicalGamepad();
 #elif defined(__ANDROID__)
-  // "auto" means controller prompts on a phone: it is played with a pad or with touch
-  // controls laid out like one, never with a keyboard.
-  return true;
+  return AndroidKeyboardPromptsWanted();
 #else
-  return false;
+  return true;
 #endif
 }
 
@@ -494,7 +522,7 @@ CoalescedOptions CoalescedOptionsFromCvars() {
   o.mouse_look = rex::cvar::Query<bool>("mnk_mouse");
   o.native_mouse = NativeMouseAimWanted();
   const std::string mode = REXCVAR_GET(gow2_prompts);
-  const bool keyboard = mode == "keyboard" || (mode != "controller" && !AnyPhysicalGamepad());
+  const bool keyboard = mode == "keyboard" || (mode != "controller" && AutoPromptsUseKeyboard());
   if (!keyboard) return o;
   o.prompt_labels = {
       {"Controller_A", KeybindLabel("keybind_a", "Space")},

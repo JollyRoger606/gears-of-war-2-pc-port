@@ -223,6 +223,28 @@ index 0000000..120ace9
 +}  // namespace rex
 +
 +#endif  // REX_PLATFORM_ANDROID
+diff --git a/include/rex/ui/window_sdl.h b/include/rex/ui/window_sdl.h
+index 5079d0f..bc3e7e5 100644
+--- a/include/rex/ui/window_sdl.h
++++ b/include/rex/ui/window_sdl.h
+@@ -20,6 +20,7 @@
+ 
+ #include <SDL3/SDL.h>
+ 
++#include <rex/platform.h>
+ #include <rex/ui/window.h>
+ #include <rex/ui/windowed_app_context_sdl.h>
+ 
+@@ -43,6 +44,9 @@ class WindowSDL final : public Window {
+   void HandleMouseEvent(SDL_Event& event);
+   void HandleDropEvent(SDL_Event& event);
+   void HandlePaintEvent();
++#if REX_PLATFORM_ANDROID
++  void HandleTouchEvent(SDL_Event& event);
++#endif
+ 
+  protected:
+   uint32_t GetLatestDpiImpl() const override;
 diff --git a/include/rex/ui/windowed_app.h b/include/rex/ui/windowed_app.h
 index 50638d6..7a9f5d8 100644
 --- a/include/rex/ui/windowed_app.h
@@ -1006,6 +1028,163 @@ index 754fa13..688c3d0 100644
      REXSYS_ERROR(
          "GPU plugin '{}' not found at {}. Stage it next to the executable "
          "(GPU_PLUGINS {} in rexglue_configure_target).",
+diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
+index 6b1f6b9..117a1f2 100644
+--- a/src/system/xsocket.cpp
++++ b/src/system/xsocket.cpp
+@@ -19,6 +19,13 @@
+ // #include <rex/system/xnet.h>
+ 
+ #include <rex/net/socket.h>
++#if REX_PLATFORM_ANDROID
++#include <sys/ioctl.h>
++
++#include <atomic>
++
++#include <rex/logging.h>
++#endif
+ 
+ // Standard socket types used by Xbox API emulation
+ #if REX_PLATFORM_WIN32
+@@ -34,6 +41,94 @@
+ 
+ namespace rex::system {
+ 
++#if REX_PLATFORM_ANDROID
++namespace {
++
++// Apps may not bind ports below 1024 on Android, and the guest binds its VDP socket to port 1000.
++constexpr uint16_t kFirstUnprivilegedPort = 1024;
++constexpr uint16_t kPrivilegedPortShift = 30000;
++constexpr uint32_t kGuestSolSocket = 0xFFFF;
++
++uint16_t HostBindPort(uint16_t guest_port) {
++  if (guest_port == 0 || guest_port >= kFirstUnprivilegedPort) {
++    return guest_port;
++  }
++  return static_cast<uint16_t>(guest_port + kPrivilegedPortShift);
++}
++
++void LogShiftedPortOnce(uint16_t guest_port, uint16_t host_port) {
++  static std::atomic<bool> logged{false};
++  if (guest_port != host_port && !logged.exchange(true)) {
++    REXLOG_INFO("XSocket: guest port {} bound as host port {} (Android reserves ports below {})",
++                guest_port, host_port, kFirstUnprivilegedPort);
++  }
++}
++
++// The guest numbers SOL_SOCKET and its options the Winsock way; Linux numbers them differently.
++// Options without a Linux twin keep the guest's numbers and fail as before.
++void TranslateSocketOption(uint32_t& level, uint32_t& optname) {
++  if (level != kGuestSolSocket) {
++    return;
++  }
++  switch (optname) {
++    case 0x0004:
++      optname = SO_REUSEADDR;
++      break;
++    case 0x0008:
++      optname = SO_KEEPALIVE;
++      break;
++    case 0x0020:
++      optname = SO_BROADCAST;
++      break;
++    case 0x0100:
++      optname = SO_OOBINLINE;
++      break;
++    case 0x1001:
++      optname = SO_SNDBUF;
++      break;
++    case 0x1002:
++      optname = SO_RCVBUF;
++      break;
++    default:
++      return;
++  }
++  level = SOL_SOCKET;
++}
++
++// Winsock's FIONBIO and FIONREAD with a big-endian u_long; Linux numbers both differently and
++// takes a host int, so the guest's non-blocking request never reached the socket and the main
++// thread blocked in its first recvfrom.
++constexpr uint32_t kGuestFionbio = 0x8004667E;
++constexpr uint32_t kGuestFionread = 0x4004667F;
++
++int SetNonBlocking(int fd, const uint8_t* guest_arg) {
++  int enable = memory::load_and_swap<uint32_t>(guest_arg) != 0 ? 1 : 0;
++  return ioctl(fd, FIONBIO, &enable);
++}
++
++int ReadAvailableBytes(int fd, uint8_t* guest_arg) {
++  int available = 0;
++  const int ret = ioctl(fd, FIONREAD, &available);
++  if (ret == 0) {
++    memory::store_and_swap<uint32_t>(guest_arg, static_cast<uint32_t>(available));
++  }
++  return ret;
++}
++
++int GuestSocketIoctl(uint64_t handle, uint32_t cmd, uint8_t* arg) {
++  const int fd = static_cast<int>(handle);
++  if (cmd == kGuestFionbio) {
++    return SetNonBlocking(fd, arg);
++  }
++  if (cmd == kGuestFionread) {
++    return ReadAvailableBytes(fd, arg);
++  }
++  return rex::net::socket_ioctl(handle, cmd, arg);
++}
++
++}  // namespace
++#endif
++
+ XSocket::XSocket(KernelState* kernel_state) : XObject(kernel_state, kObjectType) {}
+ 
+ XSocket::XSocket(KernelState* kernel_state, uint64_t native_handle)
+@@ -89,7 +184,12 @@ X_STATUS XSocket::SetOption(uint32_t level, uint32_t optname, void* optval_ptr,
+     host_value = memory::load_and_swap<uint32_t>(optval_ptr);
+     value = reinterpret_cast<char*>(&host_value);
+   }
+-  int ret = setsockopt(native_handle_, level, optname, value, optlen);
++  uint32_t host_level = level;
++  uint32_t host_optname = optname;
++#if REX_PLATFORM_ANDROID
++  TranslateSocketOption(host_level, host_optname);
++#endif
++  int ret = setsockopt(native_handle_, host_level, host_optname, value, optlen);
+   if (ret < 0) {
+     // TODO: WSAGetLastError()
+     return X_STATUS_UNSUCCESSFUL;
+@@ -104,7 +204,11 @@ X_STATUS XSocket::SetOption(uint32_t level, uint32_t optname, void* optval_ptr,
+ }
+ 
+ X_STATUS XSocket::IOControl(uint32_t cmd, uint8_t* arg_ptr) {
++#if REX_PLATFORM_ANDROID
++  int ret = GuestSocketIoctl(native_handle_, cmd, arg_ptr);
++#else
+   int ret = rex::net::socket_ioctl(native_handle_, cmd, arg_ptr);
++#endif
+   if (ret < 0) {
+     // TODO: Get last error
+     return X_STATUS_UNSUCCESSFUL;
+@@ -123,7 +227,17 @@ X_STATUS XSocket::Connect(N_XSOCKADDR* name, int name_len) {
+ }
+ 
+ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
++#if REX_PLATFORM_ANDROID
++  N_XSOCKADDR_IN host_name = *name;
++  // sin_port is a be<> field, so it reads and writes in host byte order.
++  host_name.sin_port = HostBindPort(name->sin_port);
++  int ret = bind(native_handle_, (sockaddr*)&host_name, name_len);
++  if (ret >= 0) {
++    LogShiftedPortOnce(name->sin_port, host_name.sin_port);
++  }
++#else
+   int ret = bind(native_handle_, (sockaddr*)name, name_len);
++#endif
+   if (ret < 0) {
+     return X_STATUS_UNSUCCESSFUL;
+   }
 diff --git a/src/ui/CMakeLists.txt b/src/ui/CMakeLists.txt
 index 5bd3dc5..64b7f6a 100644
 --- a/src/ui/CMakeLists.txt
@@ -1088,7 +1267,7 @@ index 0000000..5cfd233
 +
 +#endif  // REX_PLATFORM_ANDROID
 diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
-index 6782cce..d12dcaf 100644
+index 6782cce..24549f8 100644
 --- a/src/ui/window_sdl.cpp
 +++ b/src/ui/window_sdl.cpp
 @@ -34,6 +34,8 @@
@@ -1100,7 +1279,49 @@ index 6782cce..d12dcaf 100644
  #else
  #include <X11/Xlib-xcb.h>
  #include <rex/ui/surface_gnulinux.h>
-@@ -447,6 +449,15 @@ std::unique_ptr<Surface> WindowSDL::CreateSurfaceImpl(Surface::TypeFlags allowed
+@@ -76,6 +78,41 @@ MouseEvent::Button TranslateSDLMouseButton(Uint8 button) {
+   }
+ }
+ 
++#if REX_PLATFORM_ANDROID
++TouchEvent::Action TranslateFingerAction(Uint32 type) {
++  switch (type) {
++    case SDL_EVENT_FINGER_DOWN:
++      return TouchEvent::Action::kDown;
++    case SDL_EVENT_FINGER_UP:
++      return TouchEvent::Action::kUp;
++    case SDL_EVENT_FINGER_CANCELED:
++      return TouchEvent::Action::kCancel;
++    case SDL_EVENT_FINGER_MOTION:
++    default:
++      return TouchEvent::Action::kMove;
++  }
++}
++
++bool IsSynthesizedMouseEvent(const SDL_Event& event) {
++  SDL_MouseID which = 0;
++  switch (event.type) {
++    case SDL_EVENT_MOUSE_MOTION:
++      which = event.motion.which;
++      break;
++    case SDL_EVENT_MOUSE_BUTTON_DOWN:
++    case SDL_EVENT_MOUSE_BUTTON_UP:
++      which = event.button.which;
++      break;
++    case SDL_EVENT_MOUSE_WHEEL:
++      which = event.wheel.which;
++      break;
++    default:
++      return false;
++  }
++  return which == SDL_TOUCH_MOUSEID || which == SDL_PEN_MOUSEID;
++}
++#endif
++
+ }  // namespace
+ 
+ std::unique_ptr<Window> Window::Create(WindowedAppContext& app_context,
+@@ -447,6 +484,15 @@ std::unique_ptr<Surface> WindowSDL::CreateSurfaceImpl(Surface::TypeFlags allowed
        SDL_Metal_DestroyView(metal_view);
      }
    }
@@ -1116,6 +1337,68 @@ index 6782cce..d12dcaf 100644
  #else
    SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window_);
    if (allowed_types & Surface::kTypeFlag_WaylandSurface) {
+@@ -598,6 +644,12 @@ void WindowSDL::HandleTextInputEvent(SDL_Event& event) {
+ }
+ 
+ void WindowSDL::HandleMouseEvent(SDL_Event& event) {
++#if REX_PLATFORM_ANDROID
++  // SDL also reports fingers and pens as mouse events; they reach listeners as TouchEvent instead.
++  if (IsSynthesizedMouseEvent(event)) {
++    return;
++  }
++#endif
+   // SDL3 reports float window coordinates; listeners expect physical pixels.
+   float density = GetPixelDensity();
+   WindowDestructionReceiver destruction_receiver(this);
+@@ -637,4 +689,22 @@ void WindowSDL::HandleMouseEvent(SDL_Event& event) {
+   }
+ }
+ 
++#if REX_PLATFORM_ANDROID
++void WindowSDL::HandleTouchEvent(SDL_Event& event) {
++  if (event.tfinger.touchID == SDL_MOUSE_TOUCHID) {
++    return;
++  }
++  TouchEvent::Action action = TranslateFingerAction(event.tfinger.type);
++  uint32_t pointer_id = uint32_t(event.tfinger.fingerID);
++  if (pointer_id == TouchEvent::kPointerIDNone) {
++    pointer_id = TouchEvent::kPointerIDNone - 1;
++  }
++  float x = event.tfinger.x * float(GetActualPhysicalWidth());
++  float y = event.tfinger.y * float(GetActualPhysicalHeight());
++  WindowDestructionReceiver destruction_receiver(this);
++  TouchEvent e(this, pointer_id, action, x, y);
++  OnTouchEvent(e, destruction_receiver);
++}
++#endif
++
+ }  // namespace rex::ui
+diff --git a/src/ui/windowed_app_context_sdl.cpp b/src/ui/windowed_app_context_sdl.cpp
+index dc0b4c2..0b8975b 100644
+--- a/src/ui/windowed_app_context_sdl.cpp
++++ b/src/ui/windowed_app_context_sdl.cpp
+@@ -175,6 +175,21 @@ void SDLWindowedAppContext::ProcessEvent(SDL_Event& event) {
+       }
+       break;
+     }
++#if REX_PLATFORM_ANDROID
++    case SDL_EVENT_FINGER_DOWN:
++    case SDL_EVENT_FINGER_UP:
++    case SDL_EVENT_FINGER_MOTION:
++    case SDL_EVENT_FINGER_CANCELED: {
++      WindowSDL* window = GetWindow(event.tfinger.windowID);
++      if (!window && windows_.size() == 1) {
++        window = windows_.begin()->second;
++      }
++      if (window) {
++        window->HandleTouchEvent(event);
++      }
++      break;
++    }
++#endif
+     default:
+       break;
+   }
 diff --git a/src/ui/windowed_app_main_sdl.cpp b/src/ui/windowed_app_main_sdl.cpp
 index 77bb1dc..b34d440 100644
 --- a/src/ui/windowed_app_main_sdl.cpp

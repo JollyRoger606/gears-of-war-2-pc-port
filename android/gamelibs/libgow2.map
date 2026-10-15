@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* Copyright (c) 2026 Santiago Quiroz Upegui and the gow2-recomp contributors */
+/* SDLActivity finds SDL_main with dlsym; nothing else is looked up in libgow2.so from outside. */
+{
+  global:
+    SDL_main;
+  local:
+    *;
+};

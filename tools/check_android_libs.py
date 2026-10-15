@@ -4,6 +4,8 @@ A release that only fails on the phone, with UnsatisfiedLinkError, a
 missing symbol or a 16 KB page-alignment crash, is slow to debug, so this
 script verifies the packaged .so files beforehand with the NDK's
 llvm-readelf and llvm-nm, resolving symbols the way Android's linker does.
+It also fails when libgow2.so exports a symbol other than SDL_main
+(--main-exports lists the allowed ones).
 
 It takes either a folder holding .so files (for example
 out/android/jniLibs/arm64-v8a) or an .apk file, in which case the
@@ -14,8 +16,8 @@ assets/licenses/LICENSE, unless --no-notices is given):
 
   python tools/check_android_libs.py <folder-or-apk> [--ndk <ndk folder>]
       [--api 29] [--expect NAME ...] [--main libgow2.so]
-      [--main-symbol SDL_main] [--sdl libSDL3.so] [--allow-system NAME ...]
-      [--no-notices]
+      [--main-symbol SDL_main] [--main-exports <name> ...] [--sdl libSDL3.so]
+      [--allow-system NAME ...] [--no-notices]
 
 Without --ndk the NDK matching android/app/build.gradle is preferred. The
 search order is: <sdk>/ndk/<ndkVersion> for each SDK root, then the
@@ -23,8 +25,9 @@ ANDROID_NDK_HOME folder, then the newest NDK under any SDK root. SDK roots
 are ANDROID_HOME, ANDROID_SDK_ROOT, sdk.dir in android/local.properties,
 then %LOCALAPPDATA%\\Android\\Sdk. Without --api the minSdk from
 android/app/build.gradle is used (29 when unset). NDKs older than r29 are
-rejected; using an NDK whose revision differs from the pinned ndkVersion
-prints a warning.
+rejected; the pin is compared with the NDK's base revision
+(Pkg.BaseRevision), so a pre-release of the pinned NDK
+(30.0.14904198-beta1 for 30.0.14904198) does not warn.
 
 Every problem is printed as an 'ERROR <lib>: <problem>' line, followed by
 a short summary. The exit code is 0 when all checks pass, 1 when any check
@@ -275,13 +278,32 @@ def android_sdk_roots(repo_root: Path | None = None) -> list[Path]:
     return roots
 
 
-def ndk_revision(ndk_dir) -> str:
+def ndk_property(ndk_dir, key: str) -> str:
     try:
         text = (Path(ndk_dir) / "source.properties").read_text(encoding="utf-8")
     except OSError:
         return ""
-    match = re.search(r"(?m)^\s*Pkg\.Revision\s*=\s*(.+?)\s*$", text)
+    match = re.search(r"(?m)^\s*" + re.escape(key) + r"\s*=\s*(.+?)\s*$", text)
     return match.group(1).strip() if match else ""
+
+
+def ndk_revision(ndk_dir) -> str:
+    return ndk_property(ndk_dir, "Pkg.Revision")
+
+
+def ndk_base_revision(ndk_dir) -> str:
+    base = ndk_property(ndk_dir, "Pkg.BaseRevision")
+    if base:
+        return base
+    # Gradle matches a pre-release NDK against the pin without the suffix.
+    return ndk_property(ndk_dir, "Pkg.Revision").split("-", 1)[0]
+
+
+def pinned_ndk_warning(ndk_dir, pinned: str) -> str:
+    if not pinned or pinned == ndk_base_revision(ndk_dir):
+        return ""
+    return (f"warning: using NDK {ndk_revision(ndk_dir)}, "
+            f"android/app/build.gradle pins {pinned}")
 
 
 def ndk_major(ndk_dir) -> int:
@@ -423,6 +445,14 @@ def check_main_library(libraries: dict, main: str, main_symbol: str) -> list[str
     return [f"{main}: {problem}" for problem in check_main_symbol(libraries[main].nm_text, main_symbol)]
 
 
+def check_main_exports(main: str, defined: set[str], allowed: set[str]) -> list[str]:
+    extra = sorted(defined - allowed)
+    if not extra:
+        return []
+    return [f"{main}: exports {len(extra)} symbol(s) besides {', '.join(sorted(allowed))} "
+            f"(first: {', '.join(extra[:5])}); android/gamelibs/libgow2.map should keep them local"]
+
+
 def check_sdl_reachable(libraries: dict, sdl: str) -> list[str]:
     needed_by = {name: library.needed for name, library in libraries.items()}
     errors = []
@@ -451,6 +481,8 @@ def check_libraries(lib_paths: list, tools: Tools, stub_dir: Path, options) -> l
     defined_by = {name: library.defined for name, library in libraries.items()}
     errors.extend(check_single_sdl(defined_by, options.sdl, options.main, options.main_symbol))
     errors.extend(check_main_library(libraries, options.main, options.main_symbol))
+    if options.main in libraries:
+        errors.extend(check_main_exports(options.main, libraries[options.main].defined, options.main_exports))
     errors.extend(check_sdl_reachable(libraries, options.sdl))
     return errors
 
@@ -505,12 +537,14 @@ def parse_options(argv: list[str]):
     parser.add_argument("--expect", nargs="*", default=None)
     parser.add_argument("--main", default="libgow2.so")
     parser.add_argument("--main-symbol", default="SDL_main")
+    parser.add_argument("--main-exports", nargs="*", default=None)
     parser.add_argument("--sdl", default="libSDL3.so")
     parser.add_argument("--allow-system", nargs="*", default=None)
     parser.add_argument("--no-notices", action="store_true")
     options = parser.parse_args(argv)
     options.expect = list(_DEFAULT_EXPECT) if options.expect is None else options.expect
     options.allowed = set(_DEFAULT_ALLOW_SYSTEM if options.allow_system is None else options.allow_system)
+    options.main_exports = set([options.main_symbol] if options.main_exports is None else options.main_exports)
     return options
 
 
@@ -542,9 +576,9 @@ def main(argv: list[str]) -> int:
     if major != 0 and major < 29:
         return usage_error(f"NDK {revision} at {ndk} is too old; NDK r29 or newer is needed")
     pinned = read_gradle_value(gradle_text(), "ndkVersion")
-    if pinned and pinned != revision:
-        print(f"check_android_libs: warning: using NDK {revision}, "
-              f"android/app/build.gradle pins {pinned}", file=sys.stderr)
+    warning = pinned_ndk_warning(ndk, pinned)
+    if warning:
+        print(f"check_android_libs: {warning}", file=sys.stderr)
     found = find_tools(ndk)
     if found is None:
         return usage_error(f"llvm-readelf/llvm-nm not found under {ndk}")

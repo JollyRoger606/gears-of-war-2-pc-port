@@ -212,6 +212,51 @@ def test_ndk_revision_and_major(tmp_path):
     assert cal.ndk_major(tmp_path / "missing") == 0
 
 
+def _write_ndk(ndk, text):
+    ndk.mkdir(parents=True)
+    (ndk / "source.properties").write_text(text, encoding="utf-8")
+    return ndk
+
+
+def test_ndk_base_revision_prefers_base_revision(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk",
+                     "Pkg.Desc = Android NDK\n"
+                     "Pkg.Revision = 30.0.14904198-beta1\n"
+                     "Pkg.BaseRevision = 30.0.14904198\n"
+                     "Pkg.ReleaseName = r30-beta1\n")
+    assert cal.ndk_base_revision(ndk) == "30.0.14904198"
+
+
+def test_ndk_base_revision_strips_suffix_without_base(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk", "Pkg.Revision = 30.0.14904198-beta1\n")
+    assert cal.ndk_base_revision(ndk) == "30.0.14904198"
+
+
+def test_ndk_base_revision_missing_file(tmp_path):
+    assert cal.ndk_base_revision(tmp_path / "missing") == ""
+
+
+def test_pinned_ndk_warning_silent_for_prerelease_of_pin(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk",
+                     "Pkg.Desc = Android NDK\n"
+                     "Pkg.Revision = 30.0.14904198-beta1\n"
+                     "Pkg.BaseRevision = 30.0.14904198\n"
+                     "Pkg.ReleaseName = r30-beta1\n")
+    assert cal.pinned_ndk_warning(ndk, "30.0.14904198") == ""
+
+
+def test_pinned_ndk_warning_for_other_ndk(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk", "Pkg.Revision = 29.0.13113456\n")
+    message = cal.pinned_ndk_warning(ndk, "30.0.14904198")
+    assert "29.0.13113456" in message
+    assert "30.0.14904198" in message
+
+
+def test_pinned_ndk_warning_without_pin(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk", "Pkg.Revision = 29.0.13113456\n")
+    assert cal.pinned_ndk_warning(ndk, "") == ""
+
+
 def test_default_ndk_dir_prefers_pinned_over_newer_and_env(tmp_path, monkeypatch):
     _clear_android_env(monkeypatch)
     _write_build_gradle(tmp_path)
@@ -293,3 +338,30 @@ def test_apk_notice_errors_missing(tmp_path):
     assert len(errors) == 2
     assert any("THIRD_PARTY_NOTICES.md" in error for error in errors)
     assert any("assets/licenses/LICENSE" in error for error in errors)
+
+
+def test_check_main_exports_accepts_only_allowed():
+    assert cal.check_main_exports("libgow2.so", {"SDL_main"}, {"SDL_main"}) == []
+
+
+def test_check_main_exports_reports_extra_symbols():
+    defined = {"SDL_main", "sub_82000000", "sub_82000010"}
+    errors = cal.check_main_exports("libgow2.so", defined, {"SDL_main"})
+    assert len(errors) == 1
+    assert "2 symbol(s)" in errors[0]
+    assert "sub_82000000" in errors[0]
+    assert "libgow2.map" in errors[0]
+
+
+def test_check_main_exports_lists_at_most_five():
+    defined = {"SDL_main"} | {f"sub_{i}" for i in range(8)}
+    errors = cal.check_main_exports("libgow2.so", defined, {"SDL_main"})
+    assert len(errors) == 1
+    assert "8 symbol(s)" in errors[0]
+    assert "sub_7" not in errors[0]
+
+
+def test_parse_options_main_exports_default():
+    assert cal.parse_options(["x"]).main_exports == {"SDL_main"}
+    options = cal.parse_options(["x", "--main-exports", "SDL_main", "JNI_OnLoad"])
+    assert options.main_exports == {"SDL_main", "JNI_OnLoad"}

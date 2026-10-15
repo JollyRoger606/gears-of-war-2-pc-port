@@ -32,6 +32,12 @@ linker resolves them (own `DT_NEEDED` closure, API-29 system stubs), that only a
 libraries are needed, that only `libSDL3.so` defines SDL, and that every segment and every library
 in the APK is 16 KB aligned.
 
+`libgow2.so` exports only `SDL_main`, which `SDLActivity` finds with `dlsym`; the version script
+`android/gamelibs/libgow2.map` keeps the recompiled code's ~98,000 symbols local. That shrank
+`libgow2.so` in the APK from 62.2 MB to 52.0 MB (APK 79.2 MB to 71.6 MB) and its load time from 10-15
+ms to 2-7 ms. The check fails if it exports anything besides `SDL_main` (`--main-exports` lists the
+allowed names).
+
 The SDK side of the port is [`sdk/patches/0007-android-arm64-port.patch`](../sdk/patches/README.md),
 applied after 0002-0006, so the Android runtime also has the Coalesced file overrides
 (`GOW2_VFS_OVERRIDES`), `pad_right_stick_deadzone` and `mnk_mouse_stick`. Every change in it is
@@ -51,7 +57,10 @@ Android-only (desktop builds unchanged). Besides the fixes listed under
 The port's Windows-only guards (`gow2_xam_input_guard.cpp`, `gow2_utf8_guard.cpp`,
 `gow2_crash_watch.cpp`) are not built for Android. Patch 0007 gives the Android runtime the
 XamInput serialization (one lock across the `InputSystem` entry points) and the non-throwing UTF-8
-decoder, and `android/gamelibs/gow2_android_glue.cpp` suppresses the disc-error box.
+decoder, and `android/gamelibs/gow2_android_glue.cpp` suppresses the disc-error box. An invalid
+byte decodes as a one-byte code point, as on Windows, not as U+FFFD. The guest XamInput entry points
+all go through the locked `InputSystem` methods. `scripts/test-android-device.ps1` checks both on
+the phone (18 checks, 0 failed on the S25 Ultra).
 
 ## What already exists
 
@@ -118,7 +127,8 @@ copy of the generated code.
    copied to app storage), controller and touch input, a separate `:game` process.
    The shell exists in [`android/`](../android/README.md), packages the game libraries with
    `-Pgow2.gameLibraries=true` and the license texts in `assets/licenses/`, and runs the game on
-   the S25 Ultra; input mapping and the `:game` process remain.
+   the S25 Ultra; input mapping and the `:game` process remain. On Android `gow2_prompts=auto`
+   keeps the controller glyphs unless a physical keyboard drives the game.
 4. **Bring-up on the S25 Ultra** with the stock driver first, then Turnip through adrenotools;
    record `vulkaninfo` for the device. Started in October 2026: with the stock driver the game
    reaches the PRESS START title screen.

@@ -61,10 +61,10 @@ index 7f1eb7f..2e761c8 100644
      UINT thread_group_count_y;
 diff --git a/include/rex/graphics/d3d12/gow2_dlss.h b/include/rex/graphics/d3d12/gow2_dlss.h
 new file mode 100644
-index 0000000..e2c249f
+index 0000000..79c2c7b
 --- /dev/null
 +++ b/include/rex/graphics/d3d12/gow2_dlss.h
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,28 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +#pragma once
 +#include <cstdint>
@@ -74,7 +74,8 @@ index 0000000..e2c249f
 +namespace rex::graphics::d3d12::gow2 {
 +
 +struct DlssEval {
-+  ID3D12Resource* color = nullptr;   // SRV state, render-size region at the top-left
++  // SRV state, typed format (NGX cannot view a TYPELESS frame), render-size region at the top-left
++  ID3D12Resource* color = nullptr;
 +  ID3D12Resource* depth = nullptr;   // SRV state (inverted depth)
 +  ID3D12Resource* motion = nullptr;  // SRV state, RG16F pixels, current -> previous
 +  ID3D12Resource* output = nullptr;  // UAV state
@@ -94,10 +95,10 @@ index 0000000..e2c249f
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/include/rex/graphics/d3d12/gow2_fsr.h b/include/rex/graphics/d3d12/gow2_fsr.h
 new file mode 100644
-index 0000000..30056b4
+index 0000000..6b0f165
 --- /dev/null
 +++ b/include/rex/graphics/d3d12/gow2_fsr.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,33 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +#pragma once
 +#include <cstdint>
@@ -108,6 +109,7 @@ index 0000000..30056b4
 +
 +struct FsrEval {
 +  ID3D12Resource* color = nullptr;   // SRV state, render region at the top-left
++  DXGI_FORMAT color_format = DXGI_FORMAT_UNKNOWN;  // typed view of color (UpscalerColorFormat)
 +  ID3D12Resource* depth = nullptr;   // SRV state, inverted depth (1 - z)
 +  ID3D12Resource* motion = nullptr;  // SRV state, render-size RG16F pixels, current -> previous
 +  ID3D12Resource* output = nullptr;  // UAV state, full output size
@@ -132,10 +134,10 @@ index 0000000..30056b4
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/include/rex/graphics/d3d12/gow2_temporal.h b/include/rex/graphics/d3d12/gow2_temporal.h
 new file mode 100644
-index 0000000..87cafcb
+index 0000000..eb01b2f
 --- /dev/null
 +++ b/include/rex/graphics/d3d12/gow2_temporal.h
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,122 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +#pragma once
 +// Project-local temporal-upscaling support for the D3D12 backend (Gears of War 2).
@@ -236,6 +238,10 @@ index 0000000..87cafcb
 +// Upscaler (DLSS) hooks. UpscaleEnabled(): cvar gow2_dlss && temporal pipeline on.
 +bool UpscaleEnabled();
 +void NoteDepthTexture(ID3D12Resource* depth);
++// Typed view format both upscalers read the finished frame with: the frame texture is TYPELESS
++// (Gears of War 2: R8G8B8A8_TYPELESS) and neither NGX nor FidelityFX can view that.
++// DXGI_FORMAT_UNKNOWN = a frame format the upscalers do not take.
++DXGI_FORMAT UpscalerColorFormat(DXGI_FORMAT frame_format);
 +// End-of-frame upscaling. Called at the swap with the finished guest frame (colour: the frontbuffer
 +// texture, in_w x in_h active pixels). On success the upscaled picture is in `out` (output size,
 +// R10G10B10A2, ready to be sampled) and the presenter should use it instead of the guest frame.
@@ -762,10 +768,10 @@ index 0000000..0fecf91
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/src/graphics/d3d12/gow2_fsr.cpp b/src/graphics/d3d12/gow2_fsr.cpp
 new file mode 100644
-index 0000000..da6cd4a
+index 0000000..5bbb6b3
 --- /dev/null
 +++ b/src/graphics/d3d12/gow2_fsr.cpp
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,237 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +// AMD FidelityFX Super Resolution backend for the temporal pipeline. Nothing from AMD is
 +// redistributed: amd_fidelityfx_loader_dx12.dll (and the upscaler provider next to it) are loaded
@@ -820,6 +826,19 @@ index 0000000..da6cd4a
 +  ffxCreateBackendDX12Desc be{};
 +  ffxOverrideVersion ov{};
 +};
++
++// Provider names are bare versions such as "4.1.1"; older loaders prefix them ("FSR 3.1.5").
++int VersionMajor(const std::string& name) {
++  size_t i = 0;
++  while (i < name.size() && (name[i] < '0' || name[i] > '9')) ++i;
++  if (i == name.size()) return -1;
++  int major = 0;
++  while (i < name.size() && name[i] >= '0' && name[i] <= '9') {
++    major = major * 10 + (name[i] - '0');
++    ++i;
++  }
++  return major;
++}
 +}  // namespace
 +
 +bool FsrInit(ID3D12Device* device) {
@@ -865,10 +884,7 @@ index 0000000..da6cd4a
 +      for (uint64_t i = 0; i < cap; ++i) {
 +        g_versions.push_back({ids[i], names[i] ? names[i] : ""});
 +        REXGPU_WARN("FSR provider {}: id=0x{:X} '{}'", i, ids[i], names[i] ? names[i] : "?");
-+        std::string nm = names[i] ? names[i] : "";
-+        if (nm.find("4.") != std::string::npos && nm.find("FSR") != std::string::npos &&
-+            nm.find("3.") == std::string::npos)
-+          g_fsr4 = true;
++        if (VersionMajor(names[i] ? names[i] : "") == 4) g_fsr4 = true;
 +      }
 +    }
 +  }
@@ -895,12 +911,10 @@ index 0000000..da6cd4a
 +  c.be.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
 +  c.be.device = g_device;
 +  c.up.header.pNext = &c.be.header;
-+  // Pick a provider by major version (names look like "FSR 3.1.5" / "FSR 4.0.2").
++  // Pick a provider by major version (names look like "4.1.1" or "FSR 3.1.5").
 +  uint64_t chosen = 0;
 +  for (const Version& v : g_versions) {
-+    const size_t p = v.name.find_first_of("0123456789");
-+    if (p == std::string::npos) continue;
-+    int major = v.name[p] - '0';
++    const int major = VersionMajor(v.name);
 +    if (major == e.wanted_major) {
 +      chosen = v.id;
 +      g_provider = v.name;
@@ -929,6 +943,16 @@ index 0000000..da6cd4a
 +  return true;
 +}
 +
++static bool CreateCtxWithFallback(const FsrEval& e) {
++  if (CreateCtx(e)) return true;
++  if (e.wanted_major != 4) return false;
++  REXGPU_WARN("FSR: FSR 4 context failed, falling back to FSR 3.1");
++  g_fsr4 = false;
++  FsrEval fallback = e;
++  fallback.wanted_major = 3;
++  return CreateCtx(fallback);
++}
++
 +bool FsrEvaluate(ID3D12GraphicsCommandList* list, const FsrEval& e) {
 +  if (!g_ok) return false;
 +  if (!g_ctx || g_rw != e.render_w || g_rh != e.render_h || g_ow != e.out_w || g_oh != e.out_h ||
@@ -937,7 +961,7 @@ index 0000000..da6cd4a
 +      g_fn.DestroyContext(&g_ctx, nullptr);
 +      g_ctx = nullptr;
 +    }
-+    if (!CreateCtx(e)) return false;
++    if (!CreateCtxWithFallback(e)) return false;
 +  }
 +  ffxDispatchDescUpscale d{};
 +  d.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
@@ -946,8 +970,7 @@ index 0000000..da6cd4a
 +  d.depth = ffxApiGetResourceDX12(e.depth, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 +  d.motionVectors = ffxApiGetResourceDX12(e.motion, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 +  d.output = ffxApiGetResourceDX12(e.output, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
-+  // The guest scene colour is created TYPELESS; give FidelityFX a concrete format to view it with.
-+  d.color.description.format = FFX_API_SURFACE_FORMAT_R10G10B10A2_UNORM;
++  d.color.description.format = ffxApiGetSurfaceFormatDX12(e.color_format);
 +  d.jitterOffset = {e.jitter_x, e.jitter_y};
 +  d.motionVectorScale = {1.0f, 1.0f};
 +  d.renderSize = {e.render_w, e.render_h};
@@ -1365,10 +1388,10 @@ index 0000000..0619953
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/src/graphics/d3d12/gow2_upscale.cpp b/src/graphics/d3d12/gow2_upscale.cpp
 new file mode 100644
-index 0000000..362a89d
+index 0000000..cc7460f
 --- /dev/null
 +++ b/src/graphics/d3d12/gow2_upscale.cpp
-@@ -0,0 +1,673 @@
+@@ -0,0 +1,766 @@
 +// Adapted from gears-judgement-recomp (BSD-3-Clause).
 +// Temporal upscaler pass runner: camera motion vectors -> DLSS -> write back into the scene colour
 +// texture, all recorded as one callback in the guest command stream.
@@ -1404,6 +1427,9 @@ index 0000000..362a89d
 +REXCVAR_DEFINE_INT32(gow2_mv_debug, 0, "gfx",
 +                     "1 = write the motion vectors into the scene colour instead of the upscaled "
 +                     "image (debug), 2 = bypass (copy input colour back)");
++REXCVAR_DEFINE_BOOL(gow2_upscale_typed_copy, false, "gfx",
++                    "Give FSR the same typed copy of the frame that DLSS always reads (debug: "
++                    "exercises the DLSS input path on any GPU)");
 +
 +REXCVAR_DECLARE(int32_t, gow2_vp_register);
 +REXCVAR_DECLARE(int32_t, gow2_campos_register);
@@ -1464,6 +1490,7 @@ index 0000000..362a89d
 +
 +struct Job {
 +  ComPtr<ID3D12Resource> color, depth;
++  DXGI_FORMAT color_format = DXGI_FORMAT_UNKNOWN;  // typed view format of color
 +  float inv_vp[16], prev_vp[16], tdelta[3];
 +  uint32_t rw, rh, ow, oh;
 +  float jx, jy;
@@ -1478,6 +1505,7 @@ index 0000000..362a89d
 +  ID3D12Resource* mv = nullptr;   // owned by g_mv
 +  ID3D12Resource* out = nullptr;     // owned by g.out
 +  ID3D12Resource* final_ = nullptr;  // owned by g.final_: what the presenter shows
++  ID3D12Resource* color_typed = nullptr;  // owned by g.color_typed: typed copy of color, or null
 +  uint64_t submission = 0;
 +};
 +
@@ -1491,6 +1519,9 @@ index 0000000..362a89d
 +  bool keep_alpha = false;
 +  ComPtr<ID3D12Resource> mv, out, final_;
 +  uint32_t mv_w = 0, mv_h = 0, out_w = 0, out_h = 0;
++  ComPtr<ID3D12Resource> color_typed;
++  uint32_t color_typed_w = 0, color_typed_h = 0;
++  DXGI_FORMAT color_typed_format = DXGI_FORMAT_UNKNOWN;
 +  D3D12_RESOURCE_STATES mv_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 +  D3D12_RESOURCE_STATES out_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 +  uint32_t slice = 0;
@@ -1500,6 +1531,7 @@ index 0000000..362a89d
 +  uint64_t depth_area = 0;
 +  uint32_t last_frame = 0;
 +  bool dlss_failed = false;
++  bool fsr_failed = false;
 +};
 +Gpu g;
 +constexpr uint32_t kSlices = 8;
@@ -1599,7 +1631,9 @@ index 0000000..362a89d
 +}
 +
 +ComPtr<ID3D12Resource> MakeTex(ID3D12Device* dev, uint32_t w, uint32_t h, DXGI_FORMAT fmt,
-+                               D3D12_RESOURCE_STATES state) {
++                               D3D12_RESOURCE_STATES state,
++                               D3D12_RESOURCE_FLAGS flags =
++                                   D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) {
 +  D3D12_HEAP_PROPERTIES hp = {};
 +  hp.Type = D3D12_HEAP_TYPE_DEFAULT;
 +  D3D12_RESOURCE_DESC d = {};
@@ -1610,7 +1644,7 @@ index 0000000..362a89d
 +  d.MipLevels = 1;
 +  d.Format = fmt;
 +  d.SampleDesc.Count = 1;
-+  d.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
++  d.Flags = flags;
 +  ComPtr<ID3D12Resource> r;
 +  if (FAILED(dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &d, state, nullptr,
 +                                          IID_PPV_ARGS(&r))))
@@ -1628,6 +1662,54 @@ index 0000000..362a89d
 +  br.Transition.StateBefore = a;
 +  br.Transition.StateAfter = b;
 +  l->ResourceBarrier(1, &br);
++}
++
++// NGX views its inputs with the resource's own format, so a TYPELESS frame needs a typed copy.
++bool NeedsTypedColorCopy(int backend, DXGI_FORMAT frame_format, DXGI_FORMAT view_format) {
++  if (frame_format == view_format) return false;
++  return backend == 0 || REXCVAR_GET(gow2_upscale_typed_copy);
++}
++
++void CopyFrameRegion(ID3D12GraphicsCommandList* l, ID3D12Resource* src, ID3D12Resource* dst,
++                     uint32_t w, uint32_t h) {
++  Barrier(l, src, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
++  Barrier(l, dst, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
++  D3D12_TEXTURE_COPY_LOCATION src_loc = {};
++  src_loc.pResource = src;
++  src_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++  src_loc.SubresourceIndex = 0;
++  D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
++  dst_loc.pResource = dst;
++  dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++  dst_loc.SubresourceIndex = 0;
++  D3D12_BOX box = {0, 0, 0, w, h, 1};
++  l->CopyTextureRegion(&dst_loc, 0, 0, 0, &src_loc, &box);
++  Barrier(l, dst, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++  Barrier(l, src, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++}
++
++ID3D12Resource* TypedColorCopy(D3D12CommandProcessor& cp, uint32_t w, uint32_t h,
++                               DXGI_FORMAT format) {
++  if (!g.color_typed || g.color_typed_w != w || g.color_typed_h != h ||
++      g.color_typed_format != format) {
++    if (g.color_typed) g.graveyard.emplace_back(cp.GetCurrentSubmission(), g.color_typed);
++    g.color_typed = MakeTex(g.device.Get(), w, h, format,
++                            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
++                            D3D12_RESOURCE_FLAG_NONE);
++    g.color_typed_w = w;
++    g.color_typed_h = h;
++    g.color_typed_format = format;
++  }
++  return g.color_typed.Get();
++}
++
++void LogTypedColorCopyOnce(DXGI_FORMAT frame_format, DXGI_FORMAT view_format, uint32_t w,
++                           uint32_t h) {
++  static bool logged = false;
++  if (logged) return;
++  logged = true;
++  REXGPU_WARN("GOW2 upscale: the upscaler reads a typed copy of the frame (dxgi {} -> {}, {}x{})",
++              uint32_t(frame_format), uint32_t(view_format), w, h);
 +}
 +
 +bool Invert4x4(const double m[16], double out[16]) {
@@ -1671,6 +1753,14 @@ index 0000000..362a89d
 +  return true;
 +}
 +
++// Job backend: 0 = DLSS, 1 = FSR.
++void MarkBackendFailed(int job_backend) {
++  if (job_backend == 0)
++    g.dlss_failed = true;
++  else
++    g.fsr_failed = true;
++}
++
 +void RunJob(ID3D12GraphicsCommandList* list, void* user) {
 +  Job& j = *static_cast<Job*>(user);
 +  const D3D12_RESOURCE_STATES kSrv =
@@ -1700,9 +1790,15 @@ index 0000000..362a89d
 +  bool have_out = false;
 +  if (j.debug != 1 && j.debug != 2) {
 +    // 2. The temporal upscaler (DLSS or FSR).
++    ID3D12Resource* color = j.color.Get();
++    if (j.color_typed) {
++      CopyFrameRegion(list, color, j.color_typed, j.rw, j.rh);
++      color = j.color_typed;
++    }
 +    if (j.backend == 1) {
 +      FsrEval e;
-+      e.color = j.color.Get();
++      e.color = color;
++      e.color_format = j.color_format;
 +      e.depth = j.depth.Get();
 +      e.motion = j.mv;
 +      e.output = j.out;
@@ -1720,7 +1816,7 @@ index 0000000..362a89d
 +      have_out = FsrEvaluate(list, e);
 +    } else {
 +      DlssEval e;
-+      e.color = j.color.Get();
++      e.color = color;
 +      e.depth = j.depth.Get();
 +      e.motion = j.mv;
 +      e.output = j.out;
@@ -1735,7 +1831,7 @@ index 0000000..362a89d
 +      e.quality = j.quality;
 +      have_out = DlssEvaluate(list, e);
 +    }
-+    if (!have_out) g.dlss_failed = true;
++    if (!have_out) MarkBackendFailed(j.backend);
 +  }
 +  // The upscaler (NGX / FidelityFX) rebinds its own heaps and root signature.
 +  list->SetDescriptorHeaps(1, heaps);
@@ -1774,6 +1870,11 @@ index 0000000..362a89d
 +  return REXCVAR_GET(gow2_dlss) ? 1 : 0;
 +}
 +
++// Selection as SelectedBackend() returns it: 1 = DLSS, 2/3 = FSR.
++static bool BackendFailed(int backend_sel) {
++  return backend_sel == 1 ? g.dlss_failed : g.fsr_failed;
++}
++
 +int SelectedUpscaler() { return SelectedBackend(); }
 +
 +bool UpscaleEnabled() { return SelectedBackend() != 0; }
@@ -1783,6 +1884,22 @@ index 0000000..362a89d
 +  *rw = out_w;
 +  *rh = out_h;
 +  return false;  // the whole guest frame is rendered at the render size; nothing is shrunk any more
++}
++
++DXGI_FORMAT UpscalerColorFormat(DXGI_FORMAT frame_format) {
++  switch (frame_format) {
++    case DXGI_FORMAT_R10G10B10A2_TYPELESS:
++    case DXGI_FORMAT_R10G10B10A2_UNORM:
++      return DXGI_FORMAT_R10G10B10A2_UNORM;
++    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
++    case DXGI_FORMAT_R8G8B8A8_UNORM:
++      return DXGI_FORMAT_R8G8B8A8_UNORM;
++    case DXGI_FORMAT_B8G8R8A8_TYPELESS:
++    case DXGI_FORMAT_B8G8R8A8_UNORM:
++      return DXGI_FORMAT_B8G8R8A8_UNORM;
++    default:
++      return DXGI_FORMAT_UNKNOWN;
++  }
 +}
 +
 +// The game resolves depth more than once per frame (the full-size scene depth, then smaller copies
@@ -1841,7 +1958,7 @@ index 0000000..362a89d
 +  g.depth_tex.Reset();
 +  g.depth_area = 0;
 +  if (!UpscaleEnabled()) return false;
-+  if (g.dlss_failed) {
++  if (BackendFailed(SelectedBackend())) {
 +    SetUpscaleStatus("Upscaler: failed (see log)");
 +    return false;
 +  }
@@ -1855,20 +1972,13 @@ index 0000000..362a89d
 +  if (!InitGpu(cp)) return false;
 +
 +  D3D12_RESOURCE_DESC cd = color->GetDesc();
-+  switch (cd.Format) {
-+    case DXGI_FORMAT_R10G10B10A2_UNORM:
-+    case DXGI_FORMAT_R10G10B10A2_TYPELESS:
-+    case DXGI_FORMAT_R8G8B8A8_UNORM:
-+    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
-+    case DXGI_FORMAT_B8G8R8A8_UNORM:
-+    case DXGI_FORMAT_B8G8R8A8_TYPELESS:
-+      break;
-+    default: {
-+      static int bad = 0;
-+      if (bad++ < 3)
-+        REXGPU_WARN("GOW2 upscale: skipping, the frame has an unsupported format (dxgi {})", uint32_t(cd.Format));
-+      return false;
-+    }
++  const DXGI_FORMAT color_format = UpscalerColorFormat(cd.Format);
++  if (color_format == DXGI_FORMAT_UNKNOWN) {
++    static int bad = 0;
++    if (bad++ < 3)
++      REXGPU_WARN("GOW2 upscale: skipping, the frame has an unsupported format (dxgi {})",
++                  uint32_t(cd.Format));
++    return false;
 +  }
 +  D3D12_RESOURCE_DESC dd = frame_depth->GetDesc();
 +  {
@@ -1895,7 +2005,7 @@ index 0000000..362a89d
 +    }
 +  } else {
 +    if (!FsrInit(g.device.Get())) {
-+      g.dlss_failed = true;
++      g.fsr_failed = true;
 +      SetUpscaleStatus("FSR: unavailable (amd_fidelityfx_loader_dx12.dll / upscaler DLL missing)");
 +      return false;
 +    }
@@ -1944,6 +2054,12 @@ index 0000000..362a89d
 +  job->quality = mode;
 +  job->backend = backend_sel == 1 ? 0 : 1;
 +  job->fsr_major = (backend_sel == 3 && FsrHasFsr4()) ? 4 : 3;
++  job->color_format = color_format;
++  if (NeedsTypedColorCopy(job->backend, cd.Format, color_format)) {
++    job->color_typed = TypedColorCopy(cp, rw, rh, color_format);
++    if (!job->color_typed) return false;
++    LogTypedColorCopyOnce(cd.Format, color_format, rw, rh);
++  }
 +  {
 +    const float f = cam.c[2][1] > 1e-3f ? cam.c[2][1] : 2.0f;  // world-z scale of clip.y
 +    job->fov_y = 2.0f * std::atan(1.0f / f);

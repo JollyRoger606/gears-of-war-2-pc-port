@@ -23,6 +23,11 @@
 #include "gow2_utf8_guard.h"
 #include "gow2_xam_input_guard.h"
 
+#if defined(__ANDROID__)
+#include "gow2_android_devices.h"
+#include "gow2_touch_controls.h"
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #include <shobjidl.h>
@@ -247,10 +252,31 @@ class Gow2App : public rex::ReXApp {
   // XEX is in memory and before any game code runs.
   void OnPostLoadXexImage() override { rex::glue::PatchHashSec(coalesced_hashes_); }
 
+#if defined(__ANDROID__)
+  // On a phone the keyboard/mouse driver runs only when a keyboard or mouse is attached at launch;
+  // a mouse also turns the camera (through the native mouse path when gow2_mouse_aim allows it).
+  static void UseAttachedKeyboardAndMouse() {
+    const bool keyboard = rex::glue::PhysicalKeyboardConnected();
+    const bool mouse = rex::glue::ExternalMouseConnected();
+    if (keyboard || mouse) SetIfUnset("mnk_mode", "true");
+    if (mouse) SetIfUnset("mnk_mouse", "true");
+    REXLOG_INFO("INPUTDEV keyboard {}, mouse {} -> mnk_mode {}, mnk_mouse {}",
+                keyboard ? "connected" : "not connected", mouse ? "connected" : "not connected",
+                rex::cvar::Query<bool>("mnk_mode") ? "on" : "off",
+                rex::cvar::Query<bool>("mnk_mouse") ? "on" : "off");
+  }
+
+  void AddTouchControls(rex::RuntimeConfig& config) {
+    touch_ = rex::glue::CreateTouchControls(rex::glue::TouchscreenPresent());
+    rex::glue::AddTouchDriver(config, touch_);
+  }
+#endif
+
   void OnPreSetup(rex::RuntimeConfig& config) override {
-#if !defined(__ANDROID__)
-    // Not on Android: the keyboard/mouse driver's synthetic device would take guest user 0 on a
-    // phone without a keyboard and never send input; there only pads (and touch) are devices.
+#if defined(__ANDROID__)
+    UseAttachedKeyboardAndMouse();
+    AddTouchControls(config);
+#else
     SetIfUnset("mnk_mode", "true");
 #endif
     rex::glue::PrepareNativeMouseAim();
@@ -292,7 +318,12 @@ class Gow2App : public rex::ReXApp {
   // void OnPostInitLogging() override {}
   // void OnLoadXexImage(std::string& xex_image) override {}
   void OnPostSetup() override { rex::glue::InstallNativeMouseAim(window()); }
-  // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
+#if defined(__ANDROID__)
+  void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
+    touch_overlay_ = rex::glue::CreateTouchOverlay(drawer, touch_);
+  }
+  void OnShutdown() override { touch_overlay_.reset(); }
+#endif
   // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
   // std::unique_ptr<rex::ui::AchievementNotificationDialog>
   // CreateAchievementNotificationDialog() override;
@@ -302,4 +333,8 @@ class Gow2App : public rex::ReXApp {
   std::filesystem::path game_data_root_;
   std::filesystem::path cache_root_;
   std::vector<rex::glue::HashSecEntry> coalesced_hashes_;
+#if defined(__ANDROID__)
+  std::shared_ptr<rex::glue::TouchControls> touch_;
+  std::unique_ptr<rex::ui::ImGuiDialog> touch_overlay_;
+#endif
 };

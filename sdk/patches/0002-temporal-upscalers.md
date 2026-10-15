@@ -72,7 +72,8 @@ The reference hardcodes Judgment's vertex-shader constant layout. Gears of War 2
   `gow2_upscale_quality` (-1 auto, 0/1/2/3/4/5), `gow2_render_scale`,
   `gow2_dlss` (legacy bool), `gow2_dlss_hdr`, `gow2_mv_debug`,
   `gow2_jitter_scale`, `gow2_jitter_phases`, `gow2_vp_register`,
-  `gow2_campos_register`, `gow2_upscale_status` (set by the plugin for the FPS
+  `gow2_campos_register`, `gow2_upscale_typed_copy` (debug: FSR reads the typed
+  copy DLSS gets), `gow2_upscale_status` (set by the plugin for the FPS
   overlay). New env vars: `GOW2_TARGET_W/H` (output size, required),
   `GOW2_HOME` (vendor-DLL folder for single-file layouts), `GOW2_D3D12_DEBUG`,
   `GOW2_FSR_DEBUG`; trigger files `gow2_trace.now`, `gow2_dump.now`, `gow2_shot.now`.
@@ -117,3 +118,26 @@ and measured GoW2 render sizes replacing Judgment's 720p/1440p assumptions.
   `amd_fidelityfx_loader_dx12.dll` / `amd_fidelityfx_upscaler_dx12.dll`
   (`signedbin`) into `out\sdk\`. The patch is self-contained (new files are
   part of the diff, no separate files-copy step).
+
+## Verified in game (2026-10-14, Radeon RX 7800 XT, `resolution_scale = 1`)
+
+- The FidelityFX SDK v2.3.0 loader lists its providers by bare version: `4.1.1`, `3.1.5`,
+  `2.3.4`. The FSR 4 test looked for "FSR" in the name, so `gow2_upscaler = fsr4` ran FSR 3.1;
+  the major version is now parsed from the first number. FSR 4.1.1 creates its context on
+  RDNA 3 (`FSR: context created '4.1.1' render 1280x704 -> 2560x1408`); if it ever fails, the
+  plugin falls back to FSR 3.1 instead of turning the upscaler off.
+- Gears of War 2's finished frame is `R8G8B8A8_TYPELESS` (dxgi 27), not 10:10:10:2.
+  `UpscalerColorFormat` is the one TYPELESS -> typed mapping both backends use: FidelityFX gets
+  it as the view format. NGX's D3D12 evaluate takes bare resources and views them with their own
+  format, so DLSS reads a typed copy of the render region instead (`CopyTextureRegion` into an
+  `R8G8B8A8_UNORM` texture; log `the upscaler reads a typed copy of the frame (dxgi 27 -> 28,
+  1280x704)`). DLSS itself has not run on NVIDIA hardware yet. `gow2_upscale_typed_copy = true`
+  gives FSR the same copy so that input path can be checked on any GPU: with it on, FSR 4's
+  image matches the direct read (mean RGB within 0.2 levels, same frame-to-frame difference).
+- `gow2_upscaler = auto` falls back to FSR 3.1 when DLSS is unavailable. One flag used to mean
+  both "DLSS failed" and "stop upscaling", so on this AMD card `auto` logged `DLSS: NGX init
+  failed 0xBAD00001` and then `Upscaler: failed` for good; each backend now has its own failure
+  flag and the next frame creates `FSR: context created '3.1.5'`.
+- Scene detection at scale 1: frame and depth are both 1280x704 (depth dxgi 41), the output is
+  the monitor size at the frame's aspect (2560x1408 on 2560x1440). Colours match the
+  upscaler-off image (mean RGB within one level) and the HUD stays sharp while turning.

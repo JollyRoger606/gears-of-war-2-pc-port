@@ -7,8 +7,10 @@
   0. SDK sources: clones ReXGlue 923c1a5 into out\sdk-android-src and applies every
      sdk\patches\*.patch (0007 is the Android port), like scripts\build-sdk.ps1 does for
      Windows; prepared again whenever a patch changes. -SdkSource uses your own tree instead.
-  1. Codegen: when generated\default is missing (or with -Codegen), runs the Windows SDK's
-     `rexglue codegen` on game\default.xex, like scripts\build.ps1.
+  1. Codegen: when generated\default is missing, when gow2_manifest.toml or game\default.xex
+     is newer than generated\default\sources.cmake and -Sdk is given (otherwise it warns and
+     builds the existing code), or with -Codegen, runs the Windows SDK's `rexglue codegen`
+     on game\default.xex, like scripts\build.ps1.
   2. Android sources: tools\prepare_android_sources.py copies generated\default to
      out\android\generated\default and applies the switch-trap, game and ARM memory-barrier
      patches to the copy (generated\default itself is never patched for ARM).
@@ -33,11 +35,12 @@
   Windows ReXGlue SDK folder with bin\rexglue.exe; only needed for codegen. Or set REXGLUE_SDK.
 
 .PARAMETER Ndk
-  Android NDK folder (r29 or newer). Default: ANDROID_NDK_HOME, else the newest NDK under
-  %LOCALAPPDATA%\Android\Sdk\ndk.
+  Android NDK folder (r29 or newer). Default: ndk\<ndkVersion of android\app\build.gradle>
+  under ANDROID_HOME, ANDROID_SDK_ROOT, sdk.dir of android\local.properties or
+  %LOCALAPPDATA%\Android\Sdk; else ANDROID_NDK_HOME; else the newest NDK under those SDK folders.
 
 .PARAMETER Api
-  minSdk / ANDROID_PLATFORM level. Default 29, the app's minSdk.
+  Must equal minSdk in android\app\build.gradle, which is the default; the build stops when it differs.
 
 .PARAMETER Jobs
   Parallel compile jobs. Default: the number of logical processors.
@@ -67,7 +70,7 @@ param(
     [string]$SdkSource = $env:REXGLUE_SDK_ANDROID,
     [string]$Sdk = $env:REXGLUE_SDK,
     [string]$Ndk = '',
-    [int]$Api = 29,
+    [int]$Api = 0,
     [int]$Jobs = 0,
     [switch]$Codegen,
     [switch]$Reconfigure,
@@ -106,23 +109,88 @@ $SdkTreeMarkers = @(
 function Fail($msg) { Write-Host "BUILD FAILED: $msg" -ForegroundColor Red; exit 1 }
 function Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
 
-function Find-Ndk {
+function Read-GradleValue([string]$name) {
+    $gradle = Join-Path $root 'android\app\build.gradle'
+    if (-not (Test-Path $gradle)) { return '' }
+    $text = Get-Content $gradle -Raw
+    $match = [regex]::Match($text, '(?m)^\s*' + [regex]::Escape($name) + '\b\s*=?\s*[''"]?([^''"\s]+)')
+    if ($match.Success) { return $match.Groups[1].Value }
+    return ''
+}
+
+function Get-AndroidSdkRoots {
+    $candidates = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT)
+    $props = Join-Path $root 'android\local.properties'
+    if (Test-Path $props) {
+        $match = [regex]::Match((Get-Content $props -Raw), '(?m)^\s*sdk\.dir\s*=\s*(.+?)\s*$')
+        if ($match.Success) {
+            $candidates += $match.Groups[1].Value.Trim().Replace('\:', ':').Replace('\\', '\')
+        }
+    }
+    if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA 'Android\Sdk') }
+    $roots = @()
+    $seen = @{}
+    foreach ($candidate in $candidates) {
+        if (-not $candidate) { continue }
+        if (-not (Test-Path $candidate)) { continue }
+        $full = (Resolve-Path $candidate).Path
+        $key = $full.ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $roots += $full
+        }
+    }
+    return $roots
+}
+
+function Find-Ndk([string]$pinned) {
+    $roots = Get-AndroidSdkRoots
+    if ($pinned) {
+        foreach ($sdkRoot in $roots) {
+            $candidate = Join-Path (Join-Path $sdkRoot 'ndk') $pinned
+            if (Test-Path $candidate) { return $candidate }
+        }
+    }
     if ($env:ANDROID_NDK_HOME -and (Test-Path $env:ANDROID_NDK_HOME)) { return $env:ANDROID_NDK_HOME }
-    $base = Join-Path $env:LOCALAPPDATA 'Android\Sdk\ndk'
-    $latest = Get-ChildItem $base -Directory -ErrorAction SilentlyContinue |
-        Sort-Object { [version]($_.Name -replace '[^0-9.].*$', '') } -Descending | Select-Object -First 1
-    if ($latest) { return $latest.FullName }
+    $best = $null
+    $bestVersion = $null
+    foreach ($sdkRoot in $roots) {
+        $dirs = Get-ChildItem (Join-Path $sdkRoot 'ndk') -Directory -ErrorAction SilentlyContinue
+        foreach ($dir in $dirs) {
+            try { $ver = [version]($dir.Name -replace '[^0-9.].*$', '') } catch { continue }
+            if (($null -eq $bestVersion) -or ($ver -gt $bestVersion)) {
+                $bestVersion = $ver
+                $best = $dir.FullName
+            }
+        }
+    }
+    if ($best) { return $best }
     return $null
 }
 
 function Find-AndroidSdk([string]$ndk) {
-    foreach ($candidate in @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, (Join-Path $env:LOCALAPPDATA 'Android\Sdk'))) {
-        if ($candidate -and (Test-Path (Join-Path $candidate 'platforms'))) { return $candidate }
+    foreach ($sdkRoot in (Get-AndroidSdkRoots)) {
+        if (Test-Path (Join-Path $sdkRoot 'platforms')) { return $sdkRoot }
     }
     # An NDK installed by the SDK manager lives in <sdk>\ndk\<version>.
     $fromNdk = Split-Path (Split-Path $ndk -Parent) -Parent
     if (Test-Path (Join-Path $fromNdk 'platforms')) { return $fromNdk }
     return $null
+}
+
+function Read-NdkRevision([string]$ndk) {
+    $revision = ''
+    $base = ''
+    $props = Join-Path $ndk 'source.properties'
+    if (Test-Path $props) {
+        $text = Get-Content $props -Raw
+        $match = [regex]::Match($text, '(?m)^\s*Pkg\.Revision\s*=\s*(.+?)\s*$')
+        if ($match.Success) { $revision = $match.Groups[1].Value.Trim() }
+        $matchBase = [regex]::Match($text, '(?m)^\s*Pkg\.BaseRevision\s*=\s*(.+?)\s*$')
+        if ($matchBase.Success) { $base = $matchBase.Groups[1].Value.Trim() }
+        elseif ($revision) { $base = $revision -replace '-.*$', '' }
+    }
+    return @{ Revision = $revision; Base = $base }
 }
 
 function Find-Python {
@@ -223,6 +291,74 @@ function Write-LocalProperties([string]$androidSdk) {
     Write-Host "  wrote android\local.properties (sdk.dir=$androidSdk)"
 }
 
+function Get-StaleCodegenInputs([string]$sources) {
+    $stale = @()
+    $sourcesTime = (Get-Item $sources).LastWriteTimeUtc
+    foreach ($name in @('gow2_manifest.toml', 'game\default.xex')) {
+        if (-not (Test-Path $name)) { continue }
+        if ((Get-Item $name).LastWriteTimeUtc -gt $sourcesTime) { $stale += $name }
+    }
+    return $stale
+}
+
+function Test-CodegenToolsPresent([string]$sdk) {
+    if (-not $sdk) { return $false }
+    if (-not (Test-Path (Join-Path $sdk 'bin\rexglue.exe'))) { return $false }
+    if (-not (Test-Path 'game\default.xex')) { return $false }
+    return $true
+}
+
+function Invoke-Codegen([string]$reason) {
+    Step "Generating C++ from default.xex ($reason)"
+    if (-not $Sdk) { Fail "Codegen ($reason) needs the Windows ReXGlue SDK: give -Sdk <folder> (bin\rexglue.exe) or set REXGLUE_SDK." }
+    $rexglue = Join-Path $Sdk 'bin\rexglue.exe'
+    if (-not (Test-Path $rexglue)) { Fail "rexglue.exe not found in $Sdk\bin." }
+    if (-not (Test-Path 'game\default.xex')) {
+        Fail 'game\default.xex is missing. Copy default.xex from your own copy of the game into the game folder.'
+    }
+    Invoke-Step 'codegen' $rexglue @('--log-file', (Join-Path $logs 'codegen-rexglue.log'), 'codegen', 'gow2_manifest.toml')
+}
+
+function Read-SdkVersionString {
+    $header = Join-Path $build 'rexglue-sdk\include\rex\version.h'
+    if (-not (Test-Path $header)) { return '' }
+    $line = Select-String -Path $header -Pattern '#define REXGLUE_VERSION_STRING "([^"]+)"' |
+        Select-Object -First 1
+    if ($line) { return $line.Matches[0].Groups[1].Value }
+    return ''
+}
+
+function Test-SameCommit([string]$left, [string]$right) {
+    $l = $left.ToLowerInvariant()
+    $r = $right.ToLowerInvariant()
+    return $l.StartsWith($r) -or $r.StartsWith($l)
+}
+
+# The version comes from `git describe` in the tree rex_resolve_version runs in; a commit other
+# than the SDK tree's HEAD means it described another repository (gow2-recomp).
+function Show-SdkVersion([string]$tree) {
+    $version = Read-SdkVersionString
+    if (-not $version) { return }
+    Write-Host "  SDK version: $version"
+    if ($version -notmatch '-(dev|rc)\.g([0-9a-f]+)$') { return }
+    $described = $Matches[2]
+    $head = Get-GitShortHead $tree
+    if (-not $head -or (Test-SameCommit $described $head)) { return }
+    Write-Host ("  warning: the SDK version $version does not describe $tree (HEAD $head): " +
+        'rex_resolve_version ran in another repository (patch 0007 passes SOURCE_DIR to it).') -ForegroundColor Yellow
+}
+
+# Windows PowerShell 5.1 turns native stderr into errors, so 'Stop' is lifted while git runs.
+function Get-GitShortHead([string]$dir) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $out = & git -C $dir rev-parse --short=7 HEAD 2>&1
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $previous
+    if ($code -ne 0) { return '' }
+    return ("$out").Trim()
+}
+
 # ---- checks ---------------------------------------------------------------------------------
 Step 'Checking the tools'
 foreach ($tool in 'git', 'cmake', 'ninja') {
@@ -236,14 +372,24 @@ if ($SdkSource) {
     Assert-SdkTreeCurrent $SdkSource ('Run without -SdkSource to build from a clean clone, or apply ' +
         'the missing patches to your tree (sdk\patches\README.md).')
 }
-if (-not $Ndk) { $Ndk = Find-Ndk }
+$minSdk = Read-GradleValue 'minSdk'
+if (-not $minSdk) { Fail 'minSdk was not found in android\app\build.gradle.' }
+if ($Api -eq 0) { $Api = [int]$minSdk }
+elseif ($Api -ne [int]$minSdk) { Fail "-Api $Api differs from minSdk $minSdk in android\app\build.gradle. The libraries must target the app's minSdk; change minSdk there instead." }
+$pinnedNdk = Read-GradleValue 'ndkVersion'
+if (-not $Ndk) { $Ndk = Find-Ndk $pinnedNdk }
 $toolchain = if ($Ndk) { Join-Path $Ndk 'build\cmake\android.toolchain.cmake' } else { '' }
 if (-not $Ndk -or -not (Test-Path $toolchain)) { Fail 'Android NDK not found; pass -Ndk <folder> (NDK r29 or newer).' }
 $androidSdk = Find-AndroidSdk $Ndk
 if (-not $SkipGradle -and -not $androidSdk) { Fail 'Android SDK not found; set ANDROID_HOME (platform 36 is needed).' }
 if ($Jobs -le 0) { $Jobs = [Environment]::ProcessorCount }
+$rev = Read-NdkRevision $Ndk
 Write-Host "SDK source: $(if ($SdkSource) { $SdkSource } else { "$cleanSdk (clean clone)" })"
-Write-Host "NDK:        $Ndk"
+Write-Host "NDK:        $Ndk ($($rev.Revision))"
+if ($pinnedNdk -and ($pinnedNdk -ne $rev.Base)) {
+    Write-Host "  warning: android\app\build.gradle pins NDK $pinnedNdk; this NDK is $($rev.Revision)" -ForegroundColor Yellow
+}
+Write-Host "API:        $Api (minSdk in android\app\build.gradle)"
 Write-Host "Python:     $python"
 Write-Host "Jobs:       $Jobs"
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
@@ -261,15 +407,20 @@ if (-not $SdkSource) {
 }
 
 # ---- 1. codegen -----------------------------------------------------------------------------
-if ($Codegen -or -not (Test-Path 'generated\default\sources.cmake')) {
-    Step 'Generating C++ from default.xex'
-    if (-not $Sdk) { Fail 'generated\default is missing: give the Windows ReXGlue SDK with -Sdk <folder> (bin\rexglue.exe) or set REXGLUE_SDK.' }
-    $rexglue = Join-Path $Sdk 'bin\rexglue.exe'
-    if (-not (Test-Path $rexglue)) { Fail "rexglue.exe not found in $Sdk\bin." }
-    if (-not (Test-Path 'game\default.xex')) {
-        Fail 'game\default.xex is missing. Copy default.xex from your own copy of the game into the game folder.'
+$sourcesCmake = 'generated\default\sources.cmake'
+if ($Codegen) {
+    Invoke-Codegen 'forced with -Codegen'
+} elseif (-not (Test-Path $sourcesCmake)) {
+    Invoke-Codegen 'generated\default is missing'
+} else {
+    $stale = @(Get-StaleCodegenInputs $sourcesCmake)
+    if ($stale.Count -gt 0) {
+        if (Test-CodegenToolsPresent $Sdk) {
+            Invoke-Codegen "generated\default is older than $($stale -join ', ')"
+        } else {
+            Write-Host "  warning: generated\default is older than $($stale -join ', '); give -Sdk <folder> (bin\rexglue.exe) and game\default.xex to regenerate it. Building the existing generated code." -ForegroundColor Yellow
+        }
     }
-    Invoke-Step 'codegen' $rexglue @('--log-file', (Join-Path $logs 'codegen-rexglue.log'), 'codegen', 'gow2_manifest.toml')
 }
 
 # ---- 2. Android copy of the generated code ---------------------------------------------------
@@ -300,6 +451,7 @@ if ($Reconfigure -or -not (Test-ConfiguredAs $cacheWanted)) {
 } else {
     Write-Host "`n== Build tree already configured: $build" -ForegroundColor Cyan
 }
+Show-SdkVersion $SdkSource
 
 # ---- 4. SDK ----------------------------------------------------------------------------------
 Step 'Building the SDK (libSDL3.so, librexruntime.so, librexgpu-xenos.so)'
