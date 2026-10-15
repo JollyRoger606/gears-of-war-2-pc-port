@@ -9,6 +9,8 @@
 
 Retail Xbox 360 Gears of War 2 statically recompiled from the player's own `default.xex` to native x64 code with the ReXGlue SDK. This is not emulation. Players must own the game. An earlier fan port ("Hollow") was built from a leaked 2008 development build; this one runs the complete retail game.
 
+The project's short name, `gow2-recomp`, names the release zip; the repository is `gears-of-war-2-pc-port`.
+
 Leer en español: [README.es.md](README.es.md)
 
 ## Screenshots
@@ -31,12 +33,14 @@ Leer en español: [README.es.md](README.es.md)
 - [x] Community game patches
 - [x] FSR 1 upscaling and CAS sharpening (`present_effect`)
 - [x] Texture packs: dump the game's textures, load your own higher-resolution versions
-- [ ] Mouse look that feels like a PC game (fix in progress, see Known issues)
-- [ ] FSR 4 / DLSS temporal upscaling (built in, not active for this game yet)
+- [x] Mouse aim through the game's own PC mouse axes, with no stick dead zone (`gow2_mouse_aim`, on by default)
+- [x] FSR 4 and FSR 3.1 temporal upscaling (`gow2_temporal`, `gow2_upscaler`; off by default). The release has no DLSS
+- [ ] Keyboard keys handled as on a PC (they still pass through an emulated controller)
 - [ ] Full campaign play-through
-- [x] System Link campaign co-op: four players on one PC (loopback) and PC with an Android phone on one LAN, verified 2026-10-14 and 2026-10-15
-- [ ] Internet play (built: `net_peers`, `net_public_address`, `net_allow_peers`; not tested yet)
+- [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four copies on one PC (loopback), and a PC with an Android phone on one LAN for two players, verified 2026-10-14 and 2026-10-15
+- [x] Internet play, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): a phone on mobile data joined a PC-hosted campaign through ports opened by UPnP, verified 2026-10-15; a PC friend outside the network has not been tried yet
 - [ ] System Link Horde and Versus
+- [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but runs at a few fps with parts of the scene black; not playable yet, no APK published ([docs/ANDROID.md](docs/ANDROID.md))
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 
@@ -97,6 +101,7 @@ A controller works at the same time. All bindings are in `gow2.toml`.
 - `gow2_aniso16` — 16x anisotropic filtering.
 - `gow2_ao_upscaling_fix` — ambient occlusion without artifacts when scaled.
 - `gow2_dof_upscaling_fix` — depth of field without artifacts when scaled.
+- `gow2_temporal`, `gow2_upscaler` — temporal upscaling: `gow2_temporal = true` with `gow2_upscaler = "fsr4"` (Radeon RX 7000/9000) or `"fsr3"`; off by default.
 - `mnk_sensitivity` — mouse sensitivity.
 - `gow2_save_dir` — folder for saves, profile settings and achievements; point it at a OneDrive, Google Drive or Dropbox folder to keep the campaign in the cloud ([docs/SAVES.md](docs/SAVES.md)).
 
@@ -118,7 +123,7 @@ Measured on a Ryzen 9 7900X3D + Radeon RX 7800 XT, Act 1, `resolution_scale = 2`
 
 ## Texture packs
 
-Replace game textures with higher-resolution versions (for example upscaled 4x). The game ships no textures, so each player builds packs from their own copy — packs must never include files from the game, only your own reworked DDS files under their hash names.
+Replace game textures with higher-resolution versions (for example upscaled 4x) for your own use. Each player builds packs from their own copy. An upscaled or recoloured texture is still derived from the game's copyrighted art, so do not share packs made from the game's textures; this project does not host or link them.
 
 1. Set `texture_dump = true` in `gow2.toml` and play. Dumps land in `textures\4D53082D\dump` next to `gow2.exe`, one `.dds` file per unique texture, named `<hash>_<format>_<width>x<height>.dds`. Videos and other textures that change every frame are skipped.
 2. Convert the dumps to PNG with `tools\texpack.py` (included in the release; needs Python 3 and Pillow, `pip install pillow`): `python tools\texpack.py to-png textures\4D53082D\dump work` converts the whole folder.
@@ -130,19 +135,21 @@ A replacement is picked up when it has at least as many mip levels as the game t
 
 ## System Link
 
-Campaign co-op over System Link works between PCs, Android phones and several copies on one PC. It is off by default: set `net_link_active = true` in `gow2.toml` (or pass `--net_link_active=true`) on every player's copy, and use the same build everywhere; `gow2_coop_players` 3 or more turns it on by itself. The game's UDP port 1000 becomes 41000 on every platform (`net_port_offset`, because Android cannot bind ports below 1024) and the System Link beacon uses UDP 14001, so a PC that hosts needs a Windows Firewall rule for those two ports. `system_link_trace = true` logs every network and session call the game makes (`[netlink]` lines).
+Campaign co-op over System Link works between PCs and between several copies on one PC; an Android build joined a PC for two-player co-op. It is off by default: set `net_link_active = true` in `gow2.toml` (or pass `--net_link_active=true`) on every player's copy, and use the same build everywhere; `gow2_coop_players` 3 or more turns it on by itself. The game's UDP port 1000 becomes 41000 on every platform (`net_port_offset`, because Android cannot bind ports below 1024) and the System Link beacon uses UDP 14001, so a PC that hosts needs a Windows Firewall rule for those two ports. `system_link_trace = true` logs every network and session call the game makes (`[netlink]` lines).
 
 - [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): a PC and a phone on one network, the settings, several copies on one PC, troubleshooting.
 - [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): co-op with more than two players (`gow2_coop_players`; four verified on one PC) and what is still missing, such as chapter travel with extra players.
-- [docs/ONLINE.md](docs/ONLINE.md): playing over the internet with port forwarding or a VPN (Tailscale, ZeroTier). Built, not tested yet.
+- [docs/ONLINE.md](docs/ONLINE.md): playing over the internet. From the repository (not in the release zip), [`scripts/host-online.ps1`](https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/scripts/host-online.ps1) `-Start` opens UDP 14001 and 41000 through UPnP on every router between the PC and the internet, with a lease (6 h by default, 24 h at most), and schedules an automatic `-Stop` for the end of the lease; `-Stop` closes them. Run `-Stop` after every session: some routers ignore the lease. Without UPnP: forward by hand; with no open ports: Tailscale or ZeroTier. Verified on 2026-10-15: a phone on mobile data joined a PC host behind two routers in a row.
 
 Horde and Versus over System Link have not been tried. See [ROADMAP.md](ROADMAP.md).
 
 ## Known issues
 
-- **Mouse look feels wrong.** The mouse is turned into a right-stick movement, and the game ignores any stick deflection under 30% (its `DeadZone=0.3` binding), so slow mouse movement is lost and fast movement jumps. A fix that removes that dead zone for the mouse while keeping it for controllers is in progress.
-- **Button prompts show Xbox buttons** even when you play with the keyboard. Keyboard labels are in progress.
+- **Mouse aim changed in 0.1.1.** In 0.1.0 the mouse was turned into a right-stick movement, and the game ignored any stick deflection under 30% (its `DeadZone=0.3` binding). Now the mouse goes through the game's own PC mouse axes (`gow2_mouse_aim`), with no dead zone, while controllers keep the game's own aiming. Keys still pass through an emulated controller. Reports of how it feels are welcome in an issue.
+- **Hints show Xbox button pictures.** Menu prompts show keyboard keys ([Space], [E]...) unless a controller is connected at launch (`gow2_prompts` = `auto`, `keyboard` or `controller`); the button pictures inside in-game hints still show Xbox buttons.
 - **Green-looking lighting** has been reported on skin, lights and the menu flames; it has not been reproduced on the development PC yet. Screenshots are welcome in an issue.
+- **Co-op with three or four players is early.** A chapter change, the death of any player, a player leaving, cinematics and vehicles can break it ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)).
+- **Every player needs the same build.** There is no version check yet, and a build without patch 0011 (such as 0.1.0) cannot see a 0.1.1 host.
 - Only Act 1 has been played so far.
 
 ## Building from source
@@ -159,10 +166,12 @@ See [BUILDING.md](BUILDING.md). The main scripts are `scripts/build.ps1`, `scrip
 - [OverkillLabs3/gears-judgement-recomp](https://github.com/OverkillLabs3/gears-judgement-recomp) (Gears of War: Judgment on ReXGlue, BSD-3-Clause) — this repo copies `tools/patch_switch_traps.py` and `tools/check_objects_fresh.py` from it and adapts `scripts/build.ps1` from its `scripts/build.ps1`. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - [XenonRecomp](https://github.com/hedge-dev/xenonrecomp) (hedge-dev).
 - [Xenia](https://github.com/xenia-project/xenia).
-- AMD FidelityFX SDK (MIT).
-- NVIDIA DLSS SDK.
+- AMD FidelityFX SDK: FSR 1 and CAS (MIT). The FSR 4 and FSR 3.1 DLLs in the release are AMD's signed binaries, redistributed under AMD's license, not MIT (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+- NVIDIA DLSS SDK (builds from source only; not in the release).
 - [PresentMon](https://github.com/GameTechDev/PresentMon) (used for measurements).
 
 ## Legal
 
 Unofficial project. Not affiliated with or endorsed by Microsoft, Xbox Game Studios, The Coalition, or Epic Games. All trademarks belong to their owners. This repository's own code is licensed under the BSD-3-Clause License — see [LICENSE](LICENSE).
+
+The screenshots (`docs/screenshots`, the `docs/assets/img` files other than `icon-320.webp`, `docs/assets/og-image*.jpg` and `assets/icon/og-image*.png`) show Gears of War 2 content, © Microsoft Corporation (originally © 2008 Epic Games, Inc.), captured from the game running in this port. They are not covered by the BSD-3-Clause license. The release zip also carries AMD and Microsoft runtime DLLs under their own licenses ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).

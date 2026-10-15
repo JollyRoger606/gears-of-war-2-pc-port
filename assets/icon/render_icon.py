@@ -102,7 +102,8 @@ def write_vectors(written):
 
 
 def write_og(master, written):
-    save(og_image(master), ICON_DIR / "og-image-1200x630.png", written, optimize=True)
+    save(og_image(master, "en"), ICON_DIR / "og-image-1200x630.png", written, optimize=True)
+    save(og_image(master, "es"), ICON_DIR / "og-image-es-1200x630.png", written, optimize=True)
 
 
 def parse_args(argv):

@@ -1,5 +1,22 @@
 /* gow2-recomp site: dark industrial, riveted steel plates, one stencil-red accent. */
 
+/* Big Shoulders and Big Shoulders Stencil 2.x (Google Fonts), latin subset, weights 800-900, self-hosted under the SIL OFL 1.1 (assets/fonts/OFL.txt). */
+@font-face {
+  font-family: "Big Shoulders Stencil";
+  font-style: normal;
+  font-weight: 800 900;
+  font-display: swap;
+  src: url("assets/fonts/big-shoulders-stencil-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Big Shoulders";
+  font-style: normal;
+  font-weight: 800 900;
+  font-display: swap;
+  src: url("assets/fonts/big-shoulders-latin.woff2") format("woff2");
+}
+
 :root {
   color-scheme: dark;
 
@@ -7,7 +24,7 @@
   --plate: #131518;
   --plate-hi: #1b1d21;
   --edge: #2b3036;
-  --edge-hi: #444b54;
+  --edge-hi: #5d646c;
   --steel: #8d949c;
   --muted: #a9afb6;
   --bone: #ebe6df;
@@ -17,6 +34,7 @@
   --red-text: #ff5a3d;
 
   --font-display: "Big Shoulders Stencil", "Bahnschrift", "Arial Narrow", sans-serif;
+  --font-heading: "Big Shoulders", "Bahnschrift", "Arial Narrow", sans-serif;
   --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 
@@ -31,6 +49,8 @@
   --wrap: 76rem;
   --space-section: clamp(4.5rem, 2.8rem + 6vw, 8.5rem);
   --notch: clamp(14px, 2.4vw, 30px);
+
+  --topbar-h: 4rem;
 
   --radius: 3px;
   --duration: 180ms;
@@ -51,6 +71,7 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--topbar-h) + 1rem);
 }
 
 body {
@@ -119,12 +140,12 @@ h3 {
 }
 
 h2 {
-  font-family: var(--font-display);
+  font-family: var(--font-heading);
   font-weight: 900;
   font-size: var(--step-3);
   text-transform: uppercase;
   letter-spacing: 0.005em;
-  line-height: 0.92;
+  line-height: 1;
   text-wrap: balance;
 }
 
@@ -300,7 +321,6 @@ p {
   font-size: 0.78rem;
   letter-spacing: 0.02em;
   text-transform: none;
-  opacity: 0.9;
   padding-left: 0.6em;
   border-left: 1px solid rgba(255, 255, 255, 0.35);
 }
@@ -397,6 +417,7 @@ p {
   margin: 0;
   padding: 0;
   list-style: none;
+  white-space: nowrap;
 }
 
 .topnav a {
@@ -468,6 +489,13 @@ p {
   margin-bottom: 1.5rem;
 }
 
+.hero__flag {
+  display: flex;
+  width: fit-content;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
 .hero__game {
   display: block;
   font-size: clamp(1.45rem, 1.05rem + 1.5vw, 2.35rem);
@@ -528,6 +556,7 @@ p {
 
 .hero__req li::before {
   content: "\25B8";
+  content: "\25B8" / "";
   margin-right: 0.45em;
   color: var(--red-text);
 }
@@ -601,6 +630,7 @@ p {
 
 .pipeline__step::before {
   content: counter(step);
+  content: counter(step) / "";
   display: block;
   margin-bottom: 0.9rem;
   font-family: var(--font-display);
@@ -672,6 +702,7 @@ p {
 
 .manifest li::before {
   content: "\2014\00a0";
+  content: "\2014\00a0" / "";
   color: var(--steel);
 }
 
@@ -776,11 +807,6 @@ p {
   align-items: start;
 }
 
-.features__intro {
-  position: sticky;
-  top: 6rem;
-}
-
 .features__intro > p:not(.eyebrow) {
   margin-top: 1.1rem;
   color: var(--muted);
@@ -843,7 +869,7 @@ p {
 }
 
 .feat--major h3 {
-  font-family: var(--font-display);
+  font-family: var(--font-heading);
   font-weight: 800;
   font-size: var(--step-2);
   text-transform: uppercase;
@@ -932,6 +958,7 @@ p {
 
 .checklist--done li::before {
   content: "\2713";
+  content: "\2713" / "";
   color: var(--bone);
 }
 
@@ -941,6 +968,7 @@ p {
 
 .checklist--todo li::before {
   content: "\25CB";
+  content: "\25CB" / "";
   color: var(--steel);
 }
 
@@ -1015,6 +1043,7 @@ p {
 
 .steps > li::before {
   content: counter(install);
+  content: counter(install) / "";
   position: absolute;
   left: 0;
   top: -0.15rem;
@@ -1079,8 +1108,6 @@ p {
 }
 
 .reqs {
-  position: sticky;
-  top: 6rem;
   padding: 1.75rem 1.6rem 1.5rem;
 }
 
@@ -1114,7 +1141,7 @@ p {
 
 .controls {
   margin-top: 1rem;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--edge-hi);
   border-radius: var(--radius);
   background: var(--plate);
 }
@@ -1142,6 +1169,7 @@ p {
 .controls summary::after,
 .faq summary::after {
   content: "+";
+  content: "+" / "";
   flex: none;
   font-family: var(--font-mono);
   font-size: 1.25rem;
@@ -1215,11 +1243,6 @@ kbd {
   grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
   gap: clamp(2rem, 1rem + 4vw, 5rem);
   align-items: start;
-}
-
-.faq .section-head {
-  position: sticky;
-  top: 6rem;
 }
 
 .faq details {
@@ -1365,6 +1388,35 @@ kbd {
   color: var(--red-text);
 }
 
+/* ---------- 404 ---------- */
+
+.notfound {
+  min-height: 70vh;
+}
+
+.notfound__title {
+  font-family: var(--font-heading);
+  font-weight: 900;
+  font-size: var(--step-3);
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.notfound__text {
+  margin-top: 1.1rem;
+  max-width: 40rem;
+  color: var(--muted);
+}
+
+.notfound__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  margin: 2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
 /* ---------- Load sequence ---------- */
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1409,9 +1461,9 @@ kbd {
   }
 }
 
+/* Transform only: an image that starts at opacity 0 delays the Largest Contentful Paint. */
 @keyframes slide-in {
   from {
-    opacity: 0;
     transform: translateX(28px);
   }
 }
@@ -1419,8 +1471,39 @@ kbd {
 /* ---------- Responsive ---------- */
 
 @media (max-width: 900px) {
+  :root {
+    --topbar-h: 6rem;
+  }
+
+  .topbar__inner {
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    min-height: 0;
+    padding-top: 0.55rem;
+  }
+
   .topnav {
+    order: 3;
+    flex-basis: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .topnav::-webkit-scrollbar {
     display: none;
+  }
+
+  .topnav ul {
+    gap: 0;
+  }
+
+  .topnav li:first-child a {
+    padding-left: 0;
+  }
+
+  .topnav a {
+    padding: 0.45rem 0.6rem;
+    font-size: 0.86rem;
   }
 
   .hero__copy,
@@ -1450,12 +1533,6 @@ kbd {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .features__intro,
-  .reqs,
-  .faq .section-head {
-    position: static;
-  }
-
   .shot--lead,
   .shot--side {
     grid-column: 1 / -1;
@@ -1473,7 +1550,10 @@ kbd {
     display: none;
   }
 
-  .topbar__inner,
+  .topbar__inner {
+    column-gap: 0.6rem;
+  }
+
   .topbar__actions {
     gap: 0.6rem;
   }
@@ -1511,5 +1591,38 @@ kbd {
 
   .steps > li:not(:last-child)::after {
     display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .topbar .btn--sm {
+    display: none;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 900px) {
+  .shot--side {
+    grid-column: span 6;
+  }
+}
+
+/* Sticky side columns only where they fit on screen; taller than the viewport, their end stays hidden. */
+@media (min-width: 901px) and (min-height: 50rem) {
+  .features__intro,
+  .reqs,
+  .faq .section-head {
+    position: sticky;
+    top: calc(var(--topbar-h) + 2rem);
+  }
+}
+
+/* On short screens, such as a phone held sideways or a page zoomed to 400 %, the top bar scrolls away. */
+@media (max-height: 30rem) {
+  :root {
+    --topbar-h: 0rem;
+  }
+
+  .topbar {
+    position: relative;
   }
 }

@@ -9,6 +9,8 @@
 
 Gears of War 2 de Xbox 360, versión comercial, recompilado estáticamente desde el `default.xex` del propio jugador a código nativo x64 con el SDK de ReXGlue. No es emulación. Es necesario poseer el juego. Un port anterior hecho por fans ("Hollow") se construyó a partir de una versión de desarrollo filtrada de 2008; este ejecuta el juego comercial completo.
 
+El nombre corto del proyecto, `gow2-recomp`, es el del zip de cada versión; el repositorio es `gears-of-war-2-pc-port`.
+
 Read in English: [README.md](README.md)
 
 ## Capturas de pantalla
@@ -31,12 +33,14 @@ Read in English: [README.md](README.md)
 - [x] Parches comunitarios del juego
 - [x] Reescalado FSR 1 y nitidez CAS (`present_effect`)
 - [x] Paquetes de texturas: volcar las texturas del juego y cargar tus propias versiones en mayor resolución
-- [ ] Mirada con mouse que se sienta como un juego de PC (arreglo en progreso, ver Problemas conocidos)
-- [ ] Reescalado temporal FSR 4 / DLSS (incluido, todavía no se activa en este juego)
+- [x] Puntería con el mouse por los ejes de mouse de PC del propio juego, sin zona muerta de stick (`gow2_mouse_aim`, activado por defecto)
+- [x] Reescalado temporal FSR 4 y FSR 3.1 (`gow2_temporal`, `gow2_upscaler`; apagado por defecto). La versión publicada no trae DLSS
+- [ ] Teclas que el juego reciba como en un PC (todavía pasan por un mando emulado)
 - [ ] Campaña completa de principio a fin
-- [x] Campaña cooperativa por System Link: cuatro jugadores en un mismo PC (loopback) y PC con un teléfono Android en la misma LAN, verificado el 2026-10-14 y el 2026-10-15
-- [ ] Juego por internet (implementado: `net_peers`, `net_public_address`, `net_allow_peers`; sin probar)
+- [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15
+- [x] Juego por internet, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): un teléfono con datos móviles se unió a una campaña alojada en un PC a través de puertos abiertos por UPnP, verificado el 2026-10-15; todavía no se probó con un amigo en otro PC fuera de la red
 - [ ] Horda y Versus por System Link
+- [ ] Android: una compilación del repositorio llega a jugar y se une a la campaña de un PC por System Link, pero corre a pocos fps y partes de la escena se ven negras; todavía no se puede jugar y no se publica ningún APK ([docs/ANDROID.md](docs/ANDROID.md))
 
 Ver el plan completo en [ROADMAP.md](ROADMAP.md).
 
@@ -97,6 +101,7 @@ Un mando funciona al mismo tiempo. Todas las asignaciones están en `gow2.toml`.
 - `gow2_aniso16` — filtrado anisotrópico 16x.
 - `gow2_ao_upscaling_fix` — oclusión ambiental sin artefactos al escalar.
 - `gow2_dof_upscaling_fix` — profundidad de campo sin artefactos al escalar.
+- `gow2_temporal`, `gow2_upscaler` — reescalado temporal: `gow2_temporal = true` con `gow2_upscaler = "fsr4"` (Radeon RX 7000/9000) o `"fsr3"`; apagado por defecto.
 - `mnk_sensitivity` — sensibilidad del mouse.
 - `gow2_save_dir` — carpeta de partidas guardadas, ajustes del perfil y logros; apúntala a una carpeta de OneDrive, Google Drive o Dropbox para tener la campaña en la nube ([docs/SAVES.md](docs/SAVES.md)).
 
@@ -118,7 +123,7 @@ Medido en un Ryzen 9 7900X3D + Radeon RX 7800 XT, Acto 1, `resolution_scale = 2`
 
 ## Paquetes de texturas
 
-Reemplaza las texturas del juego por versiones de mayor resolución (por ejemplo reescaladas 4x). El juego no trae texturas incluidas, así que cada jugador crea sus paquetes desde su propia copia: los paquetes nunca deben incluir archivos del juego, solo tus propios DDS retocados con sus nombres de hash.
+Reemplaza las texturas del juego por versiones de mayor resolución (por ejemplo reescaladas 4x) para tu propio uso. Cada jugador crea sus paquetes desde su propia copia. Una textura reescalada o recoloreada sigue siendo una obra derivada del arte del juego, protegido por derechos de autor, así que no compartas paquetes hechos con las texturas del juego; este proyecto no los aloja ni los enlaza.
 
 1. Activa `texture_dump = true` en `gow2.toml` y juega. Los volcados quedan en `textures\4D53082D\dump` junto a `gow2.exe`, un archivo `.dds` por textura única, con el nombre `<hash>_<formato>_<ancho>x<alto>.dds`. Los videos y otras texturas que cambian en cada frame se omiten.
 2. Convierte los volcados a PNG con `tools\texpack.py` (viene en la versión; necesita Python 3 y Pillow, `pip install pillow`): `python tools\texpack.py to-png textures\4D53082D\dump work` convierte la carpeta completa.
@@ -130,19 +135,21 @@ Un reemplazo se aplica cuando tiene al menos tantos niveles de mipmap como la te
 
 ## System Link
 
-La campaña cooperativa por System Link funciona entre PC, teléfonos Android y varias copias en un mismo PC. Viene apagada: pon `net_link_active = true` en `gow2.toml` (o pasa `--net_link_active=true`) en la copia de cada jugador y usa la misma compilación en todas; `gow2_coop_players` 3 o más la enciende sola. El puerto UDP 1000 del juego pasa a ser 41000 en todas las plataformas (`net_port_offset`, porque Android no puede usar puertos por debajo de 1024) y la baliza de System Link usa UDP 14001, así que un PC anfitrión necesita una regla del Firewall de Windows para esos dos puertos. `system_link_trace = true` registra cada llamada de red y de sesión del juego (líneas `[netlink]`).
+La campaña cooperativa por System Link funciona entre PC y entre varias copias en un mismo PC; una compilación de Android se unió a un PC para el cooperativo de dos jugadores. Viene apagada: pon `net_link_active = true` en `gow2.toml` (o pasa `--net_link_active=true`) en la copia de cada jugador y usa la misma compilación en todas; `gow2_coop_players` 3 o más la enciende sola. El puerto UDP 1000 del juego pasa a ser 41000 en todas las plataformas (`net_port_offset`, porque Android no puede usar puertos por debajo de 1024) y la baliza de System Link usa UDP 14001, así que un PC anfitrión necesita una regla del Firewall de Windows para esos dos puertos. `system_link_trace = true` registra cada llamada de red y de sesión del juego (líneas `[netlink]`).
 
 - [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): un PC y un teléfono en la misma red, los ajustes, varias copias en un mismo PC y solución de problemas.
 - [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): cooperativo con más de dos jugadores (`gow2_coop_players`; cuatro verificados en un mismo PC) y lo que aún falta, como el cambio de capítulo con jugadores extra.
-- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet con reenvío de puertos o una VPN (Tailscale, ZeroTier). Implementado, sin probar.
+- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet. Desde el repositorio (no viene en el zip de la versión publicada), [`scripts/host-online.ps1`](https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/scripts/host-online.ps1) `-Start` abre por UPnP los puertos UDP 14001 y 41000 en cada router entre el PC y internet, con un plazo (6 h por defecto, 24 h como máximo), y programa un `-Stop` automático para el final del plazo; `-Stop` los cierra. Ejecuta `-Stop` después de cada sesión; algunos routers ignoran el plazo. Sin UPnP: reenvío manual; sin abrir puertos: Tailscale o ZeroTier. Verificado el 2026-10-15: un teléfono con datos móviles se unió a un PC anfitrión detrás de dos routers en cadena.
 
 Horda y Versus por System Link no se han probado. Ver [ROADMAP.md](ROADMAP.md).
 
 ## Problemas conocidos
 
-- **La mirada con mouse se siente rara.** El mouse se traduce a movimiento del stick derecho, y el juego ignora cualquier inclinación del stick menor al 30 % (su binding `DeadZone=0.3`): los movimientos lentos del mouse se pierden y los rápidos saltan. Está en progreso un arreglo que quita esa zona muerta para el mouse y la mantiene para los mandos.
-- **Los íconos de botones muestran los del control de Xbox** aunque juegues con teclado. Las etiquetas de teclado están en progreso.
+- **La puntería con el mouse cambió en la 0.1.1.** En la 0.1.0 el mouse se traducía a movimiento del stick derecho, y el juego ignoraba cualquier inclinación del stick menor al 30 % (su binding `DeadZone=0.3`). Ahora el mouse va por los ejes de mouse de PC del propio juego (`gow2_mouse_aim`), sin zona muerta, y los mandos conservan la puntería original. Las teclas todavía pasan por un mando emulado. Se agradece contar en un issue cómo se siente.
+- **Las pistas muestran imágenes de botones de Xbox.** Los menús muestran las teclas ([Espacio], [E]...) salvo que haya un mando conectado al arrancar (`gow2_prompts` = `auto`, `keyboard` o `controller`); las imágenes de botones dentro de las pistas del juego siguen siendo las de Xbox.
 - **Se reportó iluminación verdosa** en la piel, las luces y las llamas del menú; todavía no se reproduce en el PC de desarrollo. Se agradecen capturas en un issue.
+- **El cooperativo de tres o cuatro jugadores es temprano.** Un cambio de capítulo, la muerte de cualquier jugador, que alguien se vaya, las cinemáticas y los vehículos pueden romperlo ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)).
+- **Todos los jugadores necesitan la misma compilación.** Todavía no hay comprobación de versión, y una compilación sin el parche 0011 (como la 0.1.0) no ve a un anfitrión 0.1.1.
 - Por ahora solo se jugó el Acto 1.
 
 ## Compilar desde el código fuente
@@ -159,10 +166,12 @@ Ver [BUILDING.md](BUILDING.md). Los scripts principales son `scripts/build.ps1`,
 - [OverkillLabs3/gears-judgement-recomp](https://github.com/OverkillLabs3/gears-judgement-recomp) (Gears of War: Judgment en ReXGlue, BSD-3-Clause): este repositorio copia `tools/patch_switch_traps.py` y `tools/check_objects_fresh.py` de él y adapta `scripts/build.ps1` de su `scripts/build.ps1`. Ver [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - [XenonRecomp](https://github.com/hedge-dev/xenonrecomp) (hedge-dev).
 - [Xenia](https://github.com/xenia-project/xenia).
-- AMD FidelityFX SDK (MIT).
-- NVIDIA DLSS SDK.
+- AMD FidelityFX SDK: FSR 1 y CAS (MIT). Las DLL de FSR 4 y FSR 3.1 de la versión publicada son binarios firmados de AMD, redistribuidos bajo la licencia de AMD, no MIT (ver [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+- NVIDIA DLSS SDK (solo en compilaciones desde el código fuente; no viene en la versión publicada).
 - [PresentMon](https://github.com/GameTechDev/PresentMon) (usado para las mediciones).
 
 ## Legal
 
 Proyecto no oficial. Sin afiliación ni respaldo de Microsoft, Xbox Game Studios, The Coalition o Epic Games. Todas las marcas pertenecen a sus dueños. El código propio de este repositorio tiene licencia BSD-3-Clause; ver [LICENSE](LICENSE).
+
+Las capturas (`docs/screenshots`, los archivos de `docs/assets/img` salvo `icon-320.webp`, `docs/assets/og-image*.jpg` y `assets/icon/og-image*.png`) muestran contenido de Gears of War 2, © Microsoft Corporation (originalmente © 2008 Epic Games, Inc.), tomado del juego ejecutándose en este port. No están cubiertas por la licencia BSD-3-Clause. El zip de cada versión también trae DLL de AMD y de Microsoft bajo sus propias licencias ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
