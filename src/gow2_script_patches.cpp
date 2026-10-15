@@ -4,7 +4,7 @@
 
 #include "gow2_script_patches.h"
 
-#include <cstring>
+#include <algorithm>
 #include <unordered_map>
 #include <utility>
 
@@ -164,7 +164,7 @@ struct Write {
 struct ScriptSwap {
   uint32_t function;
   uint32_t data;
-  uint32_t size;
+  std::vector<uint8_t> bytes;
 };
 
 std::vector<uint8_t> BigEndian(uint32_t v) {
@@ -180,22 +180,16 @@ class GroupPlanner {
   bool PlanScript(const ScriptRow& row) {
     current_id_ = row.id;
     uint32_t function = 0;
-    if (!ResolveOne(row.function, &function)) return false;
-    script_ = ReadArray(base_, function + kStructScript);
-    grown_ = row.grow && script_.num == row.grow->new_size;
-    if (!grown_ && script_.num != row.script_size)
-      return Fail("Script.Num is " + std::to_string(script_.num) + ", expected " +
-                  std::to_string(row.script_size));
-    if (script_.data == 0) return Fail("no script data");
-    scope_ = grown_ ? row.grow->keep : script_.num;
+    if (!ResolveOne(row.function, &function) || !LoadScript(row, function)) return false;
     const size_t writes_before = writes_.size();
-    const size_t swaps_before = swaps_.size();
-    if (!CheckBytes(row) || !CheckOperands(row) || !PlanByteEdits(row) ||
-        !PlanOperandEdits(row) || !PlanGrow(row, function))
+    if (!CheckBytes(row) || !CheckOperands(row) || !CheckEditsInKeptPrefix(row) ||
+        !PlanByteEdits(row) || !PlanOperandEdits(row))
       return false;
-    const bool swapped = swaps_.size() > swaps_before;
-    lines_.push_back(RowLine(row.id, row.function, writes_.size() - writes_before,
-                             swapped ? row.grow->new_size : 0));
+    const size_t edits = writes_.size() - writes_before;
+    const size_t swaps_before = swaps_.size();
+    if (!PlanGrow(row, function, writes_before)) return false;
+    const bool grew = swaps_.size() > swaps_before;
+    lines_.push_back(RowLine(row.id, row.function, edits, grew ? row.grow->new_size : 0));
     return true;
   }
 
@@ -220,12 +214,14 @@ class GroupPlanner {
   }
 
   void Commit() {
-    for (const Write& w : writes_) std::memcpy(base_ + w.addr, w.bytes.data(), w.bytes.size());
+    for (const Write& w : writes_) guest::WriteBytes(base_, w.addr, w.bytes);
     for (const ScriptSwap& s : swaps_) {
+      guest::WriteBytes(base_, s.data, s.bytes);
       const uint32_t array = s.function + kStructScript;
+      const uint32_t size = uint32_t(s.bytes.size());
       guest::StoreU32(base_, array + kArrayData, s.data);
-      guest::StoreU32(base_, array + kArrayNum, s.size);
-      guest::StoreU32(base_, array + kArrayMax, s.size);
+      guest::StoreU32(base_, array + kArrayNum, size);
+      guest::StoreU32(base_, array + kArrayMax, size);
     }
   }
 
@@ -238,6 +234,17 @@ class GroupPlanner {
     failed_row_ = std::string(current_id_);
     reason_ = std::move(why);
     return false;
+  }
+
+  bool LoadScript(const ScriptRow& row, uint32_t function) {
+    script_ = ReadArray(base_, function + kStructScript);
+    grown_ = row.grow && script_.num == row.grow->new_size;
+    if (!grown_ && script_.num != row.script_size)
+      return Fail("Script.Num is " + std::to_string(script_.num) + ", expected " +
+                  std::to_string(row.script_size));
+    if (script_.data == 0) return Fail("no script data");
+    scope_ = grown_ ? row.grow->keep : script_.num;
+    return true;
   }
 
   bool ResolveOne(const ObjectRef& ref, uint32_t* out) {
@@ -290,6 +297,21 @@ class GroupPlanner {
         return Fail(At(operand.offset) + " points at 0x" + Hex(found, 8) + ", expected " +
                     Describe(operand.object) + " at 0x" + Hex(expected, 8));
     }
+    return true;
+  }
+
+  bool InKeptPrefix(uint32_t offset, uint32_t size, uint32_t keep) {
+    if (offset + size <= keep) return true;
+    return Fail(At(offset) + " is past the kept prefix " + At(keep));
+  }
+
+  // A grow keeps only the prefix, so an edit after it would be dropped without a word.
+  bool CheckEditsInKeptPrefix(const ScriptRow& row) {
+    if (!row.grow) return true;
+    for (const ByteEdit& edit : row.byte_edits)
+      if (!InKeptPrefix(edit.offset, 1, row.grow->keep)) return false;
+    for (const OperandEdit& edit : row.operand_edits)
+      if (!InKeptPrefix(edit.offset, 4, row.grow->keep)) return false;
     return true;
   }
 
@@ -350,10 +372,29 @@ class GroupPlanner {
   }
 
   bool TailAlreadyThere(const GrowEdit& grow, const std::vector<uint8_t>& tail) const {
-    return std::memcmp(base_ + script_.data + grow.keep, tail.data(), tail.size()) == 0;
+    return guest::ReadBytes(base_, script_.data + grow.keep, uint32_t(tail.size())) == tail;
   }
 
-  bool PlanGrow(const ScriptRow& row, uint32_t function) {
+  // The row's edits go into the grown copy instead of the old buffer, which stays as loaded.
+  void MoveRowWritesInto(std::vector<uint8_t>* prefix, size_t row_writes_begin) {
+    for (size_t i = row_writes_begin; i < writes_.size(); ++i) {
+      const Write& w = writes_[i];
+      std::copy(w.bytes.begin(), w.bytes.end(), prefix->begin() + (w.addr - script_.data));
+    }
+    writes_.resize(row_writes_begin);
+  }
+
+  bool AllocateGrown(uint32_t size, uint32_t* data) {
+    // Allocated before the group is known to pass; a later failure only leaks this block.
+    *data = alloc_(size);
+    if (*data == 0) return Fail("guest allocation of " + std::to_string(size) + " bytes failed");
+    if (uint64_t(*data) + size > (uint64_t(1) << 32))
+      return Fail("guest allocation returned 0x" + Hex(*data, 8) + " for " + std::to_string(size) +
+                  " bytes");
+    return true;
+  }
+
+  bool PlanGrow(const ScriptRow& row, uint32_t function, size_t row_writes_begin) {
     if (!row.grow) return true;
     const GrowEdit& grow = *row.grow;
     std::vector<uint8_t> tail;
@@ -365,19 +406,25 @@ class GroupPlanner {
     if (script_.max != script_.num)
       return Fail("Script.Max is " + std::to_string(script_.max) + ", Num " +
                   std::to_string(script_.num));
-    // Allocated before the group is known to pass; a later failure only leaks this block.
-    const uint32_t data = alloc_(grow.new_size);
-    if (data == 0) return Fail("guest allocation of " + std::to_string(grow.new_size) + " bytes failed");
-    std::memcpy(base_ + data, base_ + script_.data, grow.keep);
-    std::memcpy(base_ + data + grow.keep, tail.data(), tail.size());
-    swaps_.push_back({function, data, grow.new_size});
+    std::vector<uint8_t> script = guest::ReadBytes(base_, script_.data, grow.keep);
+    MoveRowWritesInto(&script, row_writes_begin);
+    script.insert(script.end(), tail.begin(), tail.end());
+    uint32_t data = 0;
+    if (!AllocateGrown(grow.new_size, &data)) return false;
+    swaps_.push_back({function, data, std::move(script)});
     return true;
+  }
+
+  static std::string GrownText(uint32_t size, size_t writes) {
+    std::string text = "script grown to " + std::to_string(size) + " bytes";
+    if (writes > 0) text += ", with " + std::to_string(writes) + " write(s)";
+    return text;
   }
 
   static std::string RowLine(std::string_view id, const ObjectRef& target, size_t writes,
                              uint32_t grown_size) {
     std::string line = std::string(id) + " " + std::string(target.path) + ": ";
-    if (grown_size > 0) return line + "script grown to " + std::to_string(grown_size) + " bytes";
+    if (grown_size > 0) return line + GrownText(grown_size, writes);
     if (writes == 0) return line + "already applied";
     return line + std::to_string(writes) + " write(s)";
   }

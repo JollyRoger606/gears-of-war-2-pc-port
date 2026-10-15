@@ -59,7 +59,8 @@ struct TailPiece {
   ObjectRef object;
 };
 
-// The script is replaced by its first `keep` bytes followed by the tail, new_size bytes in all.
+// The script is replaced by its first `keep` bytes, with the row's own edits applied (they must
+// lie in that prefix), followed by the tail: new_size bytes in all, in a new buffer.
 struct GrowEdit {
   uint16_t keep;
   uint32_t new_size;
