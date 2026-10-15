@@ -125,6 +125,64 @@ The lit facade is warm on the phone and teal on the PC; which matches the consol
 The full record and repeat commands are in `out\pcref\results.md`, in the session's local folder,
 like `out\device\results.md` above.
 
+### Black scene found (October 15, second session)
+
+The afternoon session ran on a warm phone with the GPU capped at 160-222 MHz. The evidence is in
+`out\phone2\`, a local folder not in git, like `out\device\`.
+
+The trace found the cause: 1,881 of the 1,885 base-pass draws (#576-#2460) test GEQUAL with depth
+writes and no polygon offset against the depth the same meshes wrote in the prepass (#1-#574,
+also without polygon offset). The game relies on the depth-only and base-pass vertex shaders
+giving bit-identical depth. On the PC (D3D12) they do; on the Adreno 830 some meshes come out up to
+about one float24 step farther, fail the test and leave the cleared value: the black regions.
+The translated shaders already emit every multiply and add with NoContraction in a fixed order
+(no OpDot) and mark the position Invariant. The prepass reads a position-only vertex stream
+(stride 3), while the base pass reads the full vertex (stride 7).
+
+| Run | Setting | Black share |
+|---|---|---|
+| Reference (`a2-base`) | Defaults | 36.2 % |
+| `a5-128` | `vulkan_android_depth_experiment = 128`: skip prepass meshes, keep depth clears | 3.8 % |
+| `a5-256` | `vulkan_android_depth_experiment = 256`: every float24 color draw passes depth | 4.5 % |
+| `a5-512` | `vulkan_android_depth_experiment = 512`: skip mid-frame depth clear rectangles | 38.5 % |
+| `a5-bias16` | `vulkan_android_color_depth_bias = 16` | 3.7 % |
+
+Bit 256 leaves the scene mis-sorted. With bias 16, probe (952,234) reads the building (55,48,50)
+instead of (4,4,4). No configuration-only switch changed the black regions: the A2 table in
+`out\phone2\results.md` spans 35.5-38.5 %, while `gow2_black_shading_fix = false` gives 42.7 %.
+At the same caps, gameplay cost was 23.9 Mcycles per game frame for the reference, 26.0 for bit
+128, 24.8 for bias 16 and 33.8 for bit 256, with noise of about 10 %.
+
+`vulkan_android_color_depth_bias` now defaults to 16 on Android, about one float24 step added to
+the depth bias of color draws with a pixel shader on float24 depth that test GREATER or GEQUAL;
+0 turns it off. It was chosen over skipping the prepass because it keeps the game's frame
+structure: the prepass, early depth rejection and depth for later passes.
+
+Patch 0007 also fixes the Vulkan render target transfer shader's host depth source addressing.
+It used the guest source's sample count (`key.source_msaa_samples`); D3D12 uses the host depth
+source's own count. For a 2x MSAA source and a 1x host depth source, it read rows
+`8 * tile_row + y` instead of `16 * tile_row + y`. This had no visible effect at this checkpoint.
+The fix is not Android-specific and is not behind `REX_PLATFORM_ANDROID`: only the Android build
+compiles the Vulkan backend (`REXGLUE_USE_VULKAN` is off on Windows). Also in 0007,
+`ANativeWindow_setFrameRate` is looked up with `dlopen("libnativewindow.so")` then `dlsym`, falling
+back to `libandroid.so`. `dlsym(RTLD_DEFAULT, ...)` found nothing in the app's namespace and logged
+"not available (Android 10)" on Android 16. The new lookup is to be confirmed on the phone.
+
+The colour grade still differs from the PC (phone warm, PC teal); which matches the console is
+not established. After walking forward, two lamp posts and a hanging banner render solid white
+with a glow (`crop-white-bias16.png`, 0.81 % of the walked picture). These are the white blocks of
+October 15. With bit 128 they are absent (0.01 %); with bit 256 they are present (0.53 %). A draw
+that should fail its depth test on those objects passes once depth moves. This remains under
+investigation.
+
+Patch 0011 removed the old Launch log marker, so the helpers kept pressing Space into gameplay.
+They now add `system_link_trace = true` to every `gow2.toml` and wait for `[netlink] bind`.
+`gow2_system_settings` values that make a Coalesced bundle longer than its TOC size are not served
+(`COALESCED: no bundle could be prepared (... longer than their TOC size ...)`): `True` -> `False`
+grows each value, while `0` reads as false in UE3 and keeps the bundle shorter. The phone self-test
+printed `runtime_selftest: 21 checks, 0 failed` (both FPSCR checks) and
+`touch_model_test: 105 checks, 0 failed`.
+
 ## What the build adds
 
 The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) has:
@@ -175,6 +233,10 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   The request is not a forced rate. 0 makes no request; `gow2_unlock_fps` uses 0 for that launch
   unless `gow2.toml` sets `present_android_frame_rate` (`DISPLAY frame rate hint` in the log).
   The call logs `VulkanPresenter: ANativeWindow_setFrameRate(30 Hz) returned 0` on success.
+- **Transfer shader and frame rate lookup.** Patch 0007 addresses the host depth source with its
+  own sample count in the Vulkan render target transfer shader, with no visible change at this
+  checkpoint. `ANativeWindow_setFrameRate` is resolved through `dlopen("libnativewindow.so")` then
+  `dlsym`, falling back to `libandroid.so`; the lookup is to be confirmed on the phone.
 - **Driver pipeline cache.** `vulkan_pipeline_cache_file` keeps
   `cache/shaders/shareable/4D53082D.vkpc` beside `4D53082D.xsh` and `4D53082D.fbo.vk.xpso`.
   It loads at boot after checking vendor, device, driver version, pipeline cache UUID, size and
@@ -220,7 +282,7 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   | `gow2_system_settings` | "" | `Key=Value` pairs separated by `;` for the game's own `[SystemSettings]` (`Xe-GearEngine.ini`), for example `DynamicShadows=False` (restart) |
   | `clear_memory_page_state` | false on Android | true re-uploads every CPU-written page at each frame end (the SDK's default elsewhere); halves the frame rate here |
   | `vulkan_android_depth_experiment` | 0 | Diagnostic bits, each drawing the scene wrongly: 1 color draws without depth writes pass the depth test, 2 skip every depth-only draw on the float24 depth (the prepass and its depth clears), 4 stencil off for color draws, 8 whole-target scissor, 16 scene draws that pass the depth test painted magenta, 32 face culling off, 64 no user clip planes or vertex kill, 128 skip the prepass meshes but keep the depth clears (rectangle lists), 256 every color draw with a pixel shader on the float24 depth passes the depth test (depth writers too), 512 skip the depth clear rectangles drawn after the frame's first prepass mesh (#575-class; #0 stays), 1024 depth-only draws on the float24 depth with color target 0 bound write magenta (restart) |
-  | `vulkan_android_color_depth_bias` | 0 | Added to the depth bias constant factor of color draws with a pixel shader on the float24 depth that test GREATER or GEQUAL (host D32F: 1 unit is about 6e-8 at depth 0.5, 16 units about one float24 step) (restart) |
+  | `vulkan_android_color_depth_bias` | 16 | About one float24 step added to the depth bias of color draws with a pixel shader on float24 depth that test GREATER or GEQUAL; fixes the black regions while keeping the prepass, early depth rejection and depth for later passes; 0 turns it off (restart) |
   | `vulkan_android_skip_shader_hashes` | "" | Comma-separated 16-hex ucode hashes (vertex or pixel shader, as `FRAMETRACE` prints them): their draws are skipped (restart) |
   | `vulkan_android_paint_shader_hashes` | "" | The same list format: their draws write magenta (a depth-only draw only where color target 0 is bound) (restart) |
   | `vulkan_android_skip_draw_range` | "" | `first-last` or one number: those draws of every frame are skipped, numbered as `FRAMETRACE` numbers them (restart) |
@@ -262,7 +324,7 @@ New-Item -ItemType Directory -Force $exp | Out-Null
 
 function Set-GameConfig([string]$name, [string[]]$extra = @()) {
     $lines = @('gow2_frame_log = true', 'vulkan_android_stats_log = true',
-               'gow2_touch = "off"', 'mnk_mode = true') + $extra
+               'gow2_touch = "off"', 'mnk_mode = true', 'system_link_trace = true') + $extra
     $toml = Join-Path $exp "$name.toml"
     Set-Content -Path $toml -Value $lines -Encoding ascii
     adb -s $s push $toml "$files/gow2.toml"
@@ -296,7 +358,7 @@ function Open-Checkpoint {
     Start-Sleep -Seconds 45
     Send-KeyUntil KEYCODE_ENTER 'Gears2Checkpoint1.sav' 1
     Send-KeyUntil KEYCODE_SPACE 'Gears2Checkpoint1.sav' 2
-    Send-KeyUntil KEYCODE_SPACE 'XSocket: guest port' 1
+    Send-KeyUntil KEYCODE_SPACE '\[netlink\] bind' 1
 }
 function Save-Shot([string]$name) {
     adb -s $s shell screencap -p /data/local/tmp/gow2-shot.png
@@ -312,6 +374,10 @@ function Measure-Black([string]$name) {
     python tools\black_fraction.py (Join-Path $exp "$name.png")
 }
 ```
+
+Patch 0011 removed the old Launch marker, so `system_link_trace = true` and `[netlink] bind` keep
+the helpers from pressing Space into gameplay. Use `0` rather than `False` for false UE3 settings:
+`True` -> `False` grows Coalesced bundles beyond their TOC size and prevents them from being served.
 
 The first time, take a `Save-Shot` after each key of `Open-Checkpoint` and lengthen its waits if a
 screen was not ready (the boot logos, then the title). Screenshots go through a file on the phone:

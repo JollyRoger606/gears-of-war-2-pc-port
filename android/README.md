@@ -136,7 +136,9 @@ SDK's per-frame page invalidation and at 9.4 fps without it (`clear_memory_page_
 Android; see [GPU diagnostics and switches](#gpu-diagnostics-and-switches)). From a cool start it
 now runs at 26-29 fps with the GPU at 734 MHz for the first 40 s, then follows the thermal cap
 down to 9-13 fps at 222 MHz after about four minutes.
-Large parts of the scene render black.
+The black regions were fixed on October 15 with the Android color depth bias default of 16.
+After walking, two lamp posts and a hanging banner still render solid white with a glow; the
+phone's warm colour grade also differs from the PC's teal grade, with the console match unknown.
 
 ## Game build
 
@@ -430,7 +432,8 @@ game frame.
 ### GPU diagnostics and switches
 
 Patch 0007's Vulkan side has Android-only diagnostics and switches for the black scene and the
-frame rate; none changes what the game does unless it is set in `gow2.toml`.
+frame rate; the diagnostics keep the default behaviour unless set in `gow2.toml`, while
+`vulkan_android_color_depth_bias` defaults to 16 as described below.
 [`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md) lists them and the order to try
 them in. `vulkan_android_stats_log=true` adds a `GPUSTATS` line every five seconds (draws by kind,
 render passes, submissions, waits for the whole GPU, occlusion queries, time the GPU command thread
@@ -443,12 +446,14 @@ effects can be switched off without a rebuild. `vulkan_android_depth_experiment`
 depth test forced to pass, depth prepass skipped, stencil off, whole-target scissor, scene draws
 painted magenta, culling off, no clip planes, prepass meshes skipped without their depth clears,
 every float24 color draw passing its depth test, mid-frame depth clears skipped, prepass painted),
-`vulkan_android_color_depth_bias`, the shader hash lists `vulkan_android_skip_shader_hashes` and
+the shader hash lists `vulkan_android_skip_shader_hashes` and
 `vulkan_android_paint_shader_hashes`, `vulkan_android_skip_draw_range` and
 `vulkan_android_trace_frame_after_seconds` (every draw of one frame logged as `FRAMETRACE` with its
 render targets, viewport, scissor and polygon offset, plus the frame's render target transfers,
-resolves and resolve clears as `FRAMETRACE-RT`) are for the black scene; `docs/ANDROID_EXPERIMENTS.md`
-lists them.
+resolves and resolve clears as `FRAMETRACE-RT`) remain diagnostics for the black scene.
+`vulkan_android_color_depth_bias` defaults to 16 on Android to cover the prepass/base-pass depth
+mismatch of about one float24 step; it adds bias to color draws with a pixel shader on float24
+depth that test GREATER or GEQUAL, and 0 turns it off. `docs/ANDROID_EXPERIMENTS.md` lists them.
 
 `clear_memory_page_state` is off on Android (patch 0007; the SDK's default, on, stays elsewhere).
 On, it marks every page the CPU uploaded as stale at each frame end, so the whole working set was
@@ -507,9 +512,10 @@ unchanged: keyboard labels unless an XInput controller is connected at launch.
 - Speed: about 9 game frames per second on a GPU thermally capped at 222 MHz (see above); the Xenos
   path's remaining cost on the Adreno 830 is next
   ([`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md), steps 1 and P1-P6).
-- Rendering: large parts of the scene are black in gameplay (34% of the picture at the start of the
-  first checkpoint, `tools/black_fraction.py`). No scene draw reaches those pixels and every GPU
-  state switch was ruled out; a frame capture comes next (same document, results section).
+- Rendering: the black regions were fixed on October 15. After walking, two lamp posts and a
+  hanging banner still render solid white with a glow (0.81 % of the walked picture). The phone's
+  warm colour grade differs from the PC's teal grade; which matches the console is not established
+  (same document, [black scene results](../docs/ANDROID_EXPERIMENTS.md#black-scene-found-october-15-second-session)).
 - A checkpoint written by an older build (before the network fixes) crashes on load: the main
   thread's guest stack overflows in `sub_8255E4A8`, which calls itself through an object listed as
   its own child (`Unhandled guest access violation: write of guest 0x7014FFD0`). New campaigns and

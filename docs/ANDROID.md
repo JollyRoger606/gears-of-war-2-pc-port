@@ -6,8 +6,11 @@ included. On the phone the game plays the start of Act 1 with on-screen touch co
 controllers, and a keyboard and mouse attached at launch): menus, the campaign intro, the opening
 cutscene and gameplay, where Marcus moves, turns the camera and fires. Since October 15 it runs at
 about 9.4 game frames per second where it ran at 4.6, with the phone's thermal limit holding the
-GPU at 222 MHz (the SDK re-uploaded every CPU-written page each frame; see step 5), and parts of the
-scene still render black (step 4). Target device for bring-up: Samsung Galaxy S25 Ultra
+GPU at 222 MHz (the SDK re-uploaded every CPU-written page each frame; see step 5). On October 15,
+the black regions were traced to a depth mismatch between the prepass and base-pass vertex shaders
+on Adreno and fixed with the Android color depth bias default of 16 (step 4). White lamp objects
+and a hanging banner after walking, and the colour grade difference from the PC, remain under
+investigation. Target device for bring-up: Samsung Galaxy S25 Ultra
 (Snapdragon 8 Elite, Adreno 830, Vulkan 1.3). Controls:
 [`android/README.md`](../android/README.md#controls). [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md)
 has the experiments, their results and what comes next.
@@ -154,6 +157,12 @@ copy of the generated code.
    stays black: no scene draw reaches it, so those objects are either never drawn or drawn
    off-screen. A frame capture and a comparison with the PC at the same checkpoint come next
    ([`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md#results-of-the-october-15-session)).
+   The second October 15 session found that some Adreno base-pass meshes produce depth up to about
+   one float24 step farther than their prepass and fail GEQUAL; the earlier switches had not
+   tested the intended draws. `vulkan_android_color_depth_bias` now defaults to 16 on Android,
+   fixing the black regions while keeping the prepass and early depth rejection. The evidence
+   and remaining white objects are in
+   [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md#black-scene-found-october-15-second-session).
 5. **Measure.** If the generic Xenos path cannot hold 30 fps in Act 1, the proven alternative is a
    renderer written for Unreal Engine 3's draw calls, which is a large project of its own. First
    numbers (`gow2_frame_log`): 3 to 5 game frames per second in the first gameplay area with the
