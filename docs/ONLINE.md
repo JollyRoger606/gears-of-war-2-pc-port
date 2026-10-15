@@ -6,11 +6,8 @@ every friend names the host with `net_peers`. On a PC, `scripts/host-online.ps1`
 through UPnP for a few hours and closes them again. This guide covers that set-up, forwarding by
 hand for routers without UPnP, what it exposes, and two VPN alternatives that open no port at all.
 
-`suruworks.com` is the ready host name for the maintainer's sessions: its DNS A record already
-points at the public address of the PC that hosts them, so friends joining those sessions set
-`net_peers=suruworks.com` and need nothing else. Anyone else who hosts uses their own name or
-address. Other addresses below are examples from the documentation ranges: 203.0.113.10 is the
-host's public address, 198.51.100.20 and 198.51.100.30 are friends, `gow2.example.com` is a DNS
+Addresses below are examples from the documentation ranges: 203.0.113.10 is the host's public
+address, 198.51.100.20 and 198.51.100.30 are friends, `gow2.example.com` is a DNS
 name the host controls, and 192.168.1.10 is the host PC on its home network.
 
 Status: PC and phone joined each other's campaign over one home LAN (NETWORK_PLAY.md,
@@ -48,10 +45,11 @@ internet.
 ### Open the ports with host-online.ps1 (UPnP)
 Most home routers let programs on the LAN add port mappings through UPnP (IGD).
 `scripts/host-online.ps1` asks every router between the PC and the internet for UDP 14001 and UDP
-41000, for a limited time, and removes them again. It needs no administrator and runs in Windows
-PowerShell 5.1 and PowerShell 7:
+41000, for a limited time, and removes them again. It comes with the repository, not with the
+release zip, and needs `host-online-upnp.ps1` and `host-online-state.ps1` next to it. It needs no
+administrator and runs in Windows PowerShell 5.1 and PowerShell 7:
 ```
-powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Start
+powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Start [-Hostname gow2.example.com]
 powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Status
 powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Stop
 ```
@@ -60,31 +58,62 @@ powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Stop
    probes the route toward 1.1.1.1 one hop at a time (as traceroute does) and sends each hop a
    unicast UPnP search. A router whose WAN address (GetExternalIPAddress) is private has another
    router in front of it, so the script goes on to the next hop; it stops at the router whose WAN
-   address is public.
-2. Checks that this WAN address is what https://api.ipify.org sees.
+   address is public. It speaks UPnP to each hop only at that hop's own address: an SSDP answer,
+   a base URL or a control URL that points at another host, or at anything but plain http, is
+   ignored. Before the next router maps to a router's WAN address, that address must be a private
+   a.b.c.d address in the next hop's private range. Router answers are capped at 256 KB, and XML
+   with a DTD is refused.
+2. Checks that the outermost WAN address is what https://api.ipify.org sees.
 3. Reads UDP 14001 and 41000 on every router (GetSpecificPortMappingEntry) and refuses to go on
-   if either port already goes to another device or port.
+   if either port already goes to another device or port, or carries the script's description
+   but points elsewhere (an earlier `-Start` from another LAN address, or another PC that hosts).
 4. Maps both ports on every router, with the description `gow2 System Link` and a lease
-   (`-LeaseHours`, default 6, at most 168), each to the next device inward: on the PC's own router
+   (`-LeaseHours`, default 6, at most 24), each to the next device inward: on the PC's own router
    to the PC's LAN address, and on the router in front of it to the WAN address of the router
-   behind, which is the address that router sees the request come from. It reads every mapping
-   back; if one fails, it removes the ones it added in that run.
-5. Checks that `-Hostname` (default `suruworks.com`) resolves to the public address, and prints
-   the settings for the host and for friends on PC and Android. When the name points elsewhere,
-   it warns and prints the address instead. `-AllowPeers 198.51.100.20,friend2.example.net` fills
-   in the host's `net_allow_peers`.
+   behind, which is the address that router sees the request come from. Before each request it
+   records the mapping in a state file, `%LOCALAPPDATA%\gow2-recomp\host-online.json`, so a reply
+   lost on the way back cannot hide a mapping. It reads every mapping back. If a step fails, or
+   the run is interrupted (Ctrl+C included), it removes the mappings that run added, each only
+   when it still carries the script's description and points where the script pointed it, and
+   says so when some may still be active.
+5. Stops and undoes the run when a router accepts only permanent mappings (UPnP error 725),
+   unless `-AllowPermanent` is given; that router's mappings then have no lease.
+6. Schedules the automatic `-Stop`: a one-time Task Scheduler task for the current user,
+   `gow2 host-online stop`, one minute after the lease ends (no administrator needed). It runs
+   `-Stop` without a window (`conhost.exe --headless`) and logs to
+   `%LOCALAPPDATA%\gow2-recomp\host-online-stop.log`. If the PC is off or asleep at that time, it
+   runs as soon as it can.
+7. Prints the settings for the host and for friends on PC and Android, and when each router's
+   mappings close. `-Hostname` (no default) is the host's DNS name: the script checks that it
+   resolves to the public address, and prints the address instead when it does not.
+   `-AllowPeers 198.51.100.20,friend2.example.net` fills in the host's `net_allow_peers`.
 
-`-Start` again renews the leases. `-Status` lists both ports on every router. `-Stop` deletes the
-mappings that carry the script's description and point where the script points them, and leaves
-any other mapping alone. `-PortOffset` follows a different `net_port_offset`.
+`-Start` again renews the leases and moves the automatic `-Stop`. `-Status` lists what the state
+file records, both ports on every router, any other mapping with the script's description, and
+the scheduled `-Stop`. `-PortOffset` follows a different `net_port_offset`.
 
-Run `-Stop` after every session: not every router honours the lease. In a test with a 6-minute
-lease (`-LeaseHours 0.1`), the OpenWRT router counted it down and had dropped both mappings by a
-check two minutes after the lease ended. The ISP modem reported the full lease without counting
-it down and still listed both mappings, with lease 0, ten minutes after the lease ended. With two
-routers in a row the path closes once the inner router drops its mappings, but a modem like that
-keeps its own until `-Stop`. `-Start` re-reads one mapping per router 2.5 seconds after mapping
-and warns about a router whose lease does not go down. [V on that network]
+`-Stop` must run on the PC and under the Windows account that ran `-Start`, because it reads that
+account's state file; the PC's LAN address may have changed since. It:
+1. deletes every mapping the state file records, at the router and control URL recorded, if it
+   still carries the script's description;
+2. finds the routers again and deletes every mapping described `gow2 System Link` on each,
+   whatever its port or target. A router whose WAN address cannot be read, for example while the
+   internet link is down, is still searched, and so are the hops after it;
+3. deletes the scheduled task.
+
+It leaves every other mapping alone and goes on after a failed delete. It exits with code 1 when
+it cannot confirm that everything is gone: a recorded router did not answer, a delete failed, or
+the path could not be followed and no state file said where `-Start` had mapped. Run it again
+once the routers answer; the scheduled task stays until a `-Stop` succeeds.
+
+Run `-Stop` after every session anyway: not every router honours the lease. In a test with a
+6-minute lease (`-LeaseHours 0.1`) the OpenWRT router dropped both mappings when the lease ended.
+The ISP modem reported the full lease without counting it down, and `-Start` warned about it. In
+the first such test the modem still listed both mappings, with lease 0, ten minutes after the
+lease ended. In the second it still listed UDP 14001 when the automatic `-Stop` ran, one minute
+after the lease ended, and `-Stop` deleted it. With two routers in a row the path closes once the
+inner router drops its mappings, but a modem like that keeps its own until `-Stop`. [V on that
+network]
 
 It stops with a message, and maps nothing, when a router on the path does not answer UPnP (turn
 UPnP on there, or forward by hand as below), when a router refuses changes (UPnP error 606), and
@@ -94,11 +123,15 @@ answer UPnP, that hop is either a second router of yours with UPnP off or the IS
 NAT; the message names both.
 
 On 2026-10-15, on a home network with two routers in a row (an OpenWRT router behind the ISP's
-cable modem), `-Start`, `-Status`, a second `-Start` and `-Stop` ran in both PowerShell versions,
-and `-Start` refused a test mapping that sent UDP 14001 to another port. Each router's own list of
-mappings (GetGenericPortMappingEntry, read separately with curl) showed the four mappings while
-hosting and was back to its earlier state after `-Stop`. [V on that network] Traffic from the
-internet has not yet reached the game through the mappings.
+cable modem), it ran in both PowerShell versions: `-Start` with a 6-minute lease, whose automatic
+`-Stop` fired on its own without a window and cleaned up; `-Start`, a second `-Start` (renewal),
+`-Status`, and `-Stop` with the state file moved away (by description only), then `-Stop` again.
+An earlier version also refused a test mapping that sent UDP 14001 to another port. Each router's
+own list of mappings (GetGenericPortMappingEntry, read separately with curl) showed the four
+mappings while hosting and none of them afterwards. Failures that this network cannot produce (a
+lost reply, Ctrl+C, a router that does not answer, a changed LAN address or port offset, error
+725, a hostile description) were run against a model of two routers. [V on that network, and in
+the model]
 
 The script opens router ports only: the Windows Firewall rule below is still needed, and it needs
 an administrator.
@@ -146,10 +179,8 @@ the public address. Some ISPs lock parts of the modem's admin page; if the forwa
 missing, ask the ISP.
 
 ### DNS name (optional)
-For the maintainer's sessions `suruworks.com` is ready: its A record already points at the
-hosting PC's public address, and `host-online.ps1 -Start` checks that each time. For your own
-host, a literal public address works (`--net_public_address=203.0.113.10`), but home addresses
-are often dynamic. A DNS name lets friends keep the same settings when it changes. In your
+A literal public address works (`--net_public_address=203.0.113.10`), but home addresses are
+often dynamic. A DNS name lets friends keep the same settings when it changes. In your
 domain's DNS editor, add one of these records:
 ```
 gow2   A       203.0.113.10        (TTL 300)
@@ -165,6 +196,7 @@ Check from any machine:
 Resolve-DnsName gow2.example.com
 ```
 The result must end in the host's current public address (https://api.ipify.org).
+`host-online.ps1 -Start -Hostname gow2.example.com` checks this each time it runs.
 
 ### Game settings
 On PC, pass settings on the command line. Every build copies `config/gow2.toml` over
@@ -232,14 +264,14 @@ forwards as the only boundary: forward nothing beyond the two UDP ports.
 
 ## Friends' setup
 Every friend needs the host's build and their own copy of the game's files: this project ships no
-game data. The lines below join the maintainer's sessions at `suruworks.com`; for another host,
-use the name or address its `host-online.ps1 -Start` printed.
+game data. Friends name the host the way its `host-online.ps1 -Start` printed it; the lines
+below use `gow2.example.com`.
 
 ### PC
 Use the same build as the host. No version check exists yet, and a build without patch 0011 uses
 UDP 1000 instead of 41000 and cannot see a 0011 host.
 ```
-gow2.exe --net_link_active=true --net_peers=suruworks.com --user_name=<name>
+gow2.exe --net_link_active=true --net_peers=gow2.example.com --user_name=<name>
 ```
 Then choose CO-OP CAMPAIGN -> JOIN CO-OP CAMPAIGN to open the System Link browser; X (E on the
 keyboard with `--mnk_mode=true`) refreshes. See [NETWORK_PLAY.md](NETWORK_PLAY.md) for the menu
@@ -252,7 +284,7 @@ Use the same APK build. Put a `gow2.toml` in
 `/sdcard/Android/data/com.santiquiroz.gow2recomp/files/` with these lines:
 ```
 net_link_active = true
-net_peers = "suruworks.com"
+net_peers = "gow2.example.com"
 user_name = "<name>"
 ```
 Copy it over USB, or push it from Git Bash (without `MSYS_NO_PATHCONV=1`, Git Bash rewrites the
@@ -305,8 +337,9 @@ can change a phone's public address between connections. If the log shows
   forwards) and disable the rule. Do not rely on the lease alone (see the script's section). Nothing
   else needs to be exposed for the game.
 - UPnP lets any program on the LAN open router ports, which is why some people turn it off. The
-  script maps only the two UDP ports, with a lease, and `-Status` shows whether anything else
-  holds them.
+  script maps only the two UDP ports, with a lease and an automatic `-Stop`, and `-Status` shows
+  whether anything else holds them. `-Stop` deletes every mapping described `gow2 System Link`
+  on the routers it reaches, including one that another PC in the house made with this script.
 - Everyone runs the same build. An older or different build can misread the traffic.
 
 ## Safer alternatives with no open ports
@@ -364,7 +397,7 @@ advertising its ZeroTier address is unreachable for devices outside it.
 ### Comparison
 | Option | Open ports | Admin on host | Broadcasts | Friends need |
 |---|---|---|---|---|
-| UPnP (`host-online.ps1`) | UDP 14001 + 41000 on every router in the path, until `-Stop` | Firewall rule | n/a | `net_peers=<host name>` |
+| UPnP (`host-online.ps1`) | UDP 14001 + 41000 on every router in the path, until `-Stop` (automatic at the lease end) | Firewall rule | n/a | `net_peers=<host name>` |
 | Port forwarding by hand | UDP 14001 + 41000 on every router in the path | Router pages + firewall rule | n/a | `net_peers=<host name>` |
 | Tailscale | None | Installer + firewall rule | No | Tailscale + `net_peers` |
 | ZeroTier | None | Installer + firewall rule | Yes | ZeroTier + `net_local_ip`, `net_peers` |

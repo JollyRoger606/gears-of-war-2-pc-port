@@ -332,7 +332,7 @@
           </li>
           <li class="feat">
             <h3>Campaña cooperativa por System Link</h3>
-            <p>Hasta cuatro jugadores en la campaña, entre PC y teléfonos Android en la misma red. Viene apagada: pon <code>net_link_active = true</code> en la copia de cada jugador para dos jugadores, o <code>gow2_coop_players = 3</code> o <code>4</code> para más. Verificada con cuatro copias en un mismo PC, dos PC en una LAN y un PC con un teléfono Android. El juego por internet es experimental: el anfitrión abre dos puertos UDP y los amigos se unen con <code>net_peers</code> (<a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">guía, en inglés</a>).</p>
+            <p>Hasta cuatro jugadores en la campaña en PC; un PC y un teléfono Android se han unido para el cooperativo de dos jugadores. Viene apagada: pon <code>net_link_active = true</code> en la copia de cada jugador para dos jugadores, o <code>gow2_coop_players = 3</code> o <code>4</code> para más. Verificada con cuatro copias en un mismo PC, y con un PC y un teléfono Android en la misma LAN. El juego por internet es experimental: el anfitrión abre dos puertos UDP y los amigos se unen con <code>net_peers</code> (<a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">guía, en inglés</a>).</p>
             <div class="feat__keys"><span class="chip">net_link_active</span><span class="chip">gow2_coop_players</span><span class="chip">net_peers</span></div>
           </li>
           <li class="feat">
@@ -381,7 +381,7 @@
               <li>El acto 1 se puede jugar con teclado y mouse o con mando</li>
               <li>1440p nativo, o 4K interno</li>
               <li>Reescalado temporal FSR 4 y FSR 3.1 (opcional), FSR 1 y nitidez CAS</li>
-              <li>Campaña cooperativa de hasta cuatro jugadores por System Link (opcional): PC con PC y PC con Android en una LAN</li>
+              <li>Campaña cooperativa de hasta cuatro jugadores por System Link (opcional): cuatro copias en un mismo PC, y un PC con un teléfono Android en una LAN</li>
               <li>Parches comunitarios del juego</li>
               <li>Paquetes de texturas: volcar y reemplazar</li>
               <li>Partidas guardadas, perfil y logros en cualquier carpeta (<code>gow2_save_dir</code>)</li>
@@ -401,7 +401,7 @@
           <div class="panel plate issues">
             <h3>Problemas conocidos en la 0.1.1</h3>
             <ul role="list">
-              <li><strong>Los íconos de botones son los de Xbox.</strong> Lo son aunque juegues con teclado.</li>
+              <li><strong>Las pistas muestran imágenes de botones de Xbox.</strong> Los menús muestran las teclas ([Espacio], [E]...) salvo que haya un mando conectado al arrancar (<code>gow2_prompts</code>); las imágenes de botones dentro de las pistas del juego siguen siendo las de Xbox.</li>
               <li><strong>Iluminación verdosa.</strong> Se reportó en un PC y todavía no se ha podido reproducir. Ayudan las <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/issues">capturas en un issue</a>.</li>
               <li><strong>El cooperativo de tres o cuatro jugadores es temprano.</strong> Un cambio de capítulo, la muerte de cualquier jugador, que alguien se vaya, las cinemáticas y los vehículos pueden romperlo.</li>
               <li><strong>Todos los jugadores necesitan la misma compilación.</strong> Todavía no hay comprobación de versión, y una copia 0.1.0 no ve a un anfitrión 0.1.1.</li>
@@ -516,7 +516,7 @@
           <details>
             <summary>¿Hay multijugador, Horda o cooperativo?</summary>
             <div class="faq__answer">
-              <p>La campaña cooperativa por System Link viene en la 0.1.1, apagada por defecto. Pon <code>net_link_active = true</code> en la copia de cada jugador para dos jugadores, o <code>gow2_coop_players = 3</code> o <code>4</code> para hasta cuatro; todos necesitan la misma compilación. Dos PC, y un PC con un teléfono Android, se unieron a la campaña del otro en la misma red, y cuatro copias en un mismo PC jugaron juntas el capítulo 2 del acto 1. El juego por internet es experimental y todavía no está verificado: el anfitrión abre UDP 14001 y 41000, y los amigos lo nombran con <code>net_peers</code>. Guías, en inglés: <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/NETWORK_PLAY.md">juego en red</a>, <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/COOP_N_PLAYERS.md">más de dos jugadores</a> y <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">juego por internet</a>. Horda y Versus no se han probado. El cooperativo en pantalla dividida forma parte del objetivo de la campaña completa.</p>
+              <p>La campaña cooperativa por System Link viene en la 0.1.1, apagada por defecto. Pon <code>net_link_active = true</code> en la copia de cada jugador para dos jugadores, o <code>gow2_coop_players = 3</code> o <code>4</code> para hasta cuatro; todos necesitan la misma compilación. Dos copias en un mismo PC, y un PC con un teléfono Android en la misma red, se unieron a la campaña del otro, y cuatro copias en un mismo PC jugaron juntas el capítulo 2 del acto 1. El juego por internet es experimental y todavía no está verificado: el anfitrión abre UDP 14001 y 41000, y los amigos lo nombran con <code>net_peers</code>. Guías, en inglés: <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/NETWORK_PLAY.md">juego en red</a>, <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/COOP_N_PLAYERS.md">más de dos jugadores</a> y <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">juego por internet</a>. Horda y Versus no se han probado. El cooperativo en pantalla dividida forma parte del objetivo de la campaña completa.</p>
             </div>
           </details>
           <details>

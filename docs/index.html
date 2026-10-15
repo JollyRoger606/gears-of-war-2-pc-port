@@ -332,7 +332,7 @@
           </li>
           <li class="feat">
             <h3>Campaign co-op over System Link</h3>
-            <p>Up to four players in the campaign, between PCs and Android phones on one network. It is off by default: set <code>net_link_active = true</code> on every player's copy for two players, or <code>gow2_coop_players = 3</code> or <code>4</code> for more. Verified with four copies on one PC, two PCs on a LAN, and a PC with an Android phone. Playing over the internet is experimental: the host opens two UDP ports and friends join with <code>net_peers</code> (<a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">guide</a>).</p>
+            <p>Up to four players in the campaign on PC; a PC and an Android phone have joined for two-player co-op. It is off by default: set <code>net_link_active = true</code> on every player's copy for two players, or <code>gow2_coop_players = 3</code> or <code>4</code> for more. Verified with four copies on one PC, and with a PC and an Android phone on one LAN. Playing over the internet is experimental: the host opens two UDP ports and friends join with <code>net_peers</code> (<a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">guide</a>).</p>
             <div class="feat__keys"><span class="chip">net_link_active</span><span class="chip">gow2_coop_players</span><span class="chip">net_peers</span></div>
           </li>
           <li class="feat">
@@ -381,7 +381,7 @@
               <li>Act 1 playable with keyboard and mouse or a controller</li>
               <li>Native 1440p, or 4K internal</li>
               <li>FSR 4 and FSR 3.1 temporal upscaling (opt-in), FSR 1 and CAS</li>
-              <li>Campaign co-op for up to four players over System Link (opt-in): PC with PC and PC with Android on a LAN</li>
+              <li>Campaign co-op for up to four players over System Link (opt-in): four copies on one PC, and a PC with an Android phone on a LAN</li>
               <li>Community game patches</li>
               <li>Texture packs: dump and replace</li>
               <li>Saves, profile and achievements in any folder (<code>gow2_save_dir</code>)</li>
@@ -401,7 +401,7 @@
           <div class="panel plate issues">
             <h3>Known issues in 0.1.1</h3>
             <ul role="list">
-              <li><strong>Button prompts show Xbox buttons.</strong> They do even when you play with the keyboard.</li>
+              <li><strong>Hints show Xbox button pictures.</strong> Menu prompts show keyboard keys ([Space], [E]...) unless a controller is connected at launch (<code>gow2_prompts</code>); the button pictures inside in-game hints are still the Xbox ones.</li>
               <li><strong>Green-looking lighting.</strong> It has been reported on one PC and could not be reproduced yet. <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/issues">Screenshots in an issue</a> help.</li>
               <li><strong>Co-op with three or four players is early.</strong> A chapter change, the death of any player, a player leaving, cinematics and vehicles can break it.</li>
               <li><strong>Every player needs the same build.</strong> There is no version check yet, and a 0.1.0 copy cannot see a 0.1.1 host.</li>
@@ -516,7 +516,7 @@
           <details>
             <summary>Is there multiplayer, Horde or co-op?</summary>
             <div class="faq__answer">
-              <p>Campaign co-op over System Link is in 0.1.1, off by default. Set <code>net_link_active = true</code> on every player's copy for two players, or <code>gow2_coop_players = 3</code> or <code>4</code> for up to four; everyone needs the same build. Two PCs, and a PC with an Android phone, joined each other's campaign on one network, and four copies on one PC played Act 1 chapter 2 together. Playing over the internet is experimental and not yet verified: the host opens UDP 14001 and 41000, and friends name the host with <code>net_peers</code>. Guides: <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/NETWORK_PLAY.md">network play</a>, <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/COOP_N_PLAYERS.md">more than two players</a> and <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">playing over the internet</a>. Horde and Versus have not been tried. Split-screen co-op is part of the full-campaign goal.</p>
+              <p>Campaign co-op over System Link is in 0.1.1, off by default. Set <code>net_link_active = true</code> on every player's copy for two players, or <code>gow2_coop_players = 3</code> or <code>4</code> for up to four; everyone needs the same build. Two copies on one PC, and a PC with an Android phone on one network, joined each other's campaign, and four copies on one PC played Act 1 chapter 2 together. Playing over the internet is experimental and not yet verified: the host opens UDP 14001 and 41000, and friends name the host with <code>net_peers</code>. Guides: <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/NETWORK_PLAY.md">network play</a>, <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/COOP_N_PLAYERS.md">more than two players</a> and <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">playing over the internet</a>. Horde and Versus have not been tried. Split-screen co-op is part of the full-campaign goal.</p>
             </div>
           </details>
           <details>

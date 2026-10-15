@@ -37,9 +37,10 @@ Read in English: [README.md](README.md)
 - [x] Reescalado temporal FSR 4 y FSR 3.1 (`gow2_temporal`, `gow2_upscaler`; apagado por defecto). La versión publicada no trae DLSS
 - [ ] Teclas que el juego reciba como en un PC (todavía pasan por un mando emulado)
 - [ ] Campaña completa de principio a fin
-- [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro jugadores en un mismo PC (loopback), dos PC en la misma LAN y un PC con un teléfono Android en la misma LAN, verificado el 2026-10-14 y el 2026-10-15
+- [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15
 - [ ] Juego por internet (implementado: `net_peers`, `net_public_address`, `net_allow_peers`; sin probar)
 - [ ] Horda y Versus por System Link
+- [ ] Android: una compilación del repositorio llega a jugar y se une a la campaña de un PC por System Link, pero corre a pocos fps y partes de la escena se ven negras; todavía no se puede jugar y no se publica ningún APK ([docs/ANDROID.md](docs/ANDROID.md))
 
 Ver el plan completo en [ROADMAP.md](ROADMAP.md).
 
@@ -134,18 +135,18 @@ Un reemplazo se aplica cuando tiene al menos tantos niveles de mipmap como la te
 
 ## System Link
 
-La campaña cooperativa por System Link funciona entre PC, teléfonos Android y varias copias en un mismo PC. Viene apagada: pon `net_link_active = true` en `gow2.toml` (o pasa `--net_link_active=true`) en la copia de cada jugador y usa la misma compilación en todas; `gow2_coop_players` 3 o más la enciende sola. El puerto UDP 1000 del juego pasa a ser 41000 en todas las plataformas (`net_port_offset`, porque Android no puede usar puertos por debajo de 1024) y la baliza de System Link usa UDP 14001, así que un PC anfitrión necesita una regla del Firewall de Windows para esos dos puertos. `system_link_trace = true` registra cada llamada de red y de sesión del juego (líneas `[netlink]`).
+La campaña cooperativa por System Link funciona entre PC y entre varias copias en un mismo PC; una compilación de Android se unió a un PC para el cooperativo de dos jugadores. Viene apagada: pon `net_link_active = true` en `gow2.toml` (o pasa `--net_link_active=true`) en la copia de cada jugador y usa la misma compilación en todas; `gow2_coop_players` 3 o más la enciende sola. El puerto UDP 1000 del juego pasa a ser 41000 en todas las plataformas (`net_port_offset`, porque Android no puede usar puertos por debajo de 1024) y la baliza de System Link usa UDP 14001, así que un PC anfitrión necesita una regla del Firewall de Windows para esos dos puertos. `system_link_trace = true` registra cada llamada de red y de sesión del juego (líneas `[netlink]`).
 
 - [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): un PC y un teléfono en la misma red, los ajustes, varias copias en un mismo PC y solución de problemas.
 - [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): cooperativo con más de dos jugadores (`gow2_coop_players`; cuatro verificados en un mismo PC) y lo que aún falta, como el cambio de capítulo con jugadores extra.
-- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet. `scripts/host-online.ps1 -Start` abre por UPnP los puertos UDP 14001 y 41000 en cada router entre el PC y internet, con un plazo (6 h por defecto), y `-Stop` los cierra; probado el 2026-10-15 en una red con dos routers. Para las sesiones del mantenedor, los amigos usan `net_peers=suruworks.com`. Sin UPnP: reenvío manual; sin abrir puertos: Tailscale o ZeroTier. Ninguna partida ha cruzado internet todavía.
+- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet. Desde el repositorio (no viene en el zip de la versión publicada), [`scripts/host-online.ps1`](https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/scripts/host-online.ps1) `-Start` abre por UPnP los puertos UDP 14001 y 41000 en cada router entre el PC y internet, con un plazo (6 h por defecto, 24 h como máximo), y programa un `-Stop` automático para el final del plazo; `-Stop` los cierra. Ejecuta `-Stop` después de cada sesión; algunos routers ignoran el plazo. Sin UPnP: reenvío manual; sin abrir puertos: Tailscale o ZeroTier. Ninguna partida ha cruzado internet todavía.
 
 Horda y Versus por System Link no se han probado. Ver [ROADMAP.md](ROADMAP.md).
 
 ## Problemas conocidos
 
 - **La puntería con el mouse cambió en la 0.1.1.** En la 0.1.0 el mouse se traducía a movimiento del stick derecho, y el juego ignoraba cualquier inclinación del stick menor al 30 % (su binding `DeadZone=0.3`). Ahora el mouse va por los ejes de mouse de PC del propio juego (`gow2_mouse_aim`), sin zona muerta, y los mandos conservan la puntería original. Las teclas todavía pasan por un mando emulado. Se agradece contar en un issue cómo se siente.
-- **Los íconos de botones muestran los del control de Xbox** aunque juegues con teclado. Las etiquetas de teclado están en progreso.
+- **Las pistas muestran imágenes de botones de Xbox.** Los menús muestran las teclas ([Espacio], [E]...) salvo que haya un mando conectado al arrancar (`gow2_prompts` = `auto`, `keyboard` o `controller`); las imágenes de botones dentro de las pistas del juego siguen siendo las de Xbox.
 - **Se reportó iluminación verdosa** en la piel, las luces y las llamas del menú; todavía no se reproduce en el PC de desarrollo. Se agradecen capturas en un issue.
 - **El cooperativo de tres o cuatro jugadores es temprano.** Un cambio de capítulo, la muerte de cualquier jugador, que alguien se vaya, las cinemáticas y los vehículos pueden romperlo ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)).
 - **Todos los jugadores necesitan la misma compilación.** Todavía no hay comprobación de versión, y una compilación sin el parche 0011 (como la 0.1.0) no ve a un anfitrión 0.1.1.
