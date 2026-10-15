@@ -34,8 +34,9 @@ table with every run, its screenshot and its log is in the session's `out\device
   13.6-16.8 fps at up to 734 MHz in the same place. Repeat on other days before trusting the
   decay; the cost now sits close to the game's frame cap at the higher clocks, so the next limit
   may be the CPU side (`top -H` during play, step 1).
-- **Black scene: not a GPU state problem.** None of experiments 2, 3, 5, 7-10 changed it, nor did
-  the PC's texture cache limits, invalid fetch constants allowed, or the four minutes waited in
+- **Black scene: read that night as not a GPU state problem (corrected below).** None of
+  experiments 2, 3, 5, 7-10 changed it, nor did the PC's texture cache limits, invalid fetch
+  constants allowed, or the four minutes waited in
   place. Experiment 4 does not apply (the game issues no occlusion queries in this view, `ends 0`)
   and experiment 6 is ruled out (the first gameplay with every pipeline built during play and the
   later runs with all of them loaded from storage look the same). The new diagnostics rule out the
