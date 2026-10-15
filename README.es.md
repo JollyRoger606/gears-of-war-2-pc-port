@@ -96,6 +96,7 @@ Un mando funciona al mismo tiempo. Todas las asignaciones están en `gow2.toml`.
 - `gow2_ao_upscaling_fix` — oclusión ambiental sin artefactos al escalar.
 - `gow2_dof_upscaling_fix` — profundidad de campo sin artefactos al escalar.
 - `mnk_sensitivity` — sensibilidad del mouse.
+- `gow2_save_dir` — carpeta de partidas guardadas, ajustes del perfil y logros; apúntala a una carpeta de OneDrive, Google Drive o Dropbox para tener la campaña en la nube ([docs/SAVES.md](docs/SAVES.md)).
 
 Los parches comunitarios vienen de [xenia-canary/game-patches](https://github.com/xenia-canary/game-patches) (autores illusion y boma); los sitios y valores parcheados para este XEX se aplican al código generado, cada uno detrás de su ajuste `gow2_*`.
 
