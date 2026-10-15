@@ -3,6 +3,8 @@
 
 #include "gow2_frame_stats.h"
 
+#include "gow2_android_thermal.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -55,9 +57,9 @@ FrameWindow g_window;
 
 void LogAndRestart(int64_t now) {
   const double seconds = static_cast<double>(now - g_window.start_us) / kUsPerSecond;
-  REXLOG_INFO("FRAMES {:.1f} s: {} frames, {:.1f} fps, longest frame {:.1f} ms", seconds,
+  REXLOG_INFO("FRAMES {:.1f} s: {} frames, {:.1f} fps, longest frame {:.1f} ms, {}", seconds,
               g_window.frames, g_window.frames / seconds,
-              static_cast<double>(g_window.longest_us) / kUsPerMs);
+              static_cast<double>(g_window.longest_us) / kUsPerMs, DescribeGpuAndThermalState());
   g_window = FrameWindow{now, now, 0, 0};
 }
 

@@ -37,6 +37,15 @@
 REXCVAR_DEFINE_STRING(gow2_prompts, "auto", "input", GOW2_PROMPTS_HELP);
 #undef GOW2_PROMPTS_HELP
 
+#if defined(__ANDROID__)
+REXCVAR_DEFINE_STRING(gow2_system_settings, "", "debug",
+                      "Values for the game's own [SystemSettings] (Xe-GearEngine.ini in the "
+                      "Coalesced bundles) as Key=Value pairs separated by ';', for example "
+                      "AmbientOcclusion=False;MotionBlur=False. Only keys the bundle has are "
+                      "changed, in a cached copy prepared at launch")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+#endif
+
 namespace rex::glue {
 
 namespace {
@@ -243,6 +252,13 @@ void AddPrompts(std::vector<Edit>* e, const CoalescedOptions& o) {
     e->push_back({Edit::kSet, kUI, "ControllerFont", kv.first, kv.second});
 }
 
+#if defined(__ANDROID__)
+void AddSystemSettings(std::vector<Edit>* e, const CoalescedOptions& o) {
+  for (const auto& kv : o.system_settings)
+    e->push_back({Edit::kSet, "Xe-GearEngine.ini", "SystemSettings", kv.first, kv.second});
+}
+#endif
+
 uint64_t Fnv(const std::string& s, uint64_t h = 1469598103934665603ull) {
   for (unsigned char c : s) {
     h ^= c;
@@ -313,6 +329,12 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     AddPrompts(&edits, options);
     groups += "key-prompts ";
   }
+#if defined(__ANDROID__)
+  if (!options.system_settings.empty()) {
+    AddSystemSettings(&edits, options);
+    groups += "system-settings ";
+  }
+#endif
   if (edits.empty()) return res;
 
   uint64_t h = Fnv("v" + std::to_string(kVersion));
@@ -480,12 +502,41 @@ std::string KeybindLabel(const char* name, const char* fallback) {
   return "[" + FriendlyKeyName(FirstKey(v)) + "]";
 }
 
+#if defined(__ANDROID__)
+std::string TrimSpaces(const std::string& s) {
+  const size_t first = s.find_first_not_of(" \t");
+  if (first == std::string::npos) return {};
+  const size_t last = s.find_last_not_of(" \t");
+  return s.substr(first, last - first + 1);
+}
+
+// "A=1; B = 2;;C" -> {A,1}, {B,2}; items without '=' or with an empty key are dropped.
+std::vector<std::pair<std::string, std::string>> ParseSettingList(const std::string& list) {
+  std::vector<std::pair<std::string, std::string>> settings;
+  size_t start = 0;
+  while (start <= list.size()) {
+    const size_t end = std::min(list.find(';', start), list.size());
+    const std::string item = list.substr(start, end - start);
+    const size_t eq = item.find('=');
+    const std::string key = TrimSpaces(item.substr(0, eq));
+    if (eq != std::string::npos && !key.empty()) {
+      settings.emplace_back(key, TrimSpaces(item.substr(eq + 1)));
+    }
+    start = end + 1;
+  }
+  return settings;
+}
+#endif
+
 }  // namespace
 
 CoalescedOptions CoalescedOptionsFromCvars() {
   CoalescedOptions o;
   o.mouse_look = rex::cvar::Query<bool>("mnk_mouse");
   o.native_mouse = NativeMouseAimWanted();
+#if defined(__ANDROID__)
+  o.system_settings = ParseSettingList(REXCVAR_GET(gow2_system_settings));
+#endif
   const std::string mode = REXCVAR_GET(gow2_prompts);
   const bool keyboard = mode == "keyboard" || (mode != "controller" && AutoPromptsUseKeyboard());
   if (!keyboard) return o;
