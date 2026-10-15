@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gears of War 2 PC Port — Native on Windows, Not an Emulator</title>
+  <meta name="description" content="Play Gears of War 2 on PC with an unofficial native Windows port: recompiled, not emulated. Bring your own Xbox 360 copy. 1440p/4K, FSR, mouse and keyboard.">
+  <link rel="canonical" href="https://santiquiroz.github.io/gears-of-war-2-pc-port/">
+  <link rel="alternate" hreflang="en" href="https://santiquiroz.github.io/gears-of-war-2-pc-port/">
+  <link rel="alternate" hreflang="es" href="https://santiquiroz.github.io/gears-of-war-2-pc-port/es/">
+  <link rel="alternate" hreflang="x-default" href="https://santiquiroz.github.io/gears-of-war-2-pc-port/">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="theme-color" content="#0b0c0e">
+  <meta name="color-scheme" content="dark">
+  <meta name="author" content="Santiago Quiroz Upegui">
+
+  <link rel="icon" href="assets/favicon.ico" sizes="32x32">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="gow2-recomp">
+  <meta property="og:url" content="https://santiquiroz.github.io/gears-of-war-2-pc-port/">
+  <meta property="og:title" content="Gears of War 2 — native PC port (unofficial)">
+  <meta property="og:description" content="The retail Xbox 360 game statically recompiled to native x64 code for Windows. Not an emulator. Bring your own copy.">
+  <meta property="og:image" content="https://santiquiroz.github.io/gears-of-war-2-pc-port/assets/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Marcus Fenix in Act 1 of Gears of War 2, rendered at 4K internal resolution in the unofficial native PC port">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="es_LA">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Gears of War 2 — native PC port (unofficial)">
+  <meta name="twitter:description" content="The retail Xbox 360 game statically recompiled to native x64 code for Windows. Not an emulator. Bring your own copy.">
+  <meta name="twitter:image" content="https://santiquiroz.github.io/gears-of-war-2-pc-port/assets/og-image.jpg">
+  <meta name="twitter:image:alt" content="Marcus Fenix in Act 1 of Gears of War 2, rendered at 4K internal resolution in the unofficial native PC port">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Stencil:opsz,wght@10..72,800..900&amp;display=swap">
+  <link rel="preload" as="image" type="image/webp" href="assets/img/act1-4k-internal-1600.webp" imagesrcset="assets/img/act1-4k-internal-960.webp 960w, assets/img/act1-4k-internal-1600.webp 1600w" imagesizes="(min-width: 901px) 58vw, 100vw">
+  <link rel="stylesheet" href="site.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://santiquiroz.github.io/gears-of-war-2-pc-port/#website",
+        "url": "https://santiquiroz.github.io/gears-of-war-2-pc-port/",
+        "name": "Gears of War 2 — native PC port (unofficial)",
+        "inLanguage": ["en", "es"]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://santiquiroz.github.io/gears-of-war-2-pc-port/#app",
+        "name": "Gears of War 2 — native PC port (unofficial)",
+        "alternateName": "gow2-recomp",
+        "inLanguage": "en",
+        "description": "Unofficial native Windows port of the retail Xbox 360 game Gears of War 2, statically recompiled to x64 code with the ReXGlue SDK. Not an emulator. Players need their own copy of the game; no game files are distributed.",
+        "url": "https://santiquiroz.github.io/gears-of-war-2-pc-port/",
+        "applicationCategory": "GameApplication",
+        "operatingSystem": "Windows 10, Windows 11 (x64)",
+        "softwareVersion": "0.1.0",
+        "datePublished": "2026-10-14",
+        "softwareRequirements": "A DirectX 12 GPU and your own retail Xbox 360 copy of Gears of War 2 (title ID 4D53082D)",
+        "downloadUrl": "https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest",
+        "license": "https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/LICENSE",
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "image": "https://santiquiroz.github.io/gears-of-war-2-pc-port/assets/og-image.jpg",
+        "screenshot": [
+          "https://santiquiroz.github.io/gears-of-war-2-pc-port/screenshots/act1-4k-internal.jpg",
+          "https://santiquiroz.github.io/gears-of-war-2-pc-port/screenshots/scale-1x-vs-3x.jpg",
+          "https://santiquiroz.github.io/gears-of-war-2-pc-port/screenshots/act1-jacintomed.jpg"
+        ],
+        "sameAs": ["https://github.com/santiquiroz/gears-of-war-2-pc-port"],
+        "author": {
+          "@type": "Person",
+          "name": "Santiago Quiroz Upegui",
+          "url": "https://github.com/santiquiroz"
+        }
+      },
+      {
+        "@type": "SoftwareSourceCode",
+        "@id": "https://santiquiroz.github.io/gears-of-war-2-pc-port/#source",
+        "name": "gears-of-war-2-pc-port",
+        "codeRepository": "https://github.com/santiquiroz/gears-of-war-2-pc-port",
+        "programmingLanguage": ["C++", "Python", "PowerShell"],
+        "license": "https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/LICENSE",
+        "targetProduct": { "@id": "https://santiquiroz.github.io/gears-of-war-2-pc-port/#app" }
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="mark" viewBox="-10 0 120 120">
+      <polygon points="0,9 9,0 50,9 91,0 100,9 100,92 50,120 0,92" fill="#0A0C0E"/>
+      <polygon points="2.6,10.08 9.83,2.84 50,11.66 90.17,2.84 97.4,10.08 97.4,90.48 50,117.02 2.6,90.48" fill="#969EA5"/>
+      <polygon points="9.6,12.98 12.07,10.5 50,18.83 87.93,10.5 90.4,12.98 90.4,86.37 50,109 9.6,86.37" fill="#0E1012"/>
+      <polygon points="10.9,13.51 12.49,11.93 50,20.16 87.51,11.93 89.1,13.51 89.1,85.61 50,107.51 10.9,85.61" fill="#262B30"/>
+      <g fill="#E8341E">
+        <polygon points="15,24.2 17.2,22 43.8,22 46,24.2 46,32 15,32"/>
+        <polygon points="22.5,32 38.5,32 38.5,76 22.5,76"/>
+        <polygon points="15,76 46,76 46,83.8 43.8,86 17.2,86 15,83.8"/>
+        <polygon points="85,32 54,32 54,24.2 56.2,22 82.8,22 85,24.2"/>
+        <polygon points="77.5,76 61.5,76 61.5,32 77.5,32"/>
+        <polygon points="85,83.8 82.8,86 56.2,86 54,83.8 54,76 85,76"/>
+      </g>
+    </symbol>
+    <symbol id="i-download" viewBox="0 0 24 24">
+      <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"/>
+    </symbol>
+    <symbol id="i-star" viewBox="0 0 24 24">
+      <path d="m12 2.8 2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="currentColor"/>
+    </symbol>
+  </svg>
+
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="wrap topbar__inner">
+      <a class="brand" href="./">
+        <svg class="brand__mark" aria-hidden="true"><use href="#mark"/></svg>
+        <span class="brand__name">gow2-recomp</span>
+        <span class="brand__tag">PC port</span>
+      </a>
+      <nav class="topnav" aria-label="Sections">
+        <ul>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#status">Status</a></li>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#faq">FAQ</a></li>
+        </ul>
+      </nav>
+      <div class="topbar__actions">
+        <a class="lang" href="es/" hreflang="es" lang="es"><b>EN</b> / ES<span class="sr-only"> — Leer en español</span></a>
+        <a class="btn btn--ghost btn--sm" href="https://github.com/santiquiroz/gears-of-war-2-pc-port">GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap hero__grid">
+        <div class="hero__copy">
+          <p class="eyebrow">Unofficial fan port · v0.1.0</p>
+          <h1 id="hero-title" class="hero__title">
+            <span class="hero__game">Gears of War 2</span><span class="sr-only"> — </span>
+            <span class="hero__claim"><span>Native</span> <span>PC port</span></span>
+          </h1>
+          <p class="hero__lede">The retail Xbox 360 game, statically recompiled to native x64 code for Windows. <strong>Not an emulator.</strong> You bring your own copy of the game; the download contains none of it.</p>
+          <div class="hero__cta">
+            <a class="btn btn--primary" href="https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest">
+              <svg aria-hidden="true"><use href="#i-download"/></svg>
+              Download for Windows
+              <span class="btn__meta">v0.1.0 · 45 MB</span>
+            </a>
+            <a class="btn btn--ghost" href="https://github.com/santiquiroz/gears-of-war-2-pc-port">
+              <svg aria-hidden="true"><use href="#i-star"/></svg>
+              Star on GitHub
+            </a>
+          </div>
+          <ul class="hero__req" aria-label="Requirements">
+            <li>Windows 10/11 x64</li>
+            <li>DirectX 12 GPU</li>
+            <li>Your own retail copy</li>
+          </ul>
+        </div>
+        <figure class="hero__shot plate">
+          <img
+            src="assets/img/act1-4k-internal-1600.webp"
+            srcset="assets/img/act1-4k-internal-960.webp 960w, assets/img/act1-4k-internal-1600.webp 1600w"
+            sizes="(min-width: 901px) 58vw, 100vw"
+            width="1600" height="900"
+            fetchpriority="high"
+            alt="Marcus Fenix crouched in cover inside the ruined Jacinto Med hospital in Act 1, rendered at 4K internal resolution in the PC port">
+          <figcaption><span class="readout">resolution_scale = 3</span> Act 1, Jacinto Med, rendered at 4K internally</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="runs" id="how" aria-labelledby="how-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Recompiled, not emulated</p>
+          <h2 id="how-title">The game's code, translated once</h2>
+          <p>Emulators translate a console's code while the game runs. This port does that work ahead of time, so on your PC the game is an ordinary Windows program.</p>
+        </div>
+        <ol class="pipeline">
+          <li class="pipeline__step plate">
+            <span class="pipeline__label">Xbox 360 · PowerPC</span>
+            <h3>The retail executable</h3>
+            <p>The game's <code>default.xex</code> holds code for the Xbox 360's PowerPC processor.</p>
+          </li>
+          <li class="pipeline__step plate">
+            <span class="pipeline__label">Build time · ReXGlue SDK</span>
+            <h3>Recompiled ahead of time</h3>
+            <p>The ReXGlue code generator turns the game's functions into C++, which is compiled to native x64 code. No CPU emulator runs while you play.</p>
+          </li>
+          <li class="pipeline__step plate">
+            <span class="pipeline__label">Your PC · x64</span>
+            <h3>gow2.exe</h3>
+            <p>A native Windows program. The ReXGlue runtime, derived from Xenia, stands in for the console's system and graphics, and the game's data comes from your own copy.</p>
+          </li>
+        </ol>
+        <div class="manifest" aria-label="What the download contains and what you provide">
+          <div>
+            <h3>In the zip (v0.1.0)</h3>
+            <ul>
+              <li>gow2.exe and runtime DLLs</li>
+              <li>gow2.toml (settings)</li>
+              <li>tools\texpack.py</li>
+              <li>LICENSE, README, notices</li>
+            </ul>
+          </div>
+          <div class="manifest__divider" aria-hidden="true"></div>
+          <div>
+            <h3>You bring</h3>
+            <ul>
+              <li>default.xex</li>
+              <li>GearGame\</li>
+              <li>dumped from your own retail disc</li>
+            </ul>
+          </div>
+          <p class="manifest__note">The packaging script stops if a game file (<code>default.xex</code>, <code>.xxx</code>, <code>.tfc</code> or <code>.bik</code>) would end up in the zip.</p>
+        </div>
+        <p class="runs__aside">An earlier fan port, “Hollow”, was built from a leaked 2008 development build. This one runs the complete retail game.</p>
+      </div>
+    </section>
+
+    <section class="section gallery" id="screenshots" aria-labelledby="shots-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Screenshots</p>
+          <h2 id="shots-title">Captured in the port</h2>
+          <p>Every screenshot shows the game running in this port on Windows. Select one to open it at full size.</p>
+        </div>
+        <div class="gallery__grid">
+          <figure class="shot shot--wide plate">
+            <a href="screenshots/scale-1x-vs-3x.jpg">
+              <img
+                src="assets/img/scale-1x-vs-3x-1416.webp"
+                srcset="assets/img/scale-1x-vs-3x-760.webp 760w, assets/img/scale-1x-vs-3x-1416.webp 1416w"
+                sizes="(min-width: 1280px) 1200px, 100vw"
+                width="1416" height="590" loading="lazy" decoding="async"
+                alt="Close-up of Marcus Fenix side by side: the original 720p rendering on the left has jagged, blurry edges; 4K internal rendering on the right shows clean armor and weapon detail">
+            </a>
+            <figcaption><span class="readout">resolution_scale 1 → 3</span> Original 720p rendering (left) vs 4K internal rendering (right)</figcaption>
+          </figure>
+          <figure class="shot shot--lead plate">
+            <a href="screenshots/act1-jacintomed.jpg">
+              <img
+                src="assets/img/act1-jacintomed-1600.webp"
+                srcset="assets/img/act1-jacintomed-800.webp 800w, assets/img/act1-jacintomed-1600.webp 1600w"
+                sizes="(min-width: 901px) 58vw, 100vw"
+                width="1600" height="900" loading="lazy" decoding="async"
+                alt="Act 1, Jacinto Med: Marcus Fenix crouched in front of the hospital reception counter, with gurneys and scattered papers behind him">
+            </a>
+            <figcaption>Act 1, Jacinto Med</figcaption>
+          </figure>
+          <figure class="shot shot--side plate">
+            <a href="screenshots/main-menu.jpg">
+              <img
+                src="assets/img/main-menu-640.webp"
+                srcset="assets/img/main-menu-640.webp 640w, assets/img/main-menu-1200.webp 1200w"
+                sizes="(min-width: 901px) 40vw, 100vw"
+                width="640" height="360" loading="lazy" decoding="async"
+                alt="The game's main menu in the port, listing Solo Campaign, Co-op Campaign, Training Grounds, Multiplayer and Horde">
+            </a>
+            <figcaption>Main menu</figcaption>
+          </figure>
+          <figure class="shot shot--side plate">
+            <a href="screenshots/title.jpg">
+              <img
+                src="assets/img/title-640.webp"
+                srcset="assets/img/title-640.webp 640w, assets/img/title-1200.webp 1200w"
+                sizes="(min-width: 901px) 40vw, 100vw"
+                width="640" height="360" loading="lazy" decoding="async"
+                alt="The game's title screen with “Press Start”, running in the port">
+            </a>
+            <figcaption>Title screen</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section features" id="features" aria-labelledby="features-title">
+      <div class="wrap features__grid">
+        <div class="features__intro">
+          <p class="eyebrow">On PC</p>
+          <h2 id="features-title">What the port adds</h2>
+          <p>Everything is a setting in <code>gow2.toml</code>, next to the exe. Command-line flags such as <code>--resolution_scale=3</code> override it.</p>
+          <pre class="toml plate" aria-label="Excerpt of the default gow2.toml"><code><span class="c"># gow2.toml (defaults)</span>
+<span class="k">fullscreen</span>       = <span class="v">true</span>
+<span class="k">resolution_scale</span> = <span class="v">2</span>          <span class="c"># 1 = 720p, 2 = 1440p, 3 = 4K</span>
+<span class="k">present_effect</span>   = <span class="v">"bilinear"</span>   <span class="c"># or "fsr", "cas"</span>
+<span class="k">gow2_unlock_fps</span>  = <span class="v">false</span>      <span class="c"># lifts the 30 fps cap</span>
+<span class="k">gow2_aniso16</span>     = <span class="v">true</span>       <span class="c"># 16x anisotropic filtering</span>
+<span class="k">texture_replace</span>  = <span class="v">false</span>      <span class="c"># load your texture pack</span></code></pre>
+        </div>
+        <ul class="featlist">
+          <li class="feat feat--major">
+            <h3>1440p by default, 4K internal</h3>
+            <p><code>resolution_scale</code> renders the game at a multiple of its original 720p: 2 = 1440p (the default), 3 = 4K. In Act 1 at 1440p the development PC (Ryzen 9 7900X3D, Radeon RX 7800 XT) averages about 90 presented frames per second, 1% low 55.</p>
+          </li>
+          <li class="feat feat--major">
+            <h3>FSR 1 and CAS sharpening</h3>
+            <p>Built with AMD FidelityFX. <code>present_effect = "fsr"</code> renders at a lower <code>resolution_scale</code> and upscales with FSR 1 plus sharpening; <code>"cas"</code> only sharpens. From 720p to 1440p with FSR 1: about 85 fps in Act 1.</p>
+          </li>
+          <li class="feat">
+            <h3>Texture packs</h3>
+            <p>Dump the game's textures from your own copy (<code>texture_dump = true</code>), upscale them with any tool, and load them back (<code>texture_replace = true</code>). The release includes <code>tools\texpack.py</code> to convert between DDS and PNG. Packs contain only your reworked files, never the game's.</p>
+            <figure class="feat__figure">
+              <img src="assets/img/texture-pack-test-640.webp" width="640" height="360" loading="lazy" decoding="async"
+                alt="Title screen with one texture replaced by a recoloured 2048 by 2048 version, turning the background blue and purple">
+              <figcaption>Replacement test: one title-screen texture swapped for a recoloured 2048×2048 version.</figcaption>
+            </figure>
+          </li>
+          <li class="feat">
+            <h3>Community game patches</h3>
+            <p>Correct character lighting, a bigger texture pool with less pop-in, 16x anisotropic filtering, ambient occlusion and depth of field that stay clean at higher resolutions, and an optional 30 fps cap unlock. From <a href="https://github.com/xenia-canary/game-patches">xenia-canary/game-patches</a> by illusion and boma, each behind its own setting.</p>
+            <div class="feat__keys"><span class="chip">gow2_black_shading_fix</span><span class="chip">gow2_texture_streaming_fix</span><span class="chip">gow2_unlock_fps</span></div>
+          </li>
+          <li class="feat">
+            <h3>Keyboard, mouse and controllers</h3>
+            <p>W A S D and the mouse, with fire and aim on the mouse buttons. A controller works at the same time. Every binding is in <code>gow2.toml</code>. Mouse look still needs work in 0.1.0; see <a href="#status">Status</a>.</p>
+          </li>
+          <li class="feat">
+            <h3>Open source</h3>
+            <p>The project's own code is BSD-3-Clause. You can <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/BUILDING.md">build it from source</a> with your own copy of the game.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section status" id="status" aria-labelledby="status-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Status</p>
+          <h2 id="status-title">Act 1 is playable. The rest is in progress.</h2>
+          <p class="status__stamp">v0.1.0 · released 14 Oct 2026</p>
+        </div>
+        <div class="status__grid">
+          <div class="panel plate">
+            <h3>Works now</h3>
+            <ul class="checklist checklist--done">
+              <li>The retail game boots to the menus</li>
+              <li>Act 1 playable with keyboard and mouse or a controller</li>
+              <li>Native 1440p, or 4K internal</li>
+              <li>FSR 1 upscaling and CAS sharpening</li>
+              <li>Community game patches</li>
+              <li>Texture packs: dump and replace</li>
+            </ul>
+          </div>
+          <div class="panel plate">
+            <h3>Not yet</h3>
+            <ul class="checklist checklist--todo">
+              <li>Mouse look that feels like a PC game (fix ships in 0.1.1)</li>
+              <li>The full campaign: only Act 1 has been played</li>
+              <li>FSR 4, FSR 3.1 and DLSS: built in, not active for this game yet</li>
+              <li>System Link (LAN Horde and Versus): socket layer fixed, sessions not done</li>
+              <li>Linux and Android builds</li>
+            </ul>
+          </div>
+          <div class="panel plate issues">
+            <h3>Known issues in 0.1.0</h3>
+            <ul>
+              <li><strong>Mouse look feels wrong.</strong> The game ignores stick movement under 30%, so slow mouse movement is lost. The fix is already in the repository and ships in 0.1.1 once it is tested in game.</li>
+              <li><strong>Button prompts show Xbox buttons.</strong> They do even when you play with the keyboard.</li>
+              <li><strong>Green-looking lighting.</strong> It has been reported on one PC and could not be reproduced yet. <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/issues">Screenshots in an issue</a> help.</li>
+              <li><strong>DLSS is not bundled.</strong> NVIDIA's license keeps it out of the release; NVIDIA users can add <code>nvngx_dlss.dll</code> themselves.</li>
+            </ul>
+          </div>
+        </div>
+        <p class="status__more">The full plan, from the complete campaign to Linux, Android and co-op beyond two players, is in the <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/ROADMAP.md">roadmap</a>.</p>
+      </div>
+    </section>
+
+    <section class="section install" id="install" aria-labelledby="install-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Install</p>
+          <h2 id="install-title">From your disc to gow2.exe</h2>
+          <p>How to play Gears of War 2 on PC with this port, step by step.</p>
+        </div>
+        <div class="install__grid">
+          <div>
+            <ol class="steps">
+              <li>
+                <h3>Dump your own disc</h3>
+                <p>Extract your retail Xbox 360 copy of Gears of War 2 (title ID <code>4D53082D</code>) to a folder that contains <code>default.xex</code> and <code>GearGame</code>. For example, unpack your ISO with <a href="https://github.com/antangelo/xdvdfs">xdvdfs</a>:</p>
+                <pre class="cmd"><code>xdvdfs unpack "Gears of War 2.iso" C:\Games\GoW2</code></pre>
+              </li>
+              <li>
+                <h3>Download and unzip</h3>
+                <p>Get the zip from the latest release and unzip it anywhere. Each release lists the zip's SHA-256 so you can check the download.</p>
+                <a class="btn btn--primary" href="https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest">
+                  <svg aria-hidden="true"><use href="#i-download"/></svg>
+                  Download the latest release
+                </a>
+              </li>
+              <li>
+                <h3>Run gow2.exe</h3>
+                <p>The first launch asks for your game folder and remembers it. You can also pass the folder directly:</p>
+                <pre class="cmd"><code>gow2.exe --game_data_root="C:\Games\GoW2"</code></pre>
+                <p>Settings live in <code>gow2.toml</code> next to the exe.</p>
+              </li>
+            </ol>
+            <details class="controls">
+              <summary>Keyboard and mouse controls</summary>
+              <div class="controls__body">
+                <table class="keys">
+                  <caption>Default bindings. A controller works at the same time.</caption>
+                  <tbody>
+                    <tr><th scope="row">Move</th><td><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></td></tr>
+                    <tr><th scope="row">Look</th><td>Mouse, or the arrow keys</td></tr>
+                    <tr><th scope="row">Fire / aim</th><td>Left / right mouse button</td></tr>
+                    <tr><th scope="row">Cover, roadie run, roll</th><td><kbd>Space</kbd></td></tr>
+                    <tr><th scope="row">Melee, chainsaw (hold)</th><td><kbd>F</kbd> or <kbd>V</kbd></td></tr>
+                    <tr><th scope="row">Use, pick up, revive</th><td><kbd>E</kbd></td></tr>
+                    <tr><th scope="row">Reload</th><td><kbd>R</kbd></td></tr>
+                    <tr><th scope="row">Point of interest</th><td><kbd>Q</kbd></td></tr>
+                    <tr><th scope="row">Tactical display</th><td><kbd>G</kbd></td></tr>
+                    <tr><th scope="row">Zoom</th><td>Middle mouse button or <kbd>Z</kbd></td></tr>
+                    <tr><th scope="row">Weapons</th><td><kbd>1</kbd> to <kbd>4</kbd></td></tr>
+                    <tr><th scope="row">Pause / back</th><td><kbd>Enter</kbd> or <kbd>Esc</kbd> / <kbd>Tab</kbd></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+          <aside class="reqs plate" aria-labelledby="reqs-title">
+            <h3 id="reqs-title">Requirements</h3>
+            <dl>
+              <dt>System</dt>
+              <dd>Windows 10 or 11, 64-bit</dd>
+              <dt>Graphics</dt>
+              <dd>A DirectX 12 GPU. Developed on an AMD Radeon RX 7800 XT.</dd>
+              <dt>Game</dt>
+              <dd>Your own retail Xbox 360 copy of Gears of War 2, dumped to a folder</dd>
+            </dl>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section faq" id="faq" aria-labelledby="faq-title">
+      <div class="wrap faq__grid">
+        <div class="section-head">
+          <p class="eyebrow">FAQ</p>
+          <h2 id="faq-title">Questions before you download</h2>
+        </div>
+        <div>
+          <details>
+            <summary>Is it legal? Do I need my own copy of the game?</summary>
+            <div class="faq__answer">
+              <p>You need your own retail Xbox 360 copy of Gears of War 2. The repository holds only this project's own code, and the release contains no game files or game data: everything the game needs is read from the copy you dumped yourself.</p>
+              <p>Do not pirate the game. Builds or packs that include files from the game are not part of this project.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Is this an emulator?</summary>
+            <div class="faq__answer">
+              <p>No. Emulators such as Xenia translate the console's code while the game runs. Here the game's code was recompiled ahead of time to native x64 code with the ReXGlue SDK, so <code>gow2.exe</code> is a Windows program. The ReXGlue runtime, derived from Xenia, provides the Xbox 360 system and graphics layer the game expects.</p>
+            </div>
+          </details>
+          <details>
+            <summary>What PC and GPU do I need?</summary>
+            <div class="faq__answer">
+              <p>Windows 10 or 11 (64-bit) and a GPU with DirectX 12. The port is developed on a Ryzen 9 7900X3D with a Radeon RX 7800 XT, which averages about 90 fps in Act 1 at 1440p internal.</p>
+              <p>The temporal upscalers (FSR 4, FSR 3.1, DLSS) are built in but do not switch on for this game yet. If the image looks wrong on your GPU, please <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/issues">open an issue</a> with a screenshot and your GPU model.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Can I play the whole campaign?</summary>
+            <div class="faq__answer">
+              <p>Not yet. Act 1 is playable; the rest of the campaign has not been played through. The complete campaign is the next goal on the <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/ROADMAP.md">roadmap</a>.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Is there multiplayer, Horde or co-op?</summary>
+            <div class="faq__answer">
+              <p>Not yet. System Link (LAN play for Horde and Versus) is being implemented: the game's network calls are traced and its socket options now reach Windows correctly, but sessions are not implemented. Split-screen co-op is part of the full-campaign goal.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Is there an Android or Linux version?</summary>
+            <div class="faq__answer">
+              <p>Not a playable one. On Android, the app shell runs on a Samsung Galaxy S25 Ultra with a placeholder library, and an APK with the game's libraries builds, but it has not run on a phone yet. The plan is in <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
+              <p>A Linux x64 build with Vulkan is planned as the first non-Windows target.</p>
+            </div>
+          </details>
+          <details>
+            <summary>How is this different from the “Hollow” port?</summary>
+            <div class="faq__answer">
+              <p>Hollow was built from a leaked 2008 development build. This port runs the complete retail game, from your own disc.</p>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="credits" aria-labelledby="credits-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Credits</p>
+          <h2 id="credits-title">Built on open work</h2>
+        </div>
+        <ul class="credits__list">
+          <li><a href="https://github.com/rexglue/rexglue-sdk">ReXGlue SDK</a><span>Runtime and code generator, derived from Xenia. BSD-3-Clause.</span></li>
+          <li><a href="https://github.com/OverkillLabs3/gears-judgement-recomp">gears-judgement-recomp</a><span>Gears of War: Judgment on ReXGlue; build tooling and the temporal upscalers come from it.</span></li>
+          <li><a href="https://github.com/xenia-project/xenia">Xenia</a><span>The Xbox 360 emulator the runtime is derived from.</span></li>
+          <li><a href="https://github.com/hedge-dev/xenonrecomp">XenonRecomp</a><span>Xbox 360 static recompilation by hedge-dev.</span></li>
+          <li><a href="https://github.com/xenia-canary/game-patches">xenia-canary/game-patches</a><span>Community patches by illusion and boma.</span></li>
+          <li><a href="https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK">AMD FidelityFX SDK</a><span>FSR and CAS. MIT.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="final" aria-labelledby="final-title">
+      <div class="wrap">
+        <div class="final__plate plate">
+          <img class="final__icon" src="assets/img/icon-320.webp" width="320" height="320" loading="lazy" decoding="async" alt="">
+          <div>
+            <h2 id="final-title">Bring your disc. Run it natively.</h2>
+            <p>Free and open source. Read the README for every setting, and star the repository to follow the road to the full campaign.</p>
+            <div class="hero__cta">
+              <a class="btn btn--primary" href="https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest">
+                <svg aria-hidden="true"><use href="#i-download"/></svg>
+                Download for Windows
+              </a>
+              <a class="btn btn--ghost" href="https://github.com/santiquiroz/gears-of-war-2-pc-port">
+                <svg aria-hidden="true"><use href="#i-star"/></svg>
+                Star on GitHub
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer__grid">
+      <div class="footer__legal">
+        <p><strong>Unofficial project.</strong> Not affiliated with or endorsed by Microsoft, Xbox Game Studios, The Coalition or Epic Games. Gears of War is a trademark of Microsoft Corporation; all trademarks belong to their owners. Screenshots show the game running in this port.</p>
+        <p>The project's own code is licensed under the <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/LICENSE">BSD-3-Clause License</a>. No game files are distributed.</p>
+      </div>
+      <ul class="footer__links">
+        <li><a href="https://github.com/santiquiroz/gears-of-war-2-pc-port">Source on GitHub</a></li>
+        <li><a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/releases">Releases</a></li>
+        <li><a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/issues">Report an issue</a></li>
+        <li><a href="es/" hreflang="es" lang="es">Leer en español</a></li>
+      </ul>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# Crawlers read robots.txt only at the host root (santiquiroz.github.io/robots.txt).
+# This copy documents the intent for this project site and points at its sitemap.
+User-agent: *
+Allow: /
+
+Sitemap: https://santiquiroz.github.io/gears-of-war-2-pc-port/sitemap.xml
