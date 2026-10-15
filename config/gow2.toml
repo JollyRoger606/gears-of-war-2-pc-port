@@ -86,8 +86,11 @@ keybind_back = "Tab"
 keybind_start = "Return,Escape"
 
 # ---------- Network (System Link) ----------
+# System Link (LAN and internet co-op) stays off until this is true on every player's copy;
+# gow2_coop_players 3+ turns it on by itself. See docs/NETWORK_PLAY.md.
+# net_link_active = true
 # Guest ports below 1024 move up by this offset (the game's UDP 1000 becomes 41000); every
-# player needs the same value. See docs/NETWORK_PLAY.md.
+# player needs the same value.
 # net_port_offset = 40000
 # This PC's LAN address (and prefix) when the automatic choice is wrong.
 # net_local_ip = "192.168.10.10/24"
@@ -95,6 +98,7 @@ keybind_start = "Return,Escape"
 # net_public_address = "gow2.suruworks.com"
 # On each friend's PC: the host's name or address (comma-separated list).
 # net_peers = "gow2.suruworks.com"
-# Optional: only these addresses, ranges or names reach the game.
-# net_allow_peers = ""
+# On an internet host: the friends' addresses, ranges or names. Without it, a host with
+# net_public_address lets in only the local network and net_peers.
+# net_allow_peers = "friend1.example.com, 203.0.113.7"
 # system_link_trace = false
