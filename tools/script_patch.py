@@ -88,20 +88,31 @@ DOM = Ref("GearGame.GearPawn_COGDom", "Class")
 COG_GEAR = Ref("GearGame.GearPawn_COGGear", "Class")
 SUGGEST_RETURN = Ref("GearGame.GearGameSP_Base.SuggestPawnClassFor.ReturnValue", "ClassProperty")
 GEAR_PAWN = Ref("GearGame.GearPawn", "Class")
-DYNAMIC_LOAD_OBJECT = Ref("Core.Object.DynamicLoadObject", "Function")
+# FindObject, not DynamicLoadObject: in the retail build DynamicLoadObject returned None for both
+# classes while both were loaded (Stage 1 test, docs/COOP_N_PLAYERS.md), and the game's own
+# checkpoint code resolves pawn class paths with FindObject (GearAI.ApplyCheckpointRecord+0x006F).
+FIND_OBJECT = Ref("Core.Object.FindObject", "Function")
 CLASS_CLASS = Ref("Core.Class", "Class")
 
 SUGGEST_CHECKS = (Check(0x61, b"\x04\x20"), Check(0x7E, b"\x04\x20"), Check(0x84, b"\x04\x20"),
                   Check(0x8A, b"\x04\x3A"), Check(0x90, b"\x53"))
 
-def load_pawn_class(path):
-    # ReturnValue = class<GearPawn>(DynamicLoadObject(path, class'Class', true))
-    return (Raw(b"\x0F\x00"), SUGGEST_RETURN, Raw(b"\x13"), GEAR_PAWN, Raw(b"\x1C"),
-            DYNAMIC_LOAD_OBJECT, Raw(b"\x1F"), Text(path), Raw(b"\x20"), CLASS_CLASS, Raw(b"\x27\x16"))
+BEN_CARMINE = "GearGameContent.GearPawn_COGBenjaminCarmine"
+RED_SHIRT = "GearGameContent.GearPawn_COGRedShirt"
 
-SUGGEST_TAIL = (load_pawn_class("GearGameContent.GearPawn_COGBenjaminCarmine")
-                + (Raw(b"\x07\x01\x10\x72\x00"), SUGGEST_RETURN, Raw(b"\x2A\x16"))  # if !(ReturnValue == None) goto 0x0110
-                + load_pawn_class("GearGameContent.GearPawn_COGRedShirt")
+def find_class(path):
+    # FindObject(path, class'Class')
+    return (Raw(b"\x1C"), FIND_OBJECT, Raw(b"\x1F"), Text(path), Raw(b"\x20"), CLASS_CLASS, Raw(b"\x16"))
+
+def return_pawn_class(path):
+    # return class<GearPawn>(FindObject(path, class'Class'))
+    return (Raw(b"\x04\x13"), GEAR_PAWN) + find_class(path)
+
+# Every branch returns its own expression. Storing into ReturnValue does not work: the closing
+# 'return return' (EX_ReturnNothing, sub_822536E8) zeroes the result instead of reading the local.
+SUGGEST_TAIL = ((Raw(b"\x07\x01\x00\x77"),) + find_class(BEN_CARMINE) + (Raw(b"\x2A\x16"),)  # if !(FindObject(Ben) != None) goto 0x0100
+                + return_pawn_class(BEN_CARMINE)
+                + return_pawn_class(RED_SHIRT)
                 + (Raw(b"\x04\x3A"), SUGGEST_RETURN, Raw(b"\x53")))
 
 ROWS = {
@@ -112,11 +123,11 @@ ROWS = {
         operands=(Operand(0x03, NUM_PLAYERS),
                   Operand(0x0C, Ref("GearGame.GearGameSP_Base.AtCapacity.ReturnValue", "BoolProperty"))),
         byte_edits=(ByteEdit(0x01, 0x9A, 0x99), ByteEdit(0x08, 0x02, PLAYERS))),
-    "S1-2": ScriptRow("S1-2", "return GearPawn_COGGear  ->  Ben Carmine, else RedShirt, by DynamicLoadObject",
+    "S1-2": ScriptRow("S1-2", "return GearPawn_COGGear  ->  Ben Carmine, else RedShirt, by FindObject",
         Ref("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function"), 145,
         checks=SUGGEST_CHECKS,
         operands=(Operand(0x63, MARCUS), Operand(0x80, DOM), Operand(0x86, COG_GEAR), Operand(0x8C, SUGGEST_RETURN)),
-        grow=Grow(0x84, 279, SUGGEST_TAIL)),
+        grow=Grow(0x84, 318, SUGGEST_TAIL)),
     "S1-3": ScriptRow("S1-3", "Coop.NumPublicConnections = 2  ->  N",
         Ref("GearGame.GearMenuGame.ChangeCoopInviteSetting", "Function"), 178,
         checks=(Check(0x47, b"\x0F\x19\x00"), Check(0x4E, b"\x00\x05\x00\x04\x01"), Check(0x57, b"\x2C"),

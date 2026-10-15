@@ -471,14 +471,18 @@ void CheckSuggestGrow(FakeGuest& guest, uint32_t suggest, uint32_t old_data, con
   uint32_t data = guest.U32(suggest + 84u);
   uint32_t num = guest.U32(suggest + 88u);
   uint32_t max = guest.U32(suggest + 92u);
-  Expect(num == 279u && max == 279u, "Suggest Num==Max==279");
+  Expect(num == 318u && max == 318u, "Suggest Num==Max==318");
   Expect(data != old_data, "Suggest Data is new");
   Expect(PrefixMatches(guest, data, old_bytes, 0x84u), "Suggest first 0x84 bytes preserved");
-  Expect(guest.U8(data + 0x84u) == 0x0F && guest.U8(data + 0x85u) == 0x00, "Suggest tail header");
+  Expect(guest.U8(data + 0x84u) == 0x07 && guest.U8(data + 0x85u) == 0x01 && guest.U8(data + 0x86u) == 0x00,
+         "Suggest tail jump to 0x0100");
+  Expect(guest.U8(data + 0x87u) == 0x77 && guest.U8(data + 0x88u) == 0x1C, "Suggest tail != FindObject");
+  uint32_t find = guest.Path("Core.Object.FindObject", "Function");
+  Expect(guest.U32(data + 0x89u) == find, "Suggest tail FindObject operand");
+  Expect(guest.U8(data + 0xC2u) == 0x04 && guest.U8(data + 0x100u) == 0x04, "Suggest tail returns");
   uint32_t ret = guest.Path("GearGame.GearGameSP_Base.SuggestPawnClassFor.ReturnValue", "ClassProperty");
-  Expect(guest.U32(data + 0x86u) == ret, "Suggest tail ReturnValue operand");
-  Expect(guest.U8(data + 0xC8u) == 0x07 && guest.U8(data + 0xC9u) == 0x01 && guest.U8(data + 0xCAu) == 0x10, "Suggest tail jump");
-  Expect(guest.U8(data + 278u) == 0x53, "Suggest last byte 0x53");
+  Expect(guest.U32(data + 0x139u) == ret, "Suggest tail ReturnValue operand");
+  Expect(guest.U8(data + 317u) == 0x53, "Suggest last byte 0x53");
   Expect(PrefixMatches(guest, old_data, old_bytes, static_cast<uint32_t>(old_bytes.size())), "Suggest old buffer unchanged");
 }
 
@@ -734,7 +738,7 @@ void TestGrowIntoPhysicalHeap() {
   CheckSuggestGrow(guest, suggest, old_data, old_bytes);
   if (TestHostOffset(0xE0000000u) != 0u) {
     // Wrong place on purpose: untranslated host bytes must stay zero.
-    Expect(RawHostBytesAreZero(guest.base(), 0xE0000000u, 279u), "physical heap wrong place untouched");
+    Expect(RawHostBytesAreZero(guest.base(), 0xE0000000u, 318u), "physical heap wrong place untouched");
   }
 }
 

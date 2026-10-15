@@ -390,9 +390,11 @@ def test_real_suggest_tail_assembles():
     model.scripts["any"] = sp.ScriptArray(bytes(data), 145, 145)
     plan = sp.plan_group(model, [row], 4)
     new = sp.apply_plan(model, plan)["any"]
-    assert len(new) == 279
+    assert len(new) == 318
     tail = new[0x84:]
-    assert len(tail) == 279 - 0x84
-    assert tail[0xC8 - 0x84:0xC8 - 0x84 + 3] == b"\x07\x01\x10"
+    assert len(tail) == 318 - 0x84
+    assert tail[:4] == b"\x07\x01\x00\x77"
+    assert new[0xC2:0xC4] == b"\x04\x13" and new[0x100:0x102] == b"\x04\x13"
+    assert new[0x137:0x139] == b"\x04\x3A" and new[-1:] == b"\x53"
     assert b"GearGameContent.GearPawn_COGBenjaminCarmine\x00" in tail
     assert (0x80001000).to_bytes(4, "big") in tail

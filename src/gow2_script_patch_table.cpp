@@ -34,7 +34,7 @@ ScriptRow RowS1_1() {
   };
 }
 
-// return GearPawn_COGGear  ->  Ben Carmine, else RedShirt, by DynamicLoadObject
+// return GearPawn_COGGear  ->  Ben Carmine, else RedShirt, by FindObject
 ScriptRow RowS1_2() {
   return {
       .id = "S1-2",
@@ -55,31 +55,31 @@ ScriptRow RowS1_2() {
       },
       .grow = GrowEdit{
           .keep = 0x0084,
-          .new_size = 279,
+          .new_size = 318,
           .tail = {
-              {.bytes = {0x0F, 0x00}},
-              {.object = {"GearGame.GearGameSP_Base.SuggestPawnClassFor.ReturnValue", "ClassProperty"}},
-              {.bytes = {0x13}},
-              {.object = {"GearGame.GearPawn", "Class"}},
-              {.bytes = {0x1C}},
-              {.object = {"Core.Object.DynamicLoadObject", "Function"}},
+              {.bytes = {0x07, 0x01, 0x00, 0x77, 0x1C}},
+              {.object = {"Core.Object.FindObject", "Function"}},
               {.bytes = {0x1F}},
               {.bytes = AsciiZ("GearGameContent.GearPawn_COGBenjaminCarmine")},
               {.bytes = {0x20}},
               {.object = {"Core.Class", "Class"}},
-              {.bytes = {0x27, 0x16, 0x07, 0x01, 0x10, 0x72, 0x00}},
-              {.object = {"GearGame.GearGameSP_Base.SuggestPawnClassFor.ReturnValue", "ClassProperty"}},
-              {.bytes = {0x2A, 0x16, 0x0F, 0x00}},
-              {.object = {"GearGame.GearGameSP_Base.SuggestPawnClassFor.ReturnValue", "ClassProperty"}},
-              {.bytes = {0x13}},
+              {.bytes = {0x16, 0x2A, 0x16, 0x04, 0x13}},
               {.object = {"GearGame.GearPawn", "Class"}},
               {.bytes = {0x1C}},
-              {.object = {"Core.Object.DynamicLoadObject", "Function"}},
+              {.object = {"Core.Object.FindObject", "Function"}},
+              {.bytes = {0x1F}},
+              {.bytes = AsciiZ("GearGameContent.GearPawn_COGBenjaminCarmine")},
+              {.bytes = {0x20}},
+              {.object = {"Core.Class", "Class"}},
+              {.bytes = {0x16, 0x04, 0x13}},
+              {.object = {"GearGame.GearPawn", "Class"}},
+              {.bytes = {0x1C}},
+              {.object = {"Core.Object.FindObject", "Function"}},
               {.bytes = {0x1F}},
               {.bytes = AsciiZ("GearGameContent.GearPawn_COGRedShirt")},
               {.bytes = {0x20}},
               {.object = {"Core.Class", "Class"}},
-              {.bytes = {0x27, 0x16, 0x04, 0x3A}},
+              {.bytes = {0x16, 0x04, 0x3A}},
               {.object = {"GearGame.GearGameSP_Base.SuggestPawnClassFor.ReturnValue", "ClassProperty"}},
               {.bytes = {0x53}},
           },
