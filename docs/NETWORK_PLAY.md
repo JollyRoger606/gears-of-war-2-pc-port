@@ -176,7 +176,9 @@ name, the firewall rule, a test from mobile data) and covers Tailscale and ZeroT
 5. The host's Windows Firewall needs the inbound rule for its `gow2.exe`
    path (see Windows Firewall above).
 6. Phones on mobile data sit behind carrier NAT in most cases and cannot
-   host. They can join.
+   host. They can join: on 2026-10-15 a Galaxy S25 Ultra on mobile data
+   joined a PC host behind two routers in a row and played Act 1 chapter 2
+   as Dom (ONLINE.md, "Tested over the internet").
 
 ## Security note
 

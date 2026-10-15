@@ -38,7 +38,7 @@ Read in English: [README.md](README.md)
 - [ ] Teclas que el juego reciba como en un PC (todavía pasan por un mando emulado)
 - [ ] Campaña completa de principio a fin
 - [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15
-- [ ] Juego por internet (implementado: `net_peers`, `net_public_address`, `net_allow_peers`; sin probar)
+- [x] Juego por internet, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): un teléfono con datos móviles se unió a una campaña alojada en un PC a través de puertos abiertos por UPnP, verificado el 2026-10-15; todavía no se probó con un amigo en otro PC fuera de la red
 - [ ] Horda y Versus por System Link
 - [ ] Android: una compilación del repositorio llega a jugar y se une a la campaña de un PC por System Link, pero corre a pocos fps y partes de la escena se ven negras; todavía no se puede jugar y no se publica ningún APK ([docs/ANDROID.md](docs/ANDROID.md))
 
@@ -139,7 +139,7 @@ La campaña cooperativa por System Link funciona entre PC y entre varias copias 
 
 - [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): un PC y un teléfono en la misma red, los ajustes, varias copias en un mismo PC y solución de problemas.
 - [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): cooperativo con más de dos jugadores (`gow2_coop_players`; cuatro verificados en un mismo PC) y lo que aún falta, como el cambio de capítulo con jugadores extra.
-- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet. Desde el repositorio (no viene en el zip de la versión publicada), [`scripts/host-online.ps1`](https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/scripts/host-online.ps1) `-Start` abre por UPnP los puertos UDP 14001 y 41000 en cada router entre el PC y internet, con un plazo (6 h por defecto, 24 h como máximo), y programa un `-Stop` automático para el final del plazo; `-Stop` los cierra. Ejecuta `-Stop` después de cada sesión; algunos routers ignoran el plazo. Sin UPnP: reenvío manual; sin abrir puertos: Tailscale o ZeroTier. Ninguna partida ha cruzado internet todavía.
+- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet. Desde el repositorio (no viene en el zip de la versión publicada), [`scripts/host-online.ps1`](https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/scripts/host-online.ps1) `-Start` abre por UPnP los puertos UDP 14001 y 41000 en cada router entre el PC y internet, con un plazo (6 h por defecto, 24 h como máximo), y programa un `-Stop` automático para el final del plazo; `-Stop` los cierra. Ejecuta `-Stop` después de cada sesión; algunos routers ignoran el plazo. Sin UPnP: reenvío manual; sin abrir puertos: Tailscale o ZeroTier. Verificado el 2026-10-15: un teléfono con datos móviles se unió a un PC anfitrión detrás de dos routers en cadena.
 
 Horda y Versus por System Link no se han probado. Ver [ROADMAP.md](ROADMAP.md).
 

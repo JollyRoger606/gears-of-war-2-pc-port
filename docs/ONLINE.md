@@ -10,10 +10,12 @@ Addresses below are examples from the documentation ranges: 203.0.113.10 is the 
 address, 198.51.100.20 and 198.51.100.30 are friends, `gow2.example.com` is a DNS
 name the host controls, and 192.168.1.10 is the host PC on its home network.
 
-Status: PC and phone joined each other's campaign over one home LAN (NETWORK_PLAY.md,
-2026-10-15), and the merged build joined on loopback. `host-online.ps1` opened and closed both
-ports on a home network with two routers in a row (2026-10-15). No session has crossed the
-internet yet; see "Not verified yet".
+Status: on 2026-10-15 a phone on mobile data joined a campaign hosted by a PC at home over the
+internet, through ports that `host-online.ps1` opened on two routers in a row (see "Tested over
+the internet"). PC and phone also joined each other's campaign over one home LAN
+(NETWORK_PLAY.md), and the merged build repeated it: two copies on loopback, and a phone that
+joined a PC-hosted campaign on the LAN. A PC friend outside the network has not been tried; see
+"Not verified yet".
 
 ## How the connection works
 Only the host needs open ports. In the loopback runs (2026-10-14 and 2026-10-15), every datagram
@@ -295,7 +297,8 @@ MSYS_NO_PATHCONV=1 adb push gow2.toml /sdcard/Android/data/com.santiquiroz.gow2r
 With patch 0011 the phone binds the game's port 1000 as 41000, as the PC does
 ([android/README.md](../android/README.md)). [V code]
 
-Wi-Fi or mobile data can join. [I] A phone on mobile data cannot host: carriers put phones behind
+Wi-Fi or mobile data can join (mobile data verified on 2026-10-15, see "Tested over the
+internet"). A phone on mobile data cannot host: carriers put phones behind
 carrier-grade NAT. A phone on the host's home Wi-Fi needs no `net_peers` to join the PC over the
 LAN; see [NETWORK_PLAY.md](NETWORK_PLAY.md).
 
@@ -319,6 +322,37 @@ Do not test the internet path from a device on the home Wi-Fi: from inside, the 
 back through the router (hairpin NAT), which proves nothing about access from outside. Carriers
 can change a phone's public address between connections. If the log shows
 `dropped ... (net_allow_peers)` from a new address, update the allow list.
+
+## Tested over the internet (2026-10-15)
+A phone on mobile data joined a campaign hosted by a PC at home, following the steps above.
+[V on that network]
+
+- Host: the PC on Ethernet behind two routers in a row (an OpenWRT router behind the ISP's cable
+  modem), a build of master with patch 0011, from the path that has the Windows Firewall allow
+  rule (the network profile is Public). `host-online.ps1 -Start -Hostname <host name> -AllowPeers
+  <a.b.c>.0/24` mapped UDP 14001 and 41000 on both routers, where `<a.b.c>.0/24` is the /24 around
+  the phone's public address. The game ran with `--net_link_active=true
+  --net_public_address=<host name> --net_allow_peers=<a.b.c>.0/24 --system_link_trace=true`.
+- Friend: a Galaxy S25 Ultra with Wi-Fi off. On mobile data the carrier gave it a private 10.x
+  address (carrier-grade NAT) and one public IPv4 address, the same for HTTPS and for the game's
+  UDP. Its `gow2.toml` had `net_link_active = true` and `net_peers = "<host name>"`.
+- The phone's System Link browser listed the PC's campaign (`Pc`), both lobbies listed both
+  players, both loaded Act 1 chapter 2, the phone spawned as Dom, and each screen showed the other
+  player.
+- Host log: `first datagram from <phone's public address>:<port> on local port 14001 (16 bytes)`
+  (the phone's query), the beacon answer sent back to that address and port, then `first datagram
+  from <phone's public address>:<port> on local port 41000 (55 bytes)` and
+  `XGISessionJoinRemote ... members=2`.
+- Phone log: `first datagram from <host's public address>:14001 on local port 14001 (188 bytes)`
+  (the beacon answer), `XNetXnAddrToInAddr ... ina=<host's LAN address> inaOnline=<host's public
+  address> -> <host's public address>`, then game traffic to and from `<host's public
+  address>:41000`. The host's first answer on port 41000 arrived about 160 ms after the phone's
+  first datagram.
+- The carrier's NAT gave the phone's sockets other port numbers than their own (local 14001
+  became a five-digit port), and the host's answers to those ports came through. So a phone on
+  mobile data can join; it still cannot host, because nothing can reach it first.
+- Afterwards `host-online.ps1 -Stop` deleted the four mappings and the scheduled task, and each
+  router's own list of mappings was back to what it held before.
 
 ## Security trade-offs
 - [I] System Link traffic is not encrypted or authenticated. The code that parses it was written
@@ -403,12 +437,13 @@ advertising its ZeroTier address is unreachable for devices outside it.
 | ZeroTier | None | Installer + firewall rule | Yes | ZeroTier + `net_local_ip`, `net_peers` |
 
 ## Not verified yet
-- No System Link session has crossed the internet yet. `host-online.ps1` mapped and removed both
-  ports on both routers of a double-NAT home network on 2026-10-15, but no friend's traffic has
-  come through them, and the manual forwards and the firewall rule have not been tried end to end.
+- One internet session so far: a phone on mobile data that joined a PC host through the UPnP
+  mappings ("Tested over the internet"). A PC friend outside the network, forwards made by hand,
+  the DMZ alternative, a host on a single router, and three or more players over the internet
+  have not been tried.
 - PC and phone on one LAN joined each other's campaign on 2026-10-15 with the crossplay build
-  ([NETWORK_PLAY.md](NETWORK_PLAY.md)); the merged build was verified on loopback (two copies on
-  one PC).
+  ([NETWORK_PLAY.md](NETWORK_PLAY.md)); the merged build repeated the PC-hosted case (the phone
+  joined) and two copies on one PC over loopback.
 - Tailscale and ZeroTier have not been tried.
 - A remote NAT that maps a friend's port to an external port below 1024 would be remapped wrongly.
   This is rare.
