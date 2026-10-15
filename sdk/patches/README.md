@@ -1,7 +1,9 @@
 # SDK patches
 
-`scripts/build-sdk.ps1` applies these in file-name order on top of ReXGlue commit `923c1a5` and
-builds `rexruntime.dll` and `rexgpu-xenos.dll` from source. Keep one change per patch file.
+Both SDK builds apply every patch here in file-name order on top of ReXGlue commit `923c1a5`:
+`scripts/build-sdk.ps1` builds `rexruntime.dll` and `rexgpu-xenos.dll` from the result, and
+`scripts/build-android.ps1` builds the Android libraries from its own clean clone of the same series
+(`out\sdk-android-src`). Keep one change per patch file.
 
 | Patch | What it adds |
 |---|---|
@@ -10,6 +12,7 @@ builds `rexruntime.dll` and `rexgpu-xenos.dll` from source. Keep one change per 
 | `0004-texture-packs.patch` | Texture dump and replacement (`texture_dump`, `texture_replace`, `texture_pack_dir`): content-hashed DDS dumps in `textures/<TITLEID>/dump`, replacements (same size or larger, full mip chain) from `textures/<TITLEID>/replace`. Video planes and other textures whose content changes on every load are skipped. |
 | `0005-pad-deadzone-and-file-overrides.patch` | `GOW2_VFS_OVERRIDES` lets the game read individual files from elsewhere (a cached, edited copy of the player's own Coalesced bundles) without touching the game folder, and `pad_right_stick_deadzone` gives physical controllers a radial right-stick dead zone, so the game's own look dead zone can be turned off for the mouse. |
 | `0006-mnk-mouse-stick-switch.patch` | `mnk_mouse_stick` (on by default) lets the game stop the keyboard/mouse driver from turning mouse motion into right-stick deflection while it keeps the mouse captured, so the port can hand the mouse to the game's own PC mouse path instead. |
+| `0007-android-arm64-port.patch` | The Android arm64 port of the runtime (NDK r29+, API 29). Build: an `android-arm64` platform, no `-march=armv8-a` that would lower the game's `armv8.2-a`, SDL3 as the shared `libSDL3.so` SDLActivity loads (no X11/Wayland/ALSA), `SDL_main` from `windowed_app_main_sdl.cpp`, Vulkan from the system `libvulkan`, the SDK version read from the SDK's own git history under `add_subdirectory`. Core: `GetAndroidApiLevel()` (`main_android`), guest memory through `ASharedMemory` with a `memfd_create` fallback (no `/dev/ashmem`), Bionic fixes (64-bit `off_t`, no robust mutexes, `clock_cast`), an AArch64 fiber switch (Bionic has no `ucontext`), unclaimed `SIGSEGV`/`SIGBUS`/`SIGILL` chained to the previous handler instead of looping, `REX_EXECUTABLE_FOLDER` for config and logs, `content://` stubs. UI: an `ANativeWindow` surface from the SDL window. The GPU plugin is loaded by name from the APK. Input: one recursive lock across the `InputSystem` entry points and a non-throwing `utf8::next` (the Windows build gets both from the port's own guards). `XnAddrStatus` constants get definitions. FFmpeg runs its C code: `thirdparty/ffmpeg-android/config.h` comes before FFmpeg's own `config.h` and turns the aarch64 assembly off, so the FFmpeg submodule is not modified. Every change is behind `ANDROID` / `REX_PLATFORM_ANDROID` / `__ANDROID__`, so Windows behaves as before. |
 
 ## Working on a patch
 
@@ -18,4 +21,23 @@ After editing, `scripts/verify-sdk-patch.ps1 -Worktree <worktree>` applies the w
 the prepared build tree and compiles both DLLs in seconds; then regenerate the patch with
 `git diff --binary HEAD > sdk/patches/<name>.patch` and run `scripts/build-sdk.ps1`.
 
-Android bring-up uses `scripts/build-sdk-android.ps1` (NDK r29+); see `docs/ANDROID.md`.
+The Android port is worked on in a worktree of `923c1a5` with the whole series applied (committed
+or not; only the files count). Build it with `scripts/build-android.ps1 -SdkSource <worktree>`, then regenerate
+0007 as the difference between `923c1a5` plus 0002-0006 and the worktree, using a temporary index so
+the worktree's own index and commits stay as they are (Git Bash, from the worktree):
+
+```sh
+patches=/c/path/to/gow2-recomp/sdk/patches
+export GIT_INDEX_FILE=$(mktemp -u)
+git read-tree 923c1a5
+for p in "$patches"/000[2-6]-*.patch; do git apply --cached "$p"; done
+base=$(git write-tree)
+git read-tree HEAD && git add -A && port=$(git write-tree)
+rm -f "$GIT_INDEX_FILE"; unset GIT_INDEX_FILE
+git diff --binary "$base" "$port" > "$patches/0007-android-arm64-port.patch"
+```
+
+Check that the series still reproduces the worktree: applying 0002-0007 with `git apply --cached`
+to a temporary index read from `923c1a5` must give the same `git write-tree` as `$port`.
+
+`scripts/build-sdk-android.ps1` builds the SDK alone for Android (bring-up); see `docs/ANDROID.md`.

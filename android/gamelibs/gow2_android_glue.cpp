@@ -5,8 +5,9 @@
 // rewrite x86 export thunks in rexruntime.dll or rely on SEH, so they are not built for Android:
 //
 // - XamInput serialization and the non-throwing UTF-8 decoder live in the SDK's Android patch
-//   (sdk/patches/android: InputSystem holds one recursive lock across its entry points, and
-//   utf8::next for string views decodes an invalid lead byte as one byte instead of throwing).
+//   (sdk/patches/0007-android-arm64-port.patch: InputSystem holds one recursive lock across its
+//   entry points, and utf8::next for string views decodes an invalid lead byte as one byte
+//   instead of throwing).
 // - The disc-error box is replaced here: libgow2.so defines the runtime's own
 //   __imp__XamShowDirtyDiscErrorUI, and the recompiled code and the function-mapping table bind
 //   to this definition inside libgow2.so instead of the runtime's export.
