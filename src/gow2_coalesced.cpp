@@ -8,8 +8,13 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#if defined(__ANDROID__)
+#include <SDL3/SDL_system.h>
+#include <jni.h>
+#endif
 
 #include <rex/cvar.h>
+#include <rex/logging.h>
 
 #include <algorithm>
 #include <cctype>
@@ -21,9 +26,17 @@
 #include <system_error>
 #include <vector>
 
-REXCVAR_DEFINE_STRING(gow2_prompts, "auto", "input",
-                      "Menu button prompts: auto (keyboard labels unless a controller is connected at "
-                      "launch), keyboard or controller.");
+#if defined(__ANDROID__)
+#define GOW2_PROMPTS_HELP                                                                   \
+  "Menu button prompts: auto (controller glyphs unless a physical keyboard is connected and " \
+  "mnk_mode is on), keyboard or controller."
+#else
+#define GOW2_PROMPTS_HELP                                                         \
+  "Menu button prompts: auto (keyboard labels unless a controller is connected at " \
+  "launch), keyboard or controller."
+#endif
+REXCVAR_DEFINE_STRING(gow2_prompts, "auto", "input", GOW2_PROMPTS_HELP);
+#undef GOW2_PROMPTS_HELP
 
 namespace rex::glue {
 
@@ -392,8 +405,8 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
 
 namespace {
 
-bool AnyPhysicalGamepad() {
 #ifdef _WIN32
+bool AnyPhysicalGamepad() {
   HMODULE m = LoadLibraryW(L"xinput1_4.dll");
   if (!m) m = LoadLibraryW(L"xinput9_1_0.dll");
   if (!m) return false;
@@ -414,12 +427,102 @@ bool AnyPhysicalGamepad() {
   }
   FreeLibrary(m);
   return any;
-#elif defined(__ANDROID__)
-  // "auto" means controller prompts on a phone: it is played with a pad or with touch
-  // controls laid out like one, never with a keyboard.
-  return true;
-#else
+}
+#endif
+
+#if defined(__ANDROID__)
+constexpr jint kConfigKeyboardQwerty = 2;
+constexpr jint kConfigHardKeyboardHiddenYes = 2;
+
+bool ClearJavaException(JNIEnv* env) {
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return true;
+  }
   return false;
+}
+
+jobject CallObjectGetter(JNIEnv* env, jobject object, const char* method, const char* signature) {
+  if (object == nullptr) return nullptr;
+  jclass cls = env->GetObjectClass(object);
+  if (cls == nullptr) {
+    ClearJavaException(env);
+    return nullptr;
+  }
+  jmethodID id = env->GetMethodID(cls, method, signature);
+  jobject result = nullptr;
+  if (id != nullptr) {
+    result = env->CallObjectMethod(object, id);
+    if (ClearJavaException(env)) {
+      if (result != nullptr) env->DeleteLocalRef(result);
+      result = nullptr;
+    }
+  } else {
+    ClearJavaException(env);
+  }
+  env->DeleteLocalRef(cls);
+  return result;
+}
+
+jint ReadIntField(JNIEnv* env, jobject object, const char* field, jint fallback) {
+  if (object == nullptr) return fallback;
+  jclass cls = env->GetObjectClass(object);
+  if (cls == nullptr) {
+    ClearJavaException(env);
+    return fallback;
+  }
+  jfieldID id = env->GetFieldID(cls, field, "I");
+  jint value = fallback;
+  if (id != nullptr) {
+    value = env->GetIntField(object, id);
+    if (ClearJavaException(env)) value = fallback;
+  } else {
+    ClearJavaException(env);
+  }
+  env->DeleteLocalRef(cls);
+  return value;
+}
+
+bool PhysicalKeyboardConnected() {
+  JNIEnv* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+  if (env == nullptr) return false;
+  jobject activity = static_cast<jobject>(SDL_GetAndroidActivity());
+  if (activity == nullptr) return false;
+  jobject resources =
+      CallObjectGetter(env, activity, "getResources", "()Landroid/content/res/Resources;");
+  jobject configuration = nullptr;
+  if (resources != nullptr) {
+    configuration = CallObjectGetter(env, resources, "getConfiguration",
+                                     "()Landroid/content/res/Configuration;");
+  }
+  jint keyboard = ReadIntField(env, configuration, "keyboard", 0);
+  jint hidden = ReadIntField(env, configuration, "hardKeyboardHidden", 0);
+  if (configuration != nullptr) env->DeleteLocalRef(configuration);
+  if (resources != nullptr) env->DeleteLocalRef(resources);
+  env->DeleteLocalRef(activity);
+  // Configuration.keyboard is QWERTY only while an alphabetic, non-virtual keyboard is attached;
+  // SDL keeps no keyboard list on Android, so SDL_HasKeyboard() is always false there.
+  return keyboard == kConfigKeyboardQwerty && hidden != kConfigHardKeyboardHiddenYes;
+}
+
+bool AndroidKeyboardPromptsWanted() {
+  const bool keyboard = PhysicalKeyboardConnected();
+  // Without mnk_mode the keyboard does not reach the game, so its labels would be wrong.
+  const bool mnk = rex::cvar::Query<bool>("mnk_mode");
+  REXLOG_INFO("PROMPTS gow2_prompts=auto: physical keyboard {}, mnk_mode {} -> {} labels",
+              keyboard ? "connected" : "not connected", mnk ? "on" : "off",
+              keyboard && mnk ? "keyboard" : "controller");
+  return keyboard && mnk;
+}
+#endif
+
+bool AutoPromptsUseKeyboard() {
+#ifdef _WIN32
+  return !AnyPhysicalGamepad();
+#elif defined(__ANDROID__)
+  return AndroidKeyboardPromptsWanted();
+#else
+  return true;
 #endif
 }
 
@@ -459,7 +562,7 @@ CoalescedOptions CoalescedOptionsFromCvars() {
   o.mouse_look = rex::cvar::Query<bool>("mnk_mouse");
   o.native_mouse = NativeMouseAimWanted();
   const std::string mode = REXCVAR_GET(gow2_prompts);
-  const bool keyboard = mode == "keyboard" || (mode != "controller" && !AnyPhysicalGamepad());
+  const bool keyboard = mode == "keyboard" || (mode != "controller" && AutoPromptsUseKeyboard());
   if (!keyboard) return o;
   o.prompt_labels = {
       {"Controller_A", KeybindLabel("keybind_a", "Space")},
