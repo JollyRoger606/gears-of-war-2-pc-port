@@ -5,9 +5,9 @@ package com.santiquiroz.gow2recomp;
 final class NativeLibraries {
     // SDLActivity loads these in order and runs SDL_main from the last one.
     private static final String[] SHELL = {"SDL3", "gow2shell"};
-    // librexruntime.so links SDL3 statically and exports SDL's JNI entry points, so a separate
-    // libSDL3.so would be a second SDL; prepend "SDL3" only if the SDK switches to SDL_SHARED.
-    private static final String[] GAME = {"rexruntime", "rexgpu-xenos", "gow2"};
+    // The SDK's Android build links SDL3 as libSDL3.so, the same copy whose JNI_OnLoad sets up
+    // SDL's Java state, so it loads first and only once.
+    private static final String[] GAME = {"SDL3", "rexruntime", "rexgpu-xenos", "gow2"};
 
     private NativeLibraries() {
     }

@@ -4,9 +4,9 @@ package com.santiquiroz.gow2recomp;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 
 import java.util.Arrays;
+import java.util.Collections;
 
 import org.junit.Test;
 
@@ -17,13 +17,13 @@ public class NativeLibrariesTest {
     }
 
     @Test
-    public void gameLoadsRuntimeThenGpuThenGameMainLast() {
-        assertArrayEquals(new String[] {"rexruntime", "rexgpu-xenos", "gow2"}, NativeLibraries.loadOrder(true));
+    public void gameLoadsSdlThenRuntimeThenGpuThenGameMainLast() {
+        assertArrayEquals(new String[] {"SDL3", "rexruntime", "rexgpu-xenos", "gow2"}, NativeLibraries.loadOrder(true));
     }
 
     @Test
-    public void gameDoesNotLoadASecondSdl() {
-        assertFalse(Arrays.asList(NativeLibraries.loadOrder(true)).contains("SDL3"));
+    public void gameLoadsExactlyOneSdl() {
+        assertEquals(1, Collections.frequency(Arrays.asList(NativeLibraries.loadOrder(true)), "SDL3"));
     }
 
     @Test

@@ -4,8 +4,10 @@
 
 .DESCRIPTION
   Configures an rexglue-sdk source tree with the Android NDK's CMake toolchain (arm64-v8a,
-  armv8.2-a, -fno-emulated-tls) into <Source>\out\android-arm64 and builds rexruntime and the GPU
-  plugin with the Vulkan backend. Prints only the errors; exit code 1 when the build fails.
+  armv8.2-a, -fno-emulated-tls, 16 KB pages) into <Source>\out\android-arm64 and builds rexruntime
+  and the GPU plugin with the Vulkan backend (libSDL3.so, which rexruntime links, comes with them).
+  Prints only the errors; exit code 1 when the build fails. This builds the SDK alone;
+  scripts/build-android.ps1 builds it together with the game in out\android\build.
 
 .PARAMETER Source
   The rexglue-sdk tree to build (an Android worktree with the patches applied).
@@ -74,6 +76,7 @@ $log = cmake -S $Source -B $build -G Ninja `
     "-DCMAKE_TOOLCHAIN_FILE=$Ndk\build\cmake\android.toolchain.cmake" `
     '-DANDROID_ABI=arm64-v8a' "-DANDROID_PLATFORM=android-$Api" '-DANDROID_STL=c++_shared' `
     '-DCMAKE_BUILD_TYPE=Release' "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" `
+    '-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384' `
     '-DREXGLUE_USE_VULKAN=ON' '-DREXGLUE_ENABLE_TRACY=OFF' 2>&1 | ForEach-Object { "$_" }
 if ($LASTEXITCODE -ne 0) { Show-Errors $log; Fail 'CMake configure failed.' }
 

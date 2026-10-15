@@ -245,7 +245,11 @@ class Gow2App : public rex::ReXApp {
   void OnPostLoadXexImage() override { rex::glue::PatchHashSec(coalesced_hashes_); }
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
+#if !defined(__ANDROID__)
+    // Not on Android: the keyboard/mouse driver's synthetic device would take guest user 0 on a
+    // phone without a keyboard and never send input; there only pads (and touch) are devices.
     SetIfUnset("mnk_mode", "true");
+#endif
     rex::glue::PrepareNativeMouseAim();
     PrepareCoalesced();
     PickRenderGpu();

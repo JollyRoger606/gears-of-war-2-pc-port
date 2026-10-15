@@ -321,7 +321,13 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     const std::filesystem::path dst = out_dir / name;
     const std::filesystem::path stamp_path = out_dir / (name + ".stamp");
     const auto size = std::filesystem::file_size(src, ec);
+#if defined(__ANDROID__)
+    // libc++ counts file times in __int128, which std::to_string has no overload for.
+    const auto time = static_cast<long long>(
+        std::filesystem::last_write_time(src, ec).time_since_epoch().count());
+#else
     const auto time = std::filesystem::last_write_time(src, ec).time_since_epoch().count();
+#endif
     const std::string stamp =
         std::to_string(h) + " " + std::to_string(size) + " " + std::to_string(time);
     bool fresh = false;
@@ -408,6 +414,10 @@ bool AnyPhysicalGamepad() {
   }
   FreeLibrary(m);
   return any;
+#elif defined(__ANDROID__)
+  // "auto" means controller prompts on a phone: it is played with a pad or with touch
+  // controls laid out like one, never with a keyboard.
+  return true;
 #else
   return false;
 #endif

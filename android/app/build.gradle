@@ -8,12 +8,20 @@ if (localPropertiesFile.exists()) {
     localPropertiesFile.withInputStream { localProperties.load(it) }
 }
 
+def gameLibraries = providers.gradleProperty('gow2.gameLibraries').getOrElse('false').toBoolean()
+
+// The placeholder shell builds its own libSDL3.so from SDL's sources.
 def sdl3SourceDir = localProperties.getProperty('gow2.sdl3.dir') ?: providers.gradleProperty('gow2.sdl3.dir').getOrNull()
-if (!sdl3SourceDir || !file("${sdl3SourceDir}/CMakeLists.txt").exists()) {
+if (!gameLibraries && (!sdl3SourceDir || !file("${sdl3SourceDir}/CMakeLists.txt").exists())) {
     throw new GradleException("Set gow2.sdl3.dir in android/local.properties to the SDL3 source tree " +
             "(thirdparty/sdl3 of a ReXGlue SDK checkout); got '${sdl3SourceDir}'.")
 }
-def gameLibraries = providers.gradleProperty('gow2.gameLibraries').getOrElse('false').toBoolean()
+
+// The game's libraries come prebuilt from scripts/build-android.ps1 (android/game, out/android/jniLibs).
+def gameLibsDir = file(providers.gradleProperty('gow2.gameLibs.dir').getOrNull()
+        ?: localProperties.getProperty('gow2.gameLibs.dir')
+        ?: rootProject.file('../out/android/jniLibs'))
+def gameLibraryNames = ['libSDL3.so', 'librexruntime.so', 'librexgpu-xenos.so', 'libgow2.so', 'libc++_shared.so']
 
 android {
     namespace = 'com.santiquiroz.gow2recomp'
@@ -30,14 +38,16 @@ android {
         ndk {
             abiFilters 'arm64-v8a'
         }
-        externalNativeBuild {
-            cmake {
-                arguments '-DANDROID_STL=c++_shared',
-                        "-DGOW2_SDL3_SOURCE_DIR=${sdl3SourceDir.replace('\\', '/')}"
-                // Same baseline as the SDK's Android build (scripts/build-sdk-android.ps1).
-                cFlags '-march=armv8.2-a'
-                cppFlags '-march=armv8.2-a'
-                targets 'gow2shell', 'SDL3-shared'
+        if (!gameLibraries) {
+            externalNativeBuild {
+                cmake {
+                    arguments '-DANDROID_STL=c++_shared',
+                            "-DGOW2_SDL3_SOURCE_DIR=${sdl3SourceDir.replace('\\', '/')}"
+                    // Same baseline as the SDK's Android build (scripts/build-sdk-android.ps1).
+                    cFlags '-march=armv8.2-a'
+                    cppFlags '-march=armv8.2-a'
+                    targets 'gow2shell', 'SDL3-shared'
+                }
             }
         }
     }
@@ -51,10 +61,20 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file('src/main/cpp/CMakeLists.txt')
-            version = '4.1.2'
+    if (!gameLibraries) {
+        externalNativeBuild {
+            cmake {
+                path = file('src/main/cpp/CMakeLists.txt')
+                version = '4.1.2'
+            }
+        }
+    }
+
+    if (gameLibraries) {
+        sourceSets {
+            main {
+                jniLibs.srcDirs = [gameLibsDir]
+            }
         }
     }
 
@@ -71,6 +91,23 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+if (gameLibraries) {
+    def checkGameLibraries = tasks.register('checkGameLibraries') {
+        def abiDir = new File(gameLibsDir, 'arm64-v8a')
+        def names = gameLibraryNames
+        inputs.property('gameLibsDir', abiDir.absolutePath)
+        doLast {
+            def missing = names.findAll { !new File(abiDir, it).isFile() }
+            if (!missing.isEmpty()) {
+                throw new GradleException("gow2.gameLibraries=true but ${missing.join(', ')} " +
+                        "${missing.size() == 1 ? 'is' : 'are'} missing from ${abiDir}. Build them with " +
+                        "scripts/build-android.ps1, or point gow2.gameLibs.dir at the folder that holds arm64-v8a/.")
+            }
+        }
+    }
+    tasks.named('preBuild') { dependsOn checkGameLibraries }
 }
 
 dependencies {

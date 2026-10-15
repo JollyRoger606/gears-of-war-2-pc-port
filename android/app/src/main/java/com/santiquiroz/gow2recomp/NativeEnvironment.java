@@ -22,12 +22,19 @@ final class NativeEnvironment {
         set("TMPDIR", paths.cacheDir());
         // The runtime keeps its config and logs beside the executable, which for an app is /system/bin.
         set("REX_EXECUTABLE_FOLDER", paths.dataDir());
+        // SDL reads its hints from the environment. The runtime's window is resizable and names no
+        // orientation, which makes SDL allow every orientation and the phone turns the game upright.
+        set("SDL_ORIENTATIONS", "LandscapeLeft LandscapeRight");
     }
 
     private static void set(String name, File dir) {
+        set(name, dir.getAbsolutePath());
+    }
+
+    private static void set(String name, String value) {
         try {
-            Os.setenv(name, dir.getAbsolutePath(), true);
-            Log.i(TAG, name + "=" + dir.getAbsolutePath());
+            Os.setenv(name, value, true);
+            Log.i(TAG, name + "=" + value);
         } catch (ErrnoException e) {
             Log.e(TAG, "cannot set " + name, e);
         }

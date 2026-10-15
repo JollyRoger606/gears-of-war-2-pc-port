@@ -1,8 +1,47 @@
 # Android port: plan
 
-Status (October 2026): the app shell runs on the phone with a placeholder native library, and the
-SDK is being ported to Android arm64; the game itself does not run on Android yet. Target device for bring-up: Samsung
-Galaxy S25 Ultra (Snapdragon 8 Elite, Adreno 830, Vulkan 1.3).
+Status (October 2026): the app shell runs on the phone with a placeholder native library, and
+`scripts/build-android.ps1` builds an APK with the game's own libraries (SDK, GPU plugin and the
+recompiled game for arm64), checked statically; it has not been run on a phone yet. Target device
+for bring-up: Samsung Galaxy S25 Ultra (Snapdragon 8 Elite, Adreno 830, Vulkan 1.3).
+
+## Building the APK
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-android.ps1 -SdkSource <rexglue-sdk tree with the Android port> -LowPriority
+```
+
+From a clean clone the script runs the whole chain, skipping what is current: `rexglue codegen` if
+`generated\default` is missing (needs `-Sdk` and your own `game\default.xex`), an Android copy of
+the generated code in `out\android\generated\default` with the ARM memory barriers
+(`tools/patch_memory_barriers.py` never touches `generated\default`), one CMake build of the SDK and
+the game from [`android/gamelibs`](../android/gamelibs/CMakeLists.txt) in `out\android\build`, the
+staged libraries in `out\android\jniLibs\arm64-v8a`, `tools/check_android_libs.py`, and Gradle with
+`-Pgow2.gameLibraries=true`. Details and requirements: [`android/README.md`](../android/README.md#game-build).
+
+The APK's `lib/arm64-v8a` holds `libSDL3.so`, `librexruntime.so`, `librexgpu-xenos.so`,
+`libgow2.so` and `libc++_shared.so`. SDLActivity loads them in that order and runs `SDL_main` from
+`libgow2.so`; there is one SDL in the process (the runtime links the shared `libSDL3.so` the Java
+side loads). The check verifies that every library's undefined symbols resolve the way Android's
+linker resolves them (own `DT_NEEDED` closure, API-29 system stubs), that only allowed system
+libraries are needed, that only `libSDL3.so` defines SDL, and that every segment and every library
+in the APK is 16 KB aligned.
+
+What the Android build changes in the SDK (Android-only, desktop builds unchanged), on top of the
+port work in the SDK worktree:
+
+- SDL3 is built as `libSDL3.so` (`SDL_SHARED`) instead of being linked statically into the runtime.
+- `windowed_app_main_sdl.cpp` includes `SDL_main.h`, so `main` becomes the exported `SDL_main`.
+- Android uses one app per library like the desktop (`XE_UI_WINDOWED_APPS_IN_LIBRARY` off), so
+  `REX_DEFINE_APP` defines the `GetWindowedAppCreator()` the SDL entry point calls.
+- `rexglue_apply_target_settings` no longer adds `-march=armv8-a` on Android, which lowered the
+  `-march=armv8.2-a` baseline (LSE atomics) of the game code.
+
+The port's Windows-only guards (`gow2_xam_input_guard.cpp`, `gow2_utf8_guard.cpp`,
+`gow2_crash_watch.cpp`) are not built for Android; on the phone the XamInput serialization, the
+non-throwing UTF-8 decoder and the disc-error box suppression are therefore missing, and SDK patches
+0005 and 0006 (file overrides for the edited Coalesced bundles, `mnk_mouse_stick`) are not in the
+Android SDK tree yet.
 
 ## What already exists
 
@@ -59,11 +98,13 @@ features need reverse engineering of Unreal Engine 3's session and network code.
    chained signal handlers, and memory barriers in the code generator. Kept as a patch in
    `sdk/patches/` like the others, and offered upstream.
 2. **The recompiled game links for arm64** (the generated C++ uses about 42,000 x86 SSE
-   intrinsics; simde maps them to NEON).
+   intrinsics; simde maps them to NEON). Done in October 2026: `libgow2.so` builds and links with
+   `-Wl,--no-undefined`, and the APK passes `tools/check_android_libs.py`.
 3. **App shell:** SDL3 activity, game folder chosen by the player (their own extracted disc,
    copied to app storage), controller and touch input, a separate `:game` process.
    The shell exists in [`android/`](../android/README.md) and runs on the S25 Ultra with a
-   placeholder native library; input mapping, the `:game` process and the game libraries remain.
+   placeholder native library; the game libraries are packaged with `-Pgow2.gameLibraries=true`;
+   input mapping and the `:game` process remain.
 4. **Bring-up on the S25 Ultra** with the stock driver first, then Turnip through adrenotools;
    record `vulkaninfo` for the device.
 5. **Measure.** If the generic Xenos path cannot hold 30 fps in Act 1, the proven alternative is a

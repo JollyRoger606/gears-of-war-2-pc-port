@@ -1,9 +1,8 @@
 # Android shell
 
-The Android application shell of the port (step 3 of [docs/ANDROID.md](../docs/ANDROID.md)): an
-SDL3 activity, the game-folder setup and, for now, a placeholder native library in place of the
-game, so the app can be built and run on a phone before the SDK and the recompiled game are
-packaged for Android.
+The Android application of the port (step 3 of [docs/ANDROID.md](../docs/ANDROID.md)): an SDL3
+activity, the game-folder setup and either a placeholder native library (the default) or the
+game's own libraries, built by `scripts/build-android.ps1` (see [Game build](#game-build)).
 
 This directory is part of gow2-recomp and is released under its BSD-3-Clause license
 (see [`../LICENSE`](../LICENSE)). The Java files in `app/src/main/java/org/libsdl/app/`,
@@ -31,7 +30,9 @@ own extracted copy of the game and the app copies it into its storage on the pho
    PC and press *Check again*. File names from the picker are validated (no `..`, separators or
    NUL) and the free space is checked before copying.
 3. It loads the libraries listed in `NativeLibraries.java` and passes
-   `--game_data_root=<files/game>` to `SDL_main`.
+   `--game_data_root=<files/game>` to `SDL_main`. It also sets `REX_EXECUTABLE_FOLDER` to the files
+   folder, where the runtime keeps its config and logs (an app's process image is
+   `/system/bin/app_process64`).
 
 The placeholder `libgow2shell.so` (`app/src/main/cpp`) opens an SDL3 window with Vulkan, logs the
 GPU, its driver, the Vulkan features and extensions the port cares about to logcat (tag
@@ -44,7 +45,7 @@ GPU, its driver, the Vulkan features and extensions the port cares about to logc
 - An SDL3 source tree: `thirdparty/sdl3` of a ReXGlue SDK checkout. It is only read; the build
   files go to `app/.cxx`.
 
-## Build
+## Build (placeholder shell)
 
 Create `android/local.properties` (it is not in git; paths are examples):
 
@@ -91,22 +92,83 @@ Vulkan 1.3.284, all 22 core features it checks (among them `vertexPipelineStores
 `VK_EXT_fragment_shader_interlock` or `VK_EXT_memory_budget`, and presents frames through SDL's
 Vulkan renderer.
 
+## Game build
+
+`scripts/build-android.ps1` builds the APK with the game's libraries from a clean clone. It needs,
+besides the requirements above, Python 3, `cmake` and `ninja` on `PATH`, your own `game\default.xex`
+(only while `generated\default` does not exist yet, together with the Windows ReXGlue SDK for
+`rexglue codegen`, `-Sdk`), and a rexglue-sdk source tree with the Android port (`-SdkSource`).
+`gow2.sdl3.dir` is not used in this mode.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-android.ps1 -SdkSource C:\path\to\rexglue-sdk-android -LowPriority
+```
+
+The steps, each skipped when its output is current:
+
+1. `rexglue codegen` when `generated\default` is missing (`-Codegen` forces it).
+2. `tools/prepare_android_sources.py` copies `generated\default` to `out\android\generated\default`
+   and applies the switch-trap, game and ARM memory-barrier patches to the copy; files whose
+   bytes did not change keep their timestamps, so ninja recompiles only the changed ones. The
+   Windows tree is never patched for ARM.
+3. CMake configures [`gamelibs/`](gamelibs/CMakeLists.txt) with the NDK toolchain (arm64-v8a,
+   API 29, `-march=armv8.2-a`, `-fno-emulated-tls`, `-Wl,-z,max-page-size=16384`) into
+   `out\android\build`. The SDK source tree is part of that build (its binaries go to
+   `out\android\build\sdk`, not to the SDK's own `out\android-arm64`).
+4. Builds `libSDL3.so`, `librexruntime.so` and `librexgpu-xenos.so`, then `libgow2.so`, and stages
+   them with the NDK's `libc++_shared.so` in `out\android\jniLibs\arm64-v8a`.
+5. `tools/check_android_libs.py` checks the staged libraries, then Gradle builds
+   `assembleDebug -Pgow2.gameLibraries=true` and the APK is checked again.
+
+Logs are in `out\android\logs`. A first build took 10 minutes on a busy 24-thread PC; a rebuild
+after a source change takes about a minute.
+
+`libgow2.so` holds the recompiled code, the port's code from `src/` and the SDK's SDL entry point
+(`windowed_app_main_sdl.cpp`, which exports `SDL_main` on Android). Every file in `src/` is built
+except the Windows-only ones listed in `gamelibs/CMakeLists.txt` (`gow2_xam_input_guard.cpp`,
+`gow2_utf8_guard.cpp`, `gow2_crash_watch.cpp`); `gamelibs/gow2_android_glue.cpp` stands in for
+them and logs that those guards are off.
+
+Gradle alone, once the libraries are staged:
+
+```sh
+./gradlew assembleDebug -Pgow2.gameLibraries=true    # gradlew.bat on Windows
+```
+
+It packages `../out/android/jniLibs` (or `gow2.gameLibs.dir`, as a `-P` property or in
+`local.properties`) and stops with a clear message if one of the five libraries is missing.
+
+### Checking the libraries
+
+```sh
+python tools/check_android_libs.py out/android/jniLibs/arm64-v8a
+python tools/check_android_libs.py android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+It uses the NDK's `llvm-readelf` and `llvm-nm` and fails when: an expected library is missing or is
+not an AArch64 shared object; a `PT_LOAD` segment is not 16 KB aligned (and, in an APK, a library is
+compressed or not 16 KB aligned in the zip); a `DT_NEEDED` entry is neither packaged nor an allowed
+system library; an undefined symbol is not defined by the libraries the linker will search for it
+(the library's own `DT_NEEDED` closure, with the NDK's API-29 stubs for system libraries, which is
+how Android's linker resolves app libraries); a library other than `libSDL3.so` defines `SDL_*` or
+`Java_org_libsdl_app_*` symbols; or `libgow2.so` does not export `SDL_main`.
+
 ## Native libraries
 
-`gow2.gameLibraries` in `gradle.properties` selects the list in `NativeLibraries.java`:
+`gow2.gameLibraries` in `gradle.properties` (or `-Pgow2.gameLibraries=true`) selects the list in
+`NativeLibraries.java`:
 
 | Value | Loaded, in order (the last one holds `SDL_main`) |
 |---|---|
-| `false` (today) | `libSDL3.so`, `libgow2shell.so` (placeholder) |
-| `true` | `librexruntime.so`, `librexgpu-xenos.so`, `libgow2.so` |
+| `false` (default) | `libSDL3.so`, `libgow2shell.so` (placeholder) |
+| `true` | `libSDL3.so`, `librexruntime.so`, `librexgpu-xenos.so`, `libgow2.so` |
 
-The game list has no `libSDL3.so` on purpose: the SDK's Android build links SDL3 statically into
-`librexruntime.so` (it forces `SDL_STATIC`), and that library exports SDL's JNI entry points. A
-second, shared SDL would leave one of the two copies without its JNI state. If the SDK switches to
-`SDL_SHARED`, put `SDL3` back at the front of that list. Packaging the game libraries (as
-`jniLibs` or as CMake targets) is part of the next step.
+There is exactly one SDL in the process: the SDK's Android build makes SDL3 a shared library
+(`SDL_SHARED`), `librexruntime.so` and `librexgpu-xenos.so` link that `libSDL3.so`, and SDLActivity
+loads it first, so its `JNI_OnLoad` sets up the JNI state the runtime's SDL calls use. A static SDL
+inside the runtime would be a second copy without that state.
 
 ## Not done yet
 
+- Running the game libraries on a phone (built and checked statically only so far).
 - Controller and touch mapping, and a separate `:game` process.
-- Packaging the SDK and game libraries (`gow2.gameLibraries=true`).
