@@ -13,7 +13,8 @@
      cannot find xxhash.h).
   4. The SDK's header-only unit tests of 0007, each compiled alone: the guest FPSCR rounding mode
      on x64 and arm64 (tests\unit\ppc\fpscr_rounding_test.cpp) and the Android draw diagnostics
-     (tests\unit\graphics\android_draw_experiments_test.cpp).
+     (tests\unit\graphics\android_draw_experiments_test.cpp) and driver pipeline cache files
+     (tests\unit\graphics\pipeline_cache_file_test.cpp).
   5. python -m pytest tools, when pytest is installed.
 
   Test binaries go to out\host-tests. The exit code is the number of failed steps.
@@ -159,7 +160,7 @@ function Test-SdkHeaderUnit([string]$sdk, [string]$catchBuild, [string]$test, [s
     Push-Location $sdk
     try {
         $code = Invoke-Native { clang++ -std=c++23 -O2 -fms-runtime-lib=dll -D_CRT_SECURE_NO_WARNINGS -Wall `
-            -I include -I thirdparty\simde -I thirdparty\catch2\src -I (Join-Path $catchBuild 'generated-includes') `
+            -I include -I thirdparty\simde -I thirdparty\xxHash -I thirdparty\catch2\src -I (Join-Path $catchBuild 'generated-includes') `
             $test (Get-Catch2Libraries $catchBuild) -o $exe }
     } finally { Pop-Location }
     if ($code -ne 0) { return $false }
@@ -175,7 +176,8 @@ function Test-SdkHeaderUnits([string]$outDir) {
     $catchBuild = Join-Path $outDir 'catch2'
     if (-not (Build-Catch2 $sdk $catchBuild)) { return $false }
     $tests = 'tests\unit\ppc\fpscr_rounding_test.cpp',
-        'tests\unit\graphics\android_draw_experiments_test.cpp'
+        'tests\unit\graphics\android_draw_experiments_test.cpp',
+        'tests\unit\graphics\pipeline_cache_file_test.cpp'
     $ok = $true
     foreach ($test in $tests) {
         if (-not (Test-SdkHeaderUnit $sdk $catchBuild $test $outDir)) { $ok = $false }
