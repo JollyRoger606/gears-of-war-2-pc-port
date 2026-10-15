@@ -74,7 +74,7 @@ index d876846..7469db0 100644
  template <>
  struct clock_time_conversion<::rex::chrono::WinSystemClock, ::rex::chrono::XSystemClock> {
 diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
-index 914ef19..f7817f1 100644
+index 914ef19..9614fe4 100644
 --- a/include/rex/graphics/pipeline/texture/cache.h
 +++ b/include/rex/graphics/pipeline/texture/cache.h
 @@ -24,6 +24,7 @@
@@ -85,16 +85,19 @@ index 914ef19..f7817f1 100644
  #include <rex/thread/mutex.h>
  
  namespace rex::graphics {
-@@ -130,6 +131,22 @@ class TextureCache {
+@@ -130,6 +131,25 @@ class TextureCache {
             (binding->texture_signed && binding->texture_signed->key().scaled_resolve);
    }
  
 +#if REX_PLATFORM_ANDROID
-+  // Texture loads since the last TakeAndroidTextureLoadStats. "zero" counts loaded ranges whose
-+  // guest data was all zero (block-compressed formats apart: a resolve target's data lives only
-+  // on the GPU, a DXT texture's never does); invalidations count memory watches that fired.
++  // Texture loads since the last TakeAndroidTextureLoadStats. "gpu_written" counts loads with a
++  // range a resolve or memexport wrote into the GPU's copy of guest memory: the CPU-side bytes of
++  // such a range say nothing, so it is not checked for zero. "zero" counts the other loaded ranges
++  // whose CPU-side guest data was all zero (block-compressed formats apart, as a DXT texture is
++  // never a resolve target); invalidations count memory watches that fired.
 +  struct AndroidTextureLoadStats {
 +    uint32_t loads = 0;
++    uint32_t gpu_written = 0;
 +    uint32_t zero_base_compressed = 0;
 +    uint32_t zero_mips_compressed = 0;
 +    uint32_t zero_other = 0;
@@ -108,7 +111,7 @@ index 914ef19..f7817f1 100644
   protected:
    struct TextureKey {
      // Dimensions minus 1 are stored similarly to how they're stored in fetch
-@@ -238,6 +255,11 @@ class TextureCache {
+@@ -238,6 +258,11 @@ class TextureCache {
  
      void LogAction(const char* action) const;
  
@@ -120,7 +123,7 @@ index 914ef19..f7817f1 100644
     protected:
      // If track_usage is false, the texture won't be added to the LRU list.
      explicit Texture(TextureCache& texture_cache, const TextureKey& key, bool track_usage = true);
-@@ -273,6 +295,9 @@ class TextureCache {
+@@ -273,6 +298,9 @@ class TextureCache {
      // Watch handles for the memory ranges.
      SharedMemory::WatchHandle base_watch_handle_ = nullptr;
      SharedMemory::WatchHandle mips_watch_handle_ = nullptr;
@@ -130,18 +133,19 @@ index 914ef19..f7817f1 100644
    };
  
    // Rules of data access in load shaders:
-@@ -566,6 +591,10 @@ class TextureCache {
+@@ -566,6 +594,11 @@ class TextureCache {
                            PendingSharedMemoryRange* pending_ranges_out,
                            size_t& pending_range_count_out);
    bool CommitPreparedTextureLoad(const PendingTextureLoad& pending_load);
 +#if REX_PLATFORM_ANDROID
 +  void RecordAndroidTextureLoad(Texture& texture, bool load_base, bool load_mips);
++  bool IsAndroidGuestRangeGpuWritten(uint32_t guest_address, uint32_t length) const;
 +  bool IsAndroidGuestRangeZero(uint32_t guest_address, uint32_t length) const;
 +#endif
  
    void UpdateTexturesTotalHostMemoryUsage(uint64_t add, uint64_t subtract);
  
-@@ -620,6 +649,13 @@ class TextureCache {
+@@ -620,6 +653,13 @@ class TextureCache {
    // constants have been changed.
    std::atomic<bool> texture_became_outdated_{false};
  
@@ -209,10 +213,10 @@ index 1ffd071..d1b720a 100644
    // touched pages of the buffer of this size will be invalidated).
 diff --git a/include/rex/graphics/vulkan/android_gpu_stats.h b/include/rex/graphics/vulkan/android_gpu_stats.h
 new file mode 100644
-index 0000000..59ac019
+index 0000000..c691939
 --- /dev/null
 +++ b/include/rex/graphics/vulkan/android_gpu_stats.h
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,94 @@
 +#pragma once
 +// Per-window counters of the Vulkan command processor's work on Android, logged as GPUSTATS lines
 +// (vulkan_android_stats_log). Only the command processor thread touches them.
@@ -280,6 +284,7 @@ index 0000000..59ac019
 +  uint64_t cpu_invalidated_bytes = 0;
 +  uint64_t cpu_newly_invalidated_pages = 0;
 +  uint32_t texture_loads = 0;
++  uint32_t texture_gpu_written = 0;
 +  uint32_t texture_zero_base_compressed = 0;
 +  uint32_t texture_zero_mips_compressed = 0;
 +  uint32_t texture_zero_other = 0;
@@ -1517,7 +1522,7 @@ index 1774f97..85b169c 100644
      builder_->addMemberName(type_struct_per_vertex, output_per_vertex_member_clip_distance_,
                              "gl_ClipDistance");
 diff --git a/src/graphics/pipeline/texture/cache.cpp b/src/graphics/pipeline/texture/cache.cpp
-index 76f5600..8b878f7 100644
+index 76f5600..188198e 100644
 --- a/src/graphics/pipeline/texture/cache.cpp
 +++ b/src/graphics/pipeline/texture/cache.cpp
 @@ -125,8 +125,119 @@ REXCVAR_DEFINE_BOOL(pre_mask_resolve_l2_block, true, "GPU",
@@ -1660,7 +1665,7 @@ index 76f5600..8b878f7 100644
    // Mark the ranges as uploaded and watch them. This is needed for scaled
    // resolves as well to detect when the CPU wants to reuse the memory for a
    // regular texture or a vertex buffer, and thus the scaled resolve version is
-@@ -450,6 +571,79 @@ bool TextureCache::CommitPreparedTextureLoad(const PendingTextureLoad& pending_l
+@@ -450,6 +571,91 @@ bool TextureCache::CommitPreparedTextureLoad(const PendingTextureLoad& pending_l
    return true;
  }
  
@@ -1696,6 +1701,11 @@ index 76f5600..8b878f7 100644
 +
 +}  // namespace
 +
++// Resolves and memexports write only the GPU's copy of guest memory.
++bool TextureCache::IsAndroidGuestRangeGpuWritten(uint32_t guest_address, uint32_t length) const {
++  return length && shared_memory().IsRangeGpuWritten(guest_address, length);
++}
++
 +bool TextureCache::IsAndroidGuestRangeZero(uint32_t guest_address, uint32_t length) const {
 +  if (!length) {
 +    return false;
@@ -1714,8 +1724,15 @@ index 76f5600..8b878f7 100644
 +                                 load_base ? texture.GetGuestBaseSize() : 0, false,
 +                                 uint32_t(key.mip_page) << 12,
 +                                 load_mips ? texture.GetGuestMipsSize() : 0, false};
-+  ranges.base_zero = IsAndroidGuestRangeZero(ranges.base_address, ranges.base_size);
-+  ranges.mips_zero = IsAndroidGuestRangeZero(ranges.mips_address, ranges.mips_size);
++  const bool base_gpu_written = IsAndroidGuestRangeGpuWritten(ranges.base_address, ranges.base_size);
++  const bool mips_gpu_written = IsAndroidGuestRangeGpuWritten(ranges.mips_address, ranges.mips_size);
++  if (base_gpu_written || mips_gpu_written) {
++    ++android_texture_load_stats_.gpu_written;
++  }
++  ranges.base_zero =
++      !base_gpu_written && IsAndroidGuestRangeZero(ranges.base_address, ranges.base_size);
++  ranges.mips_zero =
++      !mips_gpu_written && IsAndroidGuestRangeZero(ranges.mips_address, ranges.mips_size);
 +  const AndroidTextureDescription description = {
 +      key.format,         key.GetLogDimensionName(),        key.GetWidth(),
 +      key.GetHeight(),    key.GetDepthOrArraySize(),        uint32_t(key.mip_max_level) + 1};
@@ -1740,7 +1757,7 @@ index 76f5600..8b878f7 100644
  void TextureCache::RequestTextures(uint32_t used_texture_mask) {
    const auto& regs = register_file();
  
-@@ -734,6 +928,9 @@ void TextureCache::Texture::MarkAsUsed() {
+@@ -734,6 +940,9 @@ void TextureCache::Texture::MarkAsUsed() {
  
  void TextureCache::Texture::WatchCallback(
      [[maybe_unused]] const std::unique_lock<std::recursive_mutex>& global_lock, bool is_mip) {
@@ -1794,7 +1811,7 @@ index f1286a6..7a05090 100644
  
    return std::make_pair(page_first << page_size_log2_, (page_last - page_first + 1)
 diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
-index 001f36b..6e0761b 100644
+index 001f36b..dc6a561 100644
 --- a/src/graphics/vulkan/command_processor.cpp
 +++ b/src/graphics/vulkan/command_processor.cpp
 @@ -69,6 +69,29 @@ REXCVAR_DEFINE_BOOL(vulkan_dynamic_rendering, true, "GPU/Vulkan",
@@ -2045,7 +2062,7 @@ index 001f36b..6e0761b 100644
    WriteGuestOcclusionResult(sample_count_address, samples);
    return true;
  }
-@@ -4943,6 +5022,319 @@ void VulkanCommandProcessor::WriteGuestOcclusionResult(uint32_t sample_count_add
+@@ -4943,6 +5022,321 @@ void VulkanCommandProcessor::WriteGuestOcclusionResult(uint32_t sample_count_add
    sample_counts->StencilFail_B = 0;
  }
  
@@ -2124,9 +2141,10 @@ index 001f36b..6e0761b 100644
 +
 +std::string FormatAndroidTextureLoadStats(const AndroidGpuStats& stats) {
 +  return fmt::format(
-+      "texture_loads {} zero_bc_base {} zero_bc_mips {} zero_other {} reloaded_after_zero {} "
-+      "invalidated {}",
-+      stats.texture_loads, stats.texture_zero_base_compressed, stats.texture_zero_mips_compressed,
++      "texture_loads {} gpu_written {} zero_bc_base {} zero_bc_mips {} zero_other {} "
++      "reloaded_after_zero {} invalidated {}",
++      stats.texture_loads, stats.texture_gpu_written, stats.texture_zero_base_compressed,
++      stats.texture_zero_mips_compressed,
 +      stats.texture_zero_other, stats.texture_reloaded_after_zero, stats.texture_invalidations);
 +}
 +
@@ -2152,6 +2170,7 @@ index 001f36b..6e0761b 100644
 +void CopyAndroidTextureLoadStats(const TextureCache::AndroidTextureLoadStats& loads,
 +                                 AndroidGpuStats& stats) {
 +  stats.texture_loads = loads.loads;
++  stats.texture_gpu_written = loads.gpu_written;
 +  stats.texture_zero_base_compressed = loads.zero_base_compressed;
 +  stats.texture_zero_mips_compressed = loads.zero_mips_compressed;
 +  stats.texture_zero_other = loads.zero_other;
@@ -2365,7 +2384,7 @@ index 001f36b..6e0761b 100644
  void VulkanCommandProcessor::CheckSubmissionFenceAndDeviceLoss(uint64_t await_submission) {
    // Only report once, no need to retry a wait that won't succeed anyway.
    if (device_lost_) {
-@@ -5419,6 +5811,7 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+@@ -5419,6 +5813,7 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
            vulkan_device->AcquireQueue(vulkan_device->queue_family_graphics_compute(), 0);
        submit_result = dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info, fence);
      }
@@ -2373,7 +2392,7 @@ index 001f36b..6e0761b 100644
      if (submit_result != VK_SUCCESS) {
        REXGPU_ERROR("Failed to submit a Vulkan command buffer");
        if (submit_result == VK_ERROR_DEVICE_LOST && !device_lost_) {
-@@ -5701,6 +6094,9 @@ void VulkanCommandProcessor::UpdateDynamicState(const draw_util::ViewportInfo& v
+@@ -5701,6 +6096,9 @@ void VulkanCommandProcessor::UpdateDynamicState(const draw_util::ViewportInfo& v
    scissor_rect.offset.y = int32_t(scissor.offset[1]);
    scissor_rect.extent.width = scissor.extent[0];
    scissor_rect.extent.height = scissor.extent[1];

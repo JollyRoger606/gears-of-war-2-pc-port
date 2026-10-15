@@ -84,10 +84,14 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   passes ended), `uploads` / `upload_kb` and `upload_kb_by index` / `texture` / `vertex` /
   `memexport` (guest memory copied to the GPU, by the draw step that needed it),
   `cpu_invalidations` / `cpu_invalidated_kb` / `newly_invalid_pages` (CPU writes caught by the
-  memory watches), and `texture_loads` / `zero_bc_base` / `zero_bc_mips` / `zero_other` /
-  `reloaded_after_zero` / `invalidated` (texture loads, those whose guest data was all zero, with
-  `TEXZERO` / `TEXRELOAD` lines for block-compressed ones). `missing_textures` counts only the
-  signed or unsigned view a texture actually uses (every fetch declares both).
+  memory watches), and `texture_loads` / `gpu_written` / `zero_bc_base` / `zero_bc_mips` /
+  `zero_other` / `reloaded_after_zero` / `invalidated` (texture loads; `gpu_written` counts those
+  with a range a resolve or memexport wrote, whose data lives only in the GPU's copy of guest
+  memory, so they are not checked for zero; the `zero_*` counts are the other loads whose guest
+  data was all zero, with `TEXZERO` / `TEXRELOAD` lines for block-compressed ones; the earlier
+  October 15 builds counted GPU-written loads in `zero_other` too, whatever the GPU had written).
+  `missing_textures` counts only the signed or unsigned view a texture actually uses (every fetch
+  declares both).
 - **`TEXFMT`** lines (with `vulkan_android_stats_log`): each texture format the first time it is
   loaded, with its host format and load shader. **`TEXFAIL`** lines (always): a texture whose data
   could not be loaded, once per format; that used to fail without a word.
