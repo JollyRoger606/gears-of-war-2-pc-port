@@ -1,8 +1,8 @@
 diff --git a/include/rex/system/system_link.h b/include/rex/system/system_link.h
-index cae697b..d225653 100644
+index cae697b..546522e 100644
 --- a/include/rex/system/system_link.h
 +++ b/include/rex/system/system_link.h
-@@ -27,9 +27,107 @@ constexpr size_t kXnKeySize = 16;
+@@ -27,9 +27,124 @@ constexpr size_t kXnKeySize = 16;
  constexpr size_t kSessionInfoSize = kXnKidSize + kXnAddrSize + kXnKeySize;
  constexpr const char* kInstallXuidFileName = "system_link_xuid.txt";
  
@@ -23,6 +23,7 @@ index cae697b..d225653 100644
 +constexpr size_t kRecentSourceCapacity = 32;
 +constexpr uint64_t kDuplicateWindowMs = 250;
 +constexpr size_t kDuplicateCapacity = 16;
++constexpr size_t kFirstContactCapacity = 256;
 +// Not REX_NET_LOCAL_IP: that name sets the net_local_ip cvar and would outrank the config file.
 +constexpr const char* kLocalIpEnvironmentVariable = "REX_DETECTED_LOCAL_IP";
 +
@@ -107,10 +108,26 @@ index cae697b..d225653 100644
 +  std::vector<Entry> entries_;
 +};
 +
++// Remembers which (socket, peer) pairs were already traced, so the first datagram each way
++// is always logged once the rate-limited trace budget is spent. Not thread-safe.
++class FirstContacts {
++ public:
++  explicit FirstContacts(size_t capacity);
++  bool IsFirst(uint64_t socket_key, const Endpoint& peer);
++
++ private:
++  struct Entry {
++    uint64_t socket_key;
++    Endpoint peer;
++  };
++  size_t capacity_;
++  std::vector<Entry> entries_;
++};
++
  std::optional<uint32_t> ParseIpv4(std::string_view text);
  std::vector<uint32_t> ParseIpv4List(std::string_view text);
  std::string FormatIpv4(uint32_t ip);
-@@ -40,20 +138,68 @@ std::string FormatXuid(uint64_t xuid);
+@@ -40,20 +155,68 @@ std::string FormatXuid(uint64_t xuid);
  uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t> bind_ip);
  uint64_t SplitMix64(uint64_t& state);
  MacAddress MakeInstanceMac(uint64_t xuid, uint32_t local_ip);
@@ -241,7 +258,7 @@ index 578e38b..c003e73 100644
    std::mutex incoming_packet_mutex_;
    std::queue<uint8_t*> incoming_packets_;
 diff --git a/src/kernel/xam/xam_net.cpp b/src/kernel/xam/xam_net.cpp
-index cd6a5b8..1b4c546 100644
+index cd6a5b8..e93472b 100644
 --- a/src/kernel/xam/xam_net.cpp
 +++ b/src/kernel/xam/xam_net.cpp
 @@ -60,6 +60,10 @@ using namespace rex::system;
@@ -586,7 +603,7 @@ index cd6a5b8..1b4c546 100644
  }
  
  u32 NetDll_recvfrom_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 buf_len,
-@@ -1219,23 +1323,14 @@ u32 NetDll_recvfrom_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u3
+@@ -1219,27 +1323,21 @@ u32 NetDll_recvfrom_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u3
        socket->RecvFrom(buf_ptr, buf_len, flags, &native_from, fromlen_ptr ? &native_fromlen : 0);
  
    if (ret >= 0 && from_ptr) {
@@ -611,8 +628,17 @@ index cd6a5b8..1b4c546 100644
 +    XThread::SetLastError(XSocket::LastHostError());
    }
  
-   static std::atomic<uint64_t> netlink_trace_count{0};
-@@ -1262,7 +1357,11 @@ u32 NetDll_send_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 bu
+-  static std::atomic<uint64_t> netlink_trace_count{0};
+-  if (REXCVAR_GET(system_link_trace) && NetLinkTraceAllow(&netlink_trace_count)) {
++  // Would-block polls must not spend the trace budget of real datagrams.
++  static std::atomic<uint64_t> netlink_trace_ok_count{0};
++  static std::atomic<uint64_t> netlink_trace_fail_count{0};
++  if (REXCVAR_GET(system_link_trace) &&
++      NetLinkTraceAllow(ret >= 0 ? &netlink_trace_ok_count : &netlink_trace_fail_count)) {
+     uint32_t trace_ip;
+     uint16_t trace_port;
+     NetLinkSplitAddrIn(from_ptr, &trace_ip, &trace_port);
+@@ -1262,7 +1360,11 @@ u32 NetDll_send_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 bu
      return -1;
    }
  
@@ -625,7 +651,21 @@ index cd6a5b8..1b4c546 100644
  }
  
  u32 NetDll_sendto_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32 buf_len, u32 flags,
-@@ -1360,6 +1459,8 @@ REX_EXPORT(__imp__NetDll_bind, rex::kernel::xam::NetDll_bind_entry)
+@@ -1286,8 +1388,11 @@ u32 NetDll_sendto_entry(u32 caller, u32 socket_handle, mapped_void buf_ptr, u32
+   if (ret < 0) {
+     XThread::SetLastError(XSocket::LastHostError());
+   }
+-  static std::atomic<uint64_t> netlink_trace_count{0};
+-  if (REXCVAR_GET(system_link_trace) && NetLinkTraceAllow(&netlink_trace_count)) {
++  // Failed sends get their own trace budget, like recvfrom.
++  static std::atomic<uint64_t> netlink_trace_ok_count{0};
++  static std::atomic<uint64_t> netlink_trace_fail_count{0};
++  if (REXCVAR_GET(system_link_trace) &&
++      NetLinkTraceAllow(ret >= 0 ? &netlink_trace_ok_count : &netlink_trace_fail_count)) {
+     uint32_t trace_ip;
+     uint16_t trace_port;
+     NetLinkSplitAddrIn(to_ptr, &trace_ip, &trace_port);
+@@ -1360,6 +1465,8 @@ REX_EXPORT(__imp__NetDll_bind, rex::kernel::xam::NetDll_bind_entry)
  REX_EXPORT(__imp__NetDll_connect, rex::kernel::xam::NetDll_connect_entry)
  REX_EXPORT(__imp__NetDll_listen, rex::kernel::xam::NetDll_listen_entry)
  REX_EXPORT(__imp__NetDll_accept, rex::kernel::xam::NetDll_accept_entry)
@@ -634,7 +674,7 @@ index cd6a5b8..1b4c546 100644
  REX_EXPORT(__imp__NetDll_select, rex::kernel::xam::NetDll_select_entry)
  REX_EXPORT(__imp__NetDll_recv, rex::kernel::xam::NetDll_recv_entry)
  REX_EXPORT(__imp__NetDll_recvfrom, rex::kernel::xam::NetDll_recvfrom_entry)
-@@ -1529,6 +1630,4 @@ REX_EXPORT_STUB(__imp__NetDll_XnpToolIpProxyInject);
+@@ -1529,6 +1636,4 @@ REX_EXPORT_STUB(__imp__NetDll_XnpToolIpProxyInject);
  REX_EXPORT_STUB(__imp__NetDll_XnpToolSetCallbacks);
  REX_EXPORT_STUB(__imp__NetDll_XnpUnregisterKeyForCallerType);
  REX_EXPORT_STUB(__imp__NetDll_XnpUpdateConfigParams);
@@ -642,7 +682,7 @@ index cd6a5b8..1b4c546 100644
 -NETLINK_STUB_WSA(__imp__NetDll_getsockname, -1);
  REX_EXPORT(__imp__NetDll_getsockopt, rex::kernel::xam::NetDll_getsockopt_entry)
 diff --git a/src/system/system_link.cpp b/src/system/system_link.cpp
-index 2cc9af7..240381a 100644
+index 2cc9af7..fd4cfec 100644
 --- a/src/system/system_link.cpp
 +++ b/src/system/system_link.cpp
 @@ -159,6 +159,251 @@ std::optional<uint32_t> ParseIpv4Field(std::string_view token) {
@@ -915,7 +955,7 @@ index 2cc9af7..240381a 100644
    for (size_t i = 0; i < kMacSize; ++i) {
      out[kXnAddrMacOffset + i] = mac[i];
    }
-@@ -365,4 +610,373 @@ uint32_t WsaErrorFromErrno(int error) {
+@@ -365,4 +610,388 @@ uint32_t WsaErrorFromErrno(int error) {
    return kWsaEInval;
  }
  
@@ -1286,6 +1326,21 @@ index 2cc9af7..240381a 100644
 +  }
 +  entries_.push_back(Entry{source, hash, size, now_ms});
 +  return false;
++}
++
++FirstContacts::FirstContacts(size_t capacity) : capacity_(std::max<size_t>(capacity, 1)) {}
++
++bool FirstContacts::IsFirst(uint64_t socket_key, const Endpoint& peer) {
++  for (const Entry& entry : entries_) {
++    if (entry.socket_key == socket_key && entry.peer == peer) {
++      return false;
++    }
++  }
++  if (entries_.size() >= capacity_) {
++    entries_.erase(entries_.begin());
++  }
++  entries_.push_back(Entry{socket_key, peer});
++  return true;
 +}
 +
  }  // namespace rex::system::system_link
@@ -1839,7 +1894,7 @@ index 636fc5f..ffd2173 100644
  
  void FillRandom(std::span<uint8_t> out) {
 diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
-index 11c3fbc..e7566ba 100644
+index 11c3fbc..23ebaf0 100644
 --- a/src/system/xsocket.cpp
 +++ b/src/system/xsocket.cpp
 @@ -12,6 +12,8 @@
@@ -1884,7 +1939,7 @@ index 11c3fbc..e7566ba 100644
  sockaddr_in MakeHostSockaddr(uint32_t ip, uint16_t port) {
    sockaddr_in addr = {};
    addr.sin_family = AF_INET;
-@@ -66,19 +89,184 @@ void LogBindRewrite(uint32_t requested_ip, uint32_t effective_ip, uint16_t port)
+@@ -66,19 +89,220 @@ void LogBindRewrite(uint32_t requested_ip, uint32_t effective_ip, uint16_t port)
                port, system_link::FormatIpv4(effective_ip), port);
  }
  
@@ -1898,14 +1953,14 @@ index 11c3fbc..e7566ba 100644
 +
 +void LogSetsockoptRemap(uint32_t guest_level, uint32_t guest_opt, int host_level, int host_opt) {
 +  if (!system_link::TraceEnabled()) {
-     return;
-   }
++    return;
++  }
 +  if (host_level == static_cast<int>(guest_level) && host_opt == static_cast<int>(guest_opt)) {
 +    return;
 +  }
 +  if (!ShouldLogSetsockoptRemap()) {
-+    return;
-+  }
+     return;
+   }
 +  REXLOG_INFO("[netlink] setsockopt level {:#x} opt {:#x} -> host level {} opt {}", guest_level,
 +              guest_opt, host_level, host_opt);
 +}
@@ -1982,6 +2037,42 @@ index 11c3fbc..e7566ba 100644
 +              FormatEndpointList(endpoints));
 +}
 +
++bool IsFirstContact(uint64_t socket_key, const system_link::Endpoint& peer) {
++  static std::mutex mutex;
++  static system_link::FirstContacts contacts{system_link::kFirstContactCapacity};
++  std::lock_guard<std::mutex> lock(mutex);
++  return contacts.IsFirst(socket_key, peer);
++}
++
++uint64_t ReceiveContactKey(uint64_t handle) { return handle * 2; }
++
++uint64_t SendContactKey(uint64_t handle) { return handle * 2 + 1; }
++
++uint16_t LocalHostPort(uint64_t handle) {
++  sockaddr_in addr = {};
++  socklen_t len = sizeof(addr);
++  if (getsockname(handle, reinterpret_cast<sockaddr*>(&addr), &len) < 0) {
++    return 0;
++  }
++  return ntohs(addr.sin_port);
++}
++
++void LogFirstReceive(uint64_t handle, const system_link::Endpoint& source, int len) {
++  if (!system_link::TraceEnabled() || !IsFirstContact(ReceiveContactKey(handle), source)) {
++    return;
++  }
++  REXLOG_INFO("[netlink] first datagram from {} on local port {} ({} bytes)",
++              system_link::FormatEndpoint(source), LocalHostPort(handle), len);
++}
++
++void LogFirstSend(uint64_t handle, const system_link::Endpoint& destination, int len) {
++  if (!system_link::TraceEnabled() || !IsFirstContact(SendContactKey(handle), destination)) {
++    return;
++  }
++  REXLOG_INFO("[netlink] first datagram to {} from local port {} ({} bytes)",
++              system_link::FormatEndpoint(destination), LocalHostPort(handle), len);
++}
++
 +void FillGuestSockaddrIn(N_XSOCKADDR_IN* out, const sockaddr_in& host_addr) {
 +  out->sin_family = kAfInet;
 +  out->sin_addr = ntohl(host_addr.sin_addr.s_addr);
@@ -2055,18 +2146,18 @@ index 11c3fbc..e7566ba 100644
 +  u_long count = 0;
 +  if (ioctlsocket(handle, FIONREAD, &count) != 0) {
 +    return IoctlOutcome::kHostError;
-+  }
+   }
+-  REXLOG_INFO(
+-      "[netlink] broadcasts to port {} go out as unicast copies to [{}] "
+-      "(net_broadcast_targets)",
+-      port, list);
 +  system_link::WriteBigEndian32(std::span<uint8_t, 4>(arg_ptr, 4),
 +                                static_cast<uint32_t>(count));
 +#else
 +  int count = 0;
 +  if (ioctl(static_cast<int>(handle), FIONREAD, &count) != 0) {
 +    return IoctlOutcome::kHostError;
-   }
--  REXLOG_INFO(
--      "[netlink] broadcasts to port {} go out as unicast copies to [{}] "
--      "(net_broadcast_targets)",
--      port, list);
++  }
 +  system_link::WriteBigEndian32(std::span<uint8_t, 4>(arg_ptr, 4),
 +                                static_cast<uint32_t>(count));
 +#endif
@@ -2078,7 +2169,7 @@ index 11c3fbc..e7566ba 100644
  }
  
  }  // namespace
-@@ -92,6 +280,64 @@ XSocket::~XSocket() {
+@@ -92,6 +316,64 @@ XSocket::~XSocket() {
    Close();
  }
  
@@ -2143,7 +2234,7 @@ index 11c3fbc..e7566ba 100644
  X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
    af_ = af;
    type_ = type;
-@@ -104,6 +350,7 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
+@@ -104,6 +386,7 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
  
    native_handle_ = socket(af, type, proto);
    if (native_handle_ == -1) {
@@ -2151,7 +2242,7 @@ index 11c3fbc..e7566ba 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  #if REX_PLATFORM_WIN32
-@@ -115,14 +362,6 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
+@@ -115,14 +398,6 @@ X_STATUS XSocket::Initialize(AddressFamily af, Type type, Protocol proto) {
    return X_STATUS_SUCCESS;
  }
  
@@ -2166,7 +2257,7 @@ index 11c3fbc..e7566ba 100644
  X_STATUS XSocket::Close() {
    if (native_handle_ == uint64_t(-1)) {
      return X_STATUS_SUCCESS;
-@@ -131,6 +370,7 @@ X_STATUS XSocket::Close() {
+@@ -131,6 +406,7 @@ X_STATUS XSocket::Close() {
    int ret = rex::net::socket_close(native_handle_);
    native_handle_ = -1;
    if (ret != 0) {
@@ -2174,7 +2265,7 @@ index 11c3fbc..e7566ba 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -138,46 +378,129 @@ X_STATUS XSocket::Close() {
+@@ -138,46 +414,129 @@ X_STATUS XSocket::Close() {
  }
  
  X_STATUS XSocket::SetOption(uint32_t level, uint32_t optname, void* optval_ptr, uint32_t optlen) {
@@ -2314,7 +2405,7 @@ index 11c3fbc..e7566ba 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -188,19 +511,25 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
+@@ -188,19 +547,25 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
    uint32_t requested_ip = name->sin_addr;
    uint32_t effective_ip =
        system_link::RewriteBindAddress(requested_ip, system_link::BindIp().value_or(0));
@@ -2343,7 +2434,7 @@ index 11c3fbc..e7566ba 100644
  
    return X_STATUS_SUCCESS;
  }
-@@ -208,6 +537,7 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
+@@ -208,6 +573,7 @@ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
  X_STATUS XSocket::Listen(int backlog) {
    int ret = listen(native_handle_, backlog);
    if (ret < 0) {
@@ -2351,7 +2442,7 @@ index 11c3fbc..e7566ba 100644
      return X_STATUS_UNSUCCESSFUL;
    }
  
-@@ -215,15 +545,21 @@ X_STATUS XSocket::Listen(int backlog) {
+@@ -215,15 +581,21 @@ X_STATUS XSocket::Listen(int backlog) {
  }
  
  object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
@@ -2375,7 +2466,7 @@ index 11c3fbc..e7566ba 100644
    std::memcpy(name, &n_sockaddr, n_name_len);
    *name_len = n_name_len;
  
-@@ -238,11 +574,19 @@ object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
+@@ -238,11 +610,19 @@ object_ref<XSocket> XSocket::Accept(N_XSOCKADDR* name, int* name_len) {
  }
  
  int XSocket::Shutdown(int how) {
@@ -2397,7 +2488,7 @@ index 11c3fbc..e7566ba 100644
  }
  
  int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* from,
-@@ -270,29 +614,46 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
+@@ -270,29 +650,46 @@ int XSocket::RecvFrom(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADD
    }
    */
  
@@ -2463,7 +2554,7 @@ index 11c3fbc..e7566ba 100644
  }
  
  int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_IN* to,
-@@ -309,34 +670,50 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
+@@ -309,34 +706,52 @@ int XSocket::SendTo(uint8_t* buf, uint32_t buf_len, uint32_t flags, N_XSOCKADDR_
    */
  
    if (!to) {
@@ -2497,7 +2588,9 @@ index 11c3fbc..e7566ba 100644
 +                   reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
 +  if (ret < 0) {
 +    CaptureHostError();
++    return ret;
 +  }
++  LogFirstSend(native_handle_, system_link::Endpoint{ip, port}, ret);
 +  return ret;
  }
  
@@ -2529,7 +2622,7 @@ index 11c3fbc..e7566ba 100644
      if (ret >= 0) {
        any_sent = true;
        result = ret;
-@@ -345,6 +722,69 @@ int XSocket::SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags,
+@@ -345,6 +760,70 @@ int XSocket::SendBroadcast(const uint8_t* buf, uint32_t buf_len, uint32_t flags,
    return any_sent ? result : -1;
  }
  
@@ -2559,6 +2652,7 @@ index 11c3fbc..e7566ba 100644
 +    recent_sources_.Note(source, now);
 +  }
 +  system_link::NoteHeardFrom(source);
++  LogFirstReceive(native_handle_, source, len);
 +  return true;
 +}
 +
@@ -2600,10 +2694,10 @@ index 11c3fbc..e7566ba 100644
    packet* pkt = reinterpret_cast<packet*>(new uint8_t[sizeof(packet) + len]);
    pkt->src_ip = src_ip;
 diff --git a/tests/unit/system/system_link_test.cpp b/tests/unit/system/system_link_test.cpp
-index 54fc84f..1b58fa6 100644
+index 54fc84f..71cfb47 100644
 --- a/tests/unit/system/system_link_test.cpp
 +++ b/tests/unit/system/system_link_test.cpp
-@@ -235,3 +235,467 @@ TEST_CASE("system_link: WsaErrorFromErrno maps errnos", "[system][system_link]")
+@@ -235,3 +235,503 @@ TEST_CASE("system_link: WsaErrorFromErrno maps errnos", "[system][system_link]")
  #endif
    CHECK(WsaErrorFromErrno(999999) == 10022u);
  }
@@ -3070,4 +3164,40 @@ index 54fc84f..1b58fa6 100644
 +  CHECK(!filter.IsDuplicate(other, payload, 100));
 +  CHECK(!filter.IsDuplicate(source, different, 100));
 +  CHECK(!filter.IsDuplicate(source, payload, 400));
++}
++
++TEST_CASE("system_link: FirstContacts reports each socket and peer pair once",
++          "[system][system_link]") {
++  Endpoint peer{0x0A000001u /* 10.0.0.1 */, 14001};
++  Endpoint other_port{0x0A000001u /* 10.0.0.1 */, 41000};
++  FirstContacts contacts(8);
++
++  CHECK(contacts.IsFirst(1, peer));
++  CHECK(!contacts.IsFirst(1, peer));
++  CHECK(contacts.IsFirst(2, peer));
++  CHECK(contacts.IsFirst(1, other_port));
++  CHECK(!contacts.IsFirst(2, peer));
++}
++
++TEST_CASE("system_link: FirstContacts evicts the oldest pair at capacity",
++          "[system][system_link]") {
++  Endpoint a{0x0A000001u /* 10.0.0.1 */, 14001};
++  Endpoint b{0x0A000002u /* 10.0.0.2 */, 14001};
++  Endpoint c{0x0A000003u /* 10.0.0.3 */, 14001};
++  FirstContacts contacts(2);
++
++  CHECK(contacts.IsFirst(1, a));
++  CHECK(contacts.IsFirst(1, b));
++  CHECK(contacts.IsFirst(1, c));
++  CHECK(contacts.IsFirst(1, a));
++  CHECK(!contacts.IsFirst(1, c));
++}
++
++TEST_CASE("system_link: FirstContacts with capacity zero keeps the last pair",
++          "[system][system_link]") {
++  Endpoint a{0x0A000001u /* 10.0.0.1 */, 14001};
++  FirstContacts contacts(0);
++
++  CHECK(contacts.IsFirst(1, a));
++  CHECK(!contacts.IsFirst(1, a));
 +}
