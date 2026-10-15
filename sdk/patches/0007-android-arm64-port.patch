@@ -1028,6 +1028,163 @@ index 754fa13..688c3d0 100644
      REXSYS_ERROR(
          "GPU plugin '{}' not found at {}. Stage it next to the executable "
          "(GPU_PLUGINS {} in rexglue_configure_target).",
+diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
+index 6b1f6b9..117a1f2 100644
+--- a/src/system/xsocket.cpp
++++ b/src/system/xsocket.cpp
+@@ -19,6 +19,13 @@
+ // #include <rex/system/xnet.h>
+ 
+ #include <rex/net/socket.h>
++#if REX_PLATFORM_ANDROID
++#include <sys/ioctl.h>
++
++#include <atomic>
++
++#include <rex/logging.h>
++#endif
+ 
+ // Standard socket types used by Xbox API emulation
+ #if REX_PLATFORM_WIN32
+@@ -34,6 +41,94 @@
+ 
+ namespace rex::system {
+ 
++#if REX_PLATFORM_ANDROID
++namespace {
++
++// Apps may not bind ports below 1024 on Android, and the guest binds its VDP socket to port 1000.
++constexpr uint16_t kFirstUnprivilegedPort = 1024;
++constexpr uint16_t kPrivilegedPortShift = 30000;
++constexpr uint32_t kGuestSolSocket = 0xFFFF;
++
++uint16_t HostBindPort(uint16_t guest_port) {
++  if (guest_port == 0 || guest_port >= kFirstUnprivilegedPort) {
++    return guest_port;
++  }
++  return static_cast<uint16_t>(guest_port + kPrivilegedPortShift);
++}
++
++void LogShiftedPortOnce(uint16_t guest_port, uint16_t host_port) {
++  static std::atomic<bool> logged{false};
++  if (guest_port != host_port && !logged.exchange(true)) {
++    REXLOG_INFO("XSocket: guest port {} bound as host port {} (Android reserves ports below {})",
++                guest_port, host_port, kFirstUnprivilegedPort);
++  }
++}
++
++// The guest numbers SOL_SOCKET and its options the Winsock way; Linux numbers them differently.
++// Options without a Linux twin keep the guest's numbers and fail as before.
++void TranslateSocketOption(uint32_t& level, uint32_t& optname) {
++  if (level != kGuestSolSocket) {
++    return;
++  }
++  switch (optname) {
++    case 0x0004:
++      optname = SO_REUSEADDR;
++      break;
++    case 0x0008:
++      optname = SO_KEEPALIVE;
++      break;
++    case 0x0020:
++      optname = SO_BROADCAST;
++      break;
++    case 0x0100:
++      optname = SO_OOBINLINE;
++      break;
++    case 0x1001:
++      optname = SO_SNDBUF;
++      break;
++    case 0x1002:
++      optname = SO_RCVBUF;
++      break;
++    default:
++      return;
++  }
++  level = SOL_SOCKET;
++}
++
++// Winsock's FIONBIO and FIONREAD with a big-endian u_long; Linux numbers both differently and
++// takes a host int, so the guest's non-blocking request never reached the socket and the main
++// thread blocked in its first recvfrom.
++constexpr uint32_t kGuestFionbio = 0x8004667E;
++constexpr uint32_t kGuestFionread = 0x4004667F;
++
++int SetNonBlocking(int fd, const uint8_t* guest_arg) {
++  int enable = memory::load_and_swap<uint32_t>(guest_arg) != 0 ? 1 : 0;
++  return ioctl(fd, FIONBIO, &enable);
++}
++
++int ReadAvailableBytes(int fd, uint8_t* guest_arg) {
++  int available = 0;
++  const int ret = ioctl(fd, FIONREAD, &available);
++  if (ret == 0) {
++    memory::store_and_swap<uint32_t>(guest_arg, static_cast<uint32_t>(available));
++  }
++  return ret;
++}
++
++int GuestSocketIoctl(uint64_t handle, uint32_t cmd, uint8_t* arg) {
++  const int fd = static_cast<int>(handle);
++  if (cmd == kGuestFionbio) {
++    return SetNonBlocking(fd, arg);
++  }
++  if (cmd == kGuestFionread) {
++    return ReadAvailableBytes(fd, arg);
++  }
++  return rex::net::socket_ioctl(handle, cmd, arg);
++}
++
++}  // namespace
++#endif
++
+ XSocket::XSocket(KernelState* kernel_state) : XObject(kernel_state, kObjectType) {}
+ 
+ XSocket::XSocket(KernelState* kernel_state, uint64_t native_handle)
+@@ -89,7 +184,12 @@ X_STATUS XSocket::SetOption(uint32_t level, uint32_t optname, void* optval_ptr,
+     host_value = memory::load_and_swap<uint32_t>(optval_ptr);
+     value = reinterpret_cast<char*>(&host_value);
+   }
+-  int ret = setsockopt(native_handle_, level, optname, value, optlen);
++  uint32_t host_level = level;
++  uint32_t host_optname = optname;
++#if REX_PLATFORM_ANDROID
++  TranslateSocketOption(host_level, host_optname);
++#endif
++  int ret = setsockopt(native_handle_, host_level, host_optname, value, optlen);
+   if (ret < 0) {
+     // TODO: WSAGetLastError()
+     return X_STATUS_UNSUCCESSFUL;
+@@ -104,7 +204,11 @@ X_STATUS XSocket::SetOption(uint32_t level, uint32_t optname, void* optval_ptr,
+ }
+ 
+ X_STATUS XSocket::IOControl(uint32_t cmd, uint8_t* arg_ptr) {
++#if REX_PLATFORM_ANDROID
++  int ret = GuestSocketIoctl(native_handle_, cmd, arg_ptr);
++#else
+   int ret = rex::net::socket_ioctl(native_handle_, cmd, arg_ptr);
++#endif
+   if (ret < 0) {
+     // TODO: Get last error
+     return X_STATUS_UNSUCCESSFUL;
+@@ -123,7 +227,17 @@ X_STATUS XSocket::Connect(N_XSOCKADDR* name, int name_len) {
+ }
+ 
+ X_STATUS XSocket::Bind(N_XSOCKADDR_IN* name, int name_len) {
++#if REX_PLATFORM_ANDROID
++  N_XSOCKADDR_IN host_name = *name;
++  // sin_port is a be<> field, so it reads and writes in host byte order.
++  host_name.sin_port = HostBindPort(name->sin_port);
++  int ret = bind(native_handle_, (sockaddr*)&host_name, name_len);
++  if (ret >= 0) {
++    LogShiftedPortOnce(name->sin_port, host_name.sin_port);
++  }
++#else
+   int ret = bind(native_handle_, (sockaddr*)name, name_len);
++#endif
+   if (ret < 0) {
+     return X_STATUS_UNSUCCESSFUL;
+   }
 diff --git a/src/ui/CMakeLists.txt b/src/ui/CMakeLists.txt
 index 5bd3dc5..64b7f6a 100644
 --- a/src/ui/CMakeLists.txt

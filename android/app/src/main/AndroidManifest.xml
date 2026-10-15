@@ -25,6 +25,9 @@
 
     <!-- Controller rumble. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The game opens UDP sockets for its session layer even in solo campaign; without this
+         permission socket() fails and the campaign stops at "Error initializing network layer". -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="false"
