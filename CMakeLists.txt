@@ -25,6 +25,7 @@ set(GOW2_SOURCES
     src/gow2_script_patches.cpp
     src/gow2_script_patch_table.cpp
     src/gow2_script_patch_hook.cpp
+    src/gow2_coop_census.cpp
     src/gow2_test_input.cpp
     src/gow2_test_input_hook.cpp
 )

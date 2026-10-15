@@ -4,6 +4,7 @@
 // native script packages, by replacing the recompiled FStartupPackages::LoadAll.
 
 #include "gow2_script_patches.h"
+#include "gow2_coop_census.h"
 #include "gow2_coop_network.h"
 
 #ifdef _WIN32
@@ -122,6 +123,7 @@ void LogResult(const GroupResult& result, int players) {
 
 void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   REXLOG_INFO("SCRIPTPATCH startup script packages loaded");
+  StartCoopCensus(base);
   const int players = REXCVAR_GET(gow2_coop_players);
   if (players < kFirstCoopCount || players > kLastCoopCount) {
     REXLOG_INFO("SCRIPTPATCH coop: off (gow2_coop_players={})", players);
