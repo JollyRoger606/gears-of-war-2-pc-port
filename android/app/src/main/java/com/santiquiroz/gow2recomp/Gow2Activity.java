@@ -29,6 +29,7 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
     private final AtomicBoolean installCancelled = new AtomicBoolean(false);
     private GamePaths paths;
     private GameSetupScreen setupScreen;
+    private NetworkPlayLocks networkLocks;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,6 +37,8 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
         NativeEnvironment.apply(paths);
         applyDebugLaunchOptions();
         super.onCreate(savedInstanceState);
+        networkLocks = new NetworkPlayLocks(this);
+        networkLocks.acquire();
         if (mBrokenLibraries || isFinishing()) {
             return;
         }
@@ -66,6 +69,9 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
     protected void onDestroy() {
         installCancelled.set(true);
         installExecutor.shutdownNow();
+        if (networkLocks != null) {
+            networkLocks.release();
+        }
         super.onDestroy();
     }
 
