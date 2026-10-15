@@ -212,6 +212,51 @@ def test_ndk_revision_and_major(tmp_path):
     assert cal.ndk_major(tmp_path / "missing") == 0
 
 
+def _write_ndk(ndk, text):
+    ndk.mkdir(parents=True)
+    (ndk / "source.properties").write_text(text, encoding="utf-8")
+    return ndk
+
+
+def test_ndk_base_revision_prefers_base_revision(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk",
+                     "Pkg.Desc = Android NDK\n"
+                     "Pkg.Revision = 30.0.14904198-beta1\n"
+                     "Pkg.BaseRevision = 30.0.14904198\n"
+                     "Pkg.ReleaseName = r30-beta1\n")
+    assert cal.ndk_base_revision(ndk) == "30.0.14904198"
+
+
+def test_ndk_base_revision_strips_suffix_without_base(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk", "Pkg.Revision = 30.0.14904198-beta1\n")
+    assert cal.ndk_base_revision(ndk) == "30.0.14904198"
+
+
+def test_ndk_base_revision_missing_file(tmp_path):
+    assert cal.ndk_base_revision(tmp_path / "missing") == ""
+
+
+def test_pinned_ndk_warning_silent_for_prerelease_of_pin(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk",
+                     "Pkg.Desc = Android NDK\n"
+                     "Pkg.Revision = 30.0.14904198-beta1\n"
+                     "Pkg.BaseRevision = 30.0.14904198\n"
+                     "Pkg.ReleaseName = r30-beta1\n")
+    assert cal.pinned_ndk_warning(ndk, "30.0.14904198") == ""
+
+
+def test_pinned_ndk_warning_for_other_ndk(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk", "Pkg.Revision = 29.0.13113456\n")
+    message = cal.pinned_ndk_warning(ndk, "30.0.14904198")
+    assert "29.0.13113456" in message
+    assert "30.0.14904198" in message
+
+
+def test_pinned_ndk_warning_without_pin(tmp_path):
+    ndk = _write_ndk(tmp_path / "ndk", "Pkg.Revision = 29.0.13113456\n")
+    assert cal.pinned_ndk_warning(ndk, "") == ""
+
+
 def test_default_ndk_dir_prefers_pinned_over_newer_and_env(tmp_path, monkeypatch):
     _clear_android_env(monkeypatch)
     _write_build_gradle(tmp_path)
