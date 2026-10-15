@@ -38,6 +38,7 @@
 // trampoline and no fixups.
 
 #include "gow2_xam_input_guard.h"
+#include "gow2_test_input.h"
 
 #include <windows.h>
 
@@ -203,7 +204,15 @@ void GuardWrap(PPCContext& ctx, uint8_t* base) {
     }
   } scope{held};
 
+  // XamInputGetState(user_index r3, flags r4, XINPUT_STATE* r5); r3 holds the result afterwards.
+  const uint32_t user_index = ctx.r3.u32;
+  const uint32_t state_addr = ctx.r5.u32;
   kTargets[I].body(ctx, base);
+  if constexpr (I == 0) {
+    uint32_t result = ctx.r3.u32;
+    rex::glue::ApplyTestInput(base, user_index, state_addr, &result);
+    ctx.r3.u64 = result;
+  }
 
   LARGE_INTEGER done;
   QueryPerformanceCounter(&done);
