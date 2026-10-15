@@ -17,7 +17,8 @@ assets/licenses/LICENSE, unless --no-notices is given):
   python tools/check_android_libs.py <folder-or-apk> [--ndk <ndk folder>]
       [--api 29] [--expect NAME ...] [--main libgow2.so]
       [--main-symbol SDL_main] [--main-exports <name> ...] [--sdl libSDL3.so]
-      [--allow-system NAME ...] [--no-notices]
+      [--allow-system NAME ...] [--no-notices] [--forbid-path PATH ...]
+      [--allow-build-paths]
 
 Without --ndk the NDK matching android/app/build.gradle is preferred. The
 search order is: <sdk>/ndk/<ndkVersion> for each SDK root, then the
@@ -28,6 +29,12 @@ android/app/build.gradle is used (29 when unset). NDKs older than r29 are
 rejected; the pin is compared with the NDK's base revision
 (Pkg.BaseRevision), so a pre-release of the pinned NDK
 (30.0.14904198-beta1 for 30.0.14904198) does not warn.
+
+It also fails when a library contains an absolute build path: the
+repository root, the NDK folder or a --forbid-path (forward or backward
+slashes, any case). android/gamelibs/CMakeLists.txt maps them away with
+-ffile-prefix-map, so the libraries do not depend on where the checkout
+lives; --allow-build-paths skips that check.
 
 Every problem is printed as an 'ERROR <lib>: <problem>' line, followed by
 a short summary. The exit code is 0 when all checks pass, 1 when any check
@@ -185,6 +192,38 @@ def check_main_symbol(nm_posix_text: str, main_symbol: str) -> list[str]:
         if len(fields) >= 2 and strip_version(fields[0]) == main_symbol and fields[1] in ("T", "W", "i"):
             return []
     return [f"{main_symbol}: not exported as a defined function (expected type T, W or i)"]
+
+
+def path_spellings(path: str) -> list[bytes]:
+    full = os.path.abspath(path).rstrip("/\\")
+    forward = full.replace("\\", "/").lower().encode("utf-8")
+    backward = full.replace("/", "\\").lower().encode("utf-8")
+    return sorted({forward, backward})
+
+
+def count_path_occurrences(data: bytes, spellings: list[bytes]) -> int:
+    lowered = data.lower()
+    return sum(lowered.count(spelling.lower()) for spelling in spellings)
+
+
+def check_build_paths(lib_paths: list, forbidden: list[str]) -> list[str]:
+    errors: list[str] = []
+    for lib_path in lib_paths:
+        data = Path(lib_path).read_bytes()
+        for path in forbidden:
+            count = count_path_occurrences(data, path_spellings(path))
+            if count:
+                errors.append(f"{Path(lib_path).name}: contains the build path {os.path.abspath(path)} "
+                              f"{count} time(s); build with -ffile-prefix-map (android/gamelibs/CMakeLists.txt)")
+    return errors
+
+
+def forbidden_build_paths(extra: list[str] | None, ndk: str) -> list[str]:
+    unique: dict[str, str] = {}
+    for path in [str(_REPO_ROOT), ndk, *(extra or [])]:
+        if path:
+            unique.setdefault(os.path.abspath(path).lower(), path)
+    return list(unique.values())
 
 
 def apk_alignment_errors(zip_path) -> list[str]:
@@ -484,6 +523,8 @@ def check_libraries(lib_paths: list, tools: Tools, stub_dir: Path, options) -> l
     if options.main in libraries:
         errors.extend(check_main_exports(options.main, libraries[options.main].defined, options.main_exports))
     errors.extend(check_sdl_reachable(libraries, options.sdl))
+    if not options.allow_build_paths:
+        errors.extend(check_build_paths(lib_paths, options.forbidden))
     return errors
 
 
@@ -541,10 +582,13 @@ def parse_options(argv: list[str]):
     parser.add_argument("--sdl", default="libSDL3.so")
     parser.add_argument("--allow-system", nargs="*", default=None)
     parser.add_argument("--no-notices", action="store_true")
+    parser.add_argument("--forbid-path", action="append", default=None, metavar="PATH")
+    parser.add_argument("--allow-build-paths", action="store_true")
     options = parser.parse_args(argv)
     options.expect = list(_DEFAULT_EXPECT) if options.expect is None else options.expect
     options.allowed = set(_DEFAULT_ALLOW_SYSTEM if options.allow_system is None else options.allow_system)
     options.main_exports = set([options.main_symbol] if options.main_exports is None else options.main_exports)
+    options.forbidden = forbidden_build_paths(options.forbid_path, "")
     return options
 
 
@@ -583,6 +627,7 @@ def main(argv: list[str]) -> int:
     if found is None:
         return usage_error(f"llvm-readelf/llvm-nm not found under {ndk}")
     tools, host = found
+    options.forbidden = forbidden_build_paths(options.forbid_path, ndk)
     api = options.api or default_api()
     try:
         errors, count = check_input(source, tools, stub_folder(ndk, host, api), options)
