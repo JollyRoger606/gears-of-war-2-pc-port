@@ -1,11 +1,14 @@
 # Campaign co-op beyond two players
 
-Status: Stage 1 is in progress. SDK patch `0010-system-link-sessions` (section 3, Stage 1, item 2)
-builds for Windows and passes its unit tests. For Android it has only passed an NDK arm64
-`-fsyntax-only` check of the touched files; it has not been built or linked there. The script
-patches in guest memory (sections 2 and 4) build for Windows and pass their offline check on a
-retail package; their `src/` files have passed the same NDK check and nothing more on Android.
-Neither has run in the game yet, and everything else is design only.
+Status: Stage 1 has run on Windows. On 2026-10-15 four `gow2.exe` instances on one PC
+(127.0.0.1-127.0.0.4) played Act 1 chapter 2 together over System Link: the host as Marcus,
+player 2 as Dom, players 3 and 4 as Ben Carmine (section 3, Stage 1 results). The run found three
+bugs, now fixed: `getsockname` was a stub, so every join failed; the S1-2 tail returned None, so
+players 3+ became Marcus clones; and `--user_data_root` never reached the runtime, so every
+instance shared one save folder. Not done yet: ten minutes of real combat with four players, a
+desync check, and anything on Android. There, patch 0010 and the co-op `src/` files have only
+passed NDK arm64 `-fsyntax-only` checks, and the newest additions (`getsockname`, the traffic log,
+the census and the test input) have not had even that. Stages 2-4 are design only.
 
 Before this branch merges: rebase on master, check that 0002-0010 still apply in order on
 `923c1a5` (`git apply --check`, one patch after the other), and run `scripts/build-android.ps1` once
@@ -91,7 +94,8 @@ Two things that look like caps are not:
   `GearPawn_COGBenjaminCarmine` ("B. Carmine") uses mesh `COG_Minh.Minh_Kim` and helmet
   `Item_Helmet_COGTwo`, and its super is `GearPawn_COGGear`.
   - There is no `GearGameContent` package on disk. Content classes exist only as forced exports
-    inside map packages, so `DynamicLoadObject` can find one only while a loaded map holds it.
+    inside map packages, so a lookup by path (`FindObject`, which S1-2 uses, or
+    `DynamicLoadObject`) finds one only while a loaded map holds it.
   - The chapter numbers below come from `Coalesced_int_full.txt:5976-5986`. The class is in the
     persistent maps of chapter 2 (`SP_Hospital_P`), chapters 5-6 (`SP_Landown_P`), 7-9
     (`SP_Intervention_P`) and 10-11 (`SP_Rescue_P`).
@@ -286,7 +290,7 @@ edited `Xbox360TOC.txt`:
 [V loader paths; never run] The file route touches LZX blocks 63, 64, 67 and 69 and costs a 66 MB
 cached copy per game version.
 
-### Related finding (fixed in Stage 1)
+### Related finding (not solved by Stage 1)
 
 The game reads and hashes each edited Coalesced bundle at its TOC size. `sub_82225018` creates the
 file reader, takes its `TotalSize()`, allocates and serializes that many bytes and wraps them in
@@ -298,7 +302,16 @@ hashes. That most likely raised the DISCERR that every run with Coalesced overri
 pads each edited bundle to exactly its `FileSize` in `GearGame/Xbox360TOC.txt` (the original file
 size when the TOC has no entry; every retail Coalesced TOC size equals its file size) and does not
 serve a bundle whose edit is longer. The comment in `src/gow2_xam_input_guard.cpp` that blamed a
-missing disc drive is corrected. Still to confirm in a run: the DISCERR line is gone.
+missing disc drive is corrected.
+
+The Stage 1 runs show the padding is not the whole story. Every run with the Coalesced overrides
+still logs `DISCERR the game's 'Disc Read Error' box was suppressed` once, about a second after
+boot. That holds with co-op on or off, and with the bundles freshly rebuilt at their TOC size
+(`COALESCED: ... 0 reused from cache`; `out/coop-test/run3-coop2`, `run4-coop4`, `net8`). A run
+with the overrides off logs no DISCERR (`--mnk_mouse=false --gow2_mouse_aim=false
+--gow2_prompts=controller`, `out/coop-test/discerr-no-coalesced`). [V] So the Coalesced layer still
+raises it, and the cause is open. The game plays on either way: `DiscErrorNoop` parks only the
+thread that asked for the box.
 
 ## 3. Staged plan
 
@@ -314,7 +327,9 @@ stays loaded on the host and on every client for the whole chapter. Chapter 1 la
 Work:
 
 1. **Script patches.** The group in section 4, behind `gow2_coop_players`. Done; section 2 names the
-   files.
+   files. For diagnosis, `--gow2_coop_census=true` logs, whenever they change, the loaded
+   `GearPawn_COG*` classes with their path, the pawns per class and every player controller's
+   `DefaultPawnClass` (`src/gow2_coop_census.cpp`; read-only, from a host thread).
 2. **SDK patch `0010-system-link-sessions` (M2a), applied after 0002-0007:**
    - SendTo/RecvFrom: fill `sockaddr_in` in network order, swap the received port, and write
      `from` only when the call succeeded.
@@ -357,6 +372,7 @@ Work:
    | `net_bind_ip` | empty | Rewrites `0.0.0.0` binds and logs `[netlink] bind 0.0.0.0:1000 -> 127.0.0.2:1000 (net_bind_ip)` |
    | `net_broadcast_targets` | empty | Unicast copies of every 255.255.255.255 send, skipping this instance (`net_bind_ip`, else `net_local_ip`); the list is logged once |
    | `net_random_seed` | 0 | Non-zero: `XNetRandom`, XNKIDs, XNKEYs and nonces come from a SplitMix64 stream with this seed |
+   | `net_traffic_log_sec` | 0 | Non-zero: every that many seconds, log the UDP bytes and packets sent to and received from each peer: `[nettraffic] last 10.0 s: sent to 127.0.0.2:59687 31322 B in 300 packets (3132 B/s)` |
 
    Every one of these settings needs a restart. The network ones are read once, when the kernel
    starts, and the game threads only read that copy: the settings panel cannot move the advertised
@@ -394,6 +410,10 @@ Work:
      `XSessionGetDetails` fills the 128-byte `XSESSION_LOCAL_DETAILS` and as many 16-byte members as the
      caller's size allows, right after it. The only caller, `sub_828333C8`, passes 640 bytes.
    - `XNetRegisterKey`, `XNetUnregisterKey` and `XNetUnregisterInAddr` return 0.
+   - `getsockname` returns the host's address and port for the socket. It was a stub that failed
+     with WSAEOPNOTSUPP. The engine binds its game socket to port 0 and reads the port back, so
+     every join ended in `Error initializing network layer. LiveSock: binding to port 0 failed
+     (10045)` (Stage 1 test, step 6).
    - On Android the patch has only passed an NDK arm64 `-fsyntax-only` check; it has not been built
      or linked. errno maps to WSA codes for `sendto`, `setsockopt` and `bind` only, and
      `XSocket::SetOption` and `socket_ioctl` still hand the 360's SOL_SOCKET (0xFFFF) and FIONBIO
@@ -403,7 +423,9 @@ Work:
    on UDP 14001, as a 360 with a cable would, so anyone on the LAN can find it. [I] That is why the
    link is off unless co-op asks for it.
 3. **Tools.** Done: the package and script tools are in `tools/ue3/` (one line each in its
-   README), next to `tools/script_patch.py`.
+   README), next to `tools/script_patch.py`. `scripts/coop-instances.ps1` runs several instances on
+   one PC, and `--gow2_test_input=<file>` drives one without window focus (section 5, Running four
+   instances on one PC).
 
 Out of scope for Stage 1 (known to break; see Stage 2): chapter transitions, the death of any
 player, a player leaving, cinematics with extra players present, vehicles and co-op splits.
@@ -415,14 +437,14 @@ Offline:
 1. Run `python -I tools/script_patch.py --check <folder>` on your own decompressed Core, Engine,
    GameFramework and GearGame packages. Every old byte must match, and every patched function must
    decode to its end: AtCapacity 0x11, ChangeCoopInviteSetting 0xB2, lobby InitGame 0xA9, SP
-   InitGame 0xCA, and SuggestPawnClassFor 0x117 with the new tail. The default object must hold 2.
-   Passed on 2026-10-14 against the retail packages, D-1 included; the jumps in the kept prefix of
-   SuggestPawnClassFor go to 0x48, 0x67 and 0x84.
+   InitGame 0xCA, and SuggestPawnClassFor 0x13E with the new tail. The default object must hold 2.
+   Passed on 2026-10-14 against the retail packages, D-1 included, and again on 2026-10-15 with the
+   318-byte tail; the jumps in the kept prefix of SuggestPawnClassFor go to 0x48, 0x67 and 0x84.
 2. Unit tests on synthetic bytecode: `python -m pytest tools/tests/test_script_patch.py` and the
    `gow2_script_patch_test` target. A wrong old byte, a wrong `Num`, a wrong pointer operand, or a
    function found twice must each skip the whole group, and so must an edit past the kept prefix
    of a grown row. A grown row's own edits must land in the new buffer, and a grown script placed
-   at 0xE0000000 must be written where the game reads it. Both pass (25 tests, 88
+   at 0xE0000000 must be written where the game reads it. Both pass (25 tests, 92
    checks).
 
 One instance, no network:
@@ -430,7 +452,7 @@ One instance, no network:
 3. Run with `--gow2_coop_players=2` (the default). The log shows `SCRIPTPATCH startup script
    packages loaded` and `SCRIPTPATCH coop: off (gow2_coop_players=2)`, and play is unchanged.
 4. Run with `--gow2_coop_players=4`. The log shows one `SCRIPTPATCH coop S1-n <function>: ...`
-   line per row (S1-2 `script grown to 279 bytes`) and `SCRIPTPATCH coop: 6 rows applied for 4
+   line per row (S1-2 `script grown to 318 bytes`) and `SCRIPTPATCH coop: 6 rows applied for 4
    players, set hash <16 hex digits>`. Play the start of chapter 1 solo: nothing changes, because
    the patches only act on joins.
 5. Add `--gow2_coop_patch_fail_test=true`. The log shows `SCRIPTPATCH coop: skipped (S1-1: +0x0000
@@ -478,6 +500,36 @@ Network (needs SDK patch 0010):
 
 Join when no cinematic is playing: a remote join more than 15 s into a level cancels the running
 cutscene for everyone (Stage 2, item 5).
+
+#### Stage 1 results (2026-10-15)
+
+Run in the `coop-stage1` worktree build, Windows, RX 7800 XT, every instance windowed at
+`resolution_scale=1`. Each instance got its own `--user_data_root` holding a copy of a player's save
+at Act 1 chapter 2, *Desperation*. Input went through `--gow2_test_input` pad files, and
+screenshots were taken of each instance's window. The evidence is under `out/coop-test/` in the
+worktree. That folder is not in the repository: its saves and screenshots come from the player's
+own game.
+
+| Step | Result | Evidence |
+|---|---|---|
+| 1 | Passes with the new tail: every row validates, and S1-2 decodes to its end at 0x13E. | `step1-check-final.txt` |
+| 2 | 25 Python tests pass, and 92 core checks with 0 failures. | `step2-pytest-final.txt`, `step2-core-test-final.txt` |
+| 3 | `SCRIPTPATCH coop: off (gow2_coop_players=2)`, `[netlink] link reported down (net_link_active=false)`, `Signed-in player: XUID B13EBABEBABEBABE, gamertag 'User'`; the trace has `XNetGetEthernetLinkStatus ... ret=0x0`, one bind (`0.0.0.0:1000`) and no `XGISessionCreate`; the save loads and Marcus plays; no `system_link_xuid.txt`. That first bind of a new exe raised the Windows Firewall prompt, the one the port raises for UDP 1000 (below). | `run3-coop2/` |
+| 4 | Every row logs (`S1-2 ...: script grown to 318 bytes` after the fix), `6 rows applied for 4 players`, `turns System Link on`, `link active: local 192.168.10.10 (default-route adapter)` and a per-install XUID (`B13E79F4E114F9B3`). `system_link_xuid.txt` is created, and the save loads under the new XUID. Solo play is unchanged. But about 40 s of solo campaign made no `XGISessionCreate`, so the claim that a solo campaign hosts a LAN session ([I] in Stage 1 item 2) was not seen. | `run4-coop4/` |
+| 5 | `SCRIPTPATCH coop: skipped (S1-1: +0x0000 expected FB, found 04); the game stays retail` | `run5-failtest/` |
+| 6 | The client found the host (`SYSTEM LINK BROWSER: Player1, Act 1`), then failed with `LiveSock: binding to port 0 failed (10045)`; fixed by `getsockname` in patch 0010. After the fix: `XGISessionCreate ... flags=0x00000021 ... host=true` on the host, `flags=0x00000020 ... host=false` and `XNetXnAddrToInAddr ... ina=127.0.0.1 ret=0x0` on the client, `getsockname ... addr=127.0.0.2:64817`, `XGISessionJoinRemote ... members=2` on both. Player 2 shows in the lobby, presses RT after the launch and takes over Dom. Both move independently. | `net6-try1/`, `net6/` |
+| 7 | Reached through the save: its slot is Act 1, chapter 2 *Desperation*, so HOST CO-OP CAMPAIGN, then the slot, then LAUNCH starts chapter 2 directly. `?chapter=` and chapter select were not needed. | `net6/003128-i1-lobby-after-2.png` |
+| 8 | Players 3 and 4 find the session while 2 are in game and join (`XGISessionJoinRemote ... members=3`, then `members=4`; `slots_pub=4`). First run: both spawned as Marcus clones, with `DefaultPawnClass=None` in the census although `GearGameContent.GearPawn_COGBenjaminCarmine` was loaded. Cause and fix in section 4 (S1-2). After the fix: `GearPC_SP_2 DefaultPawnClass=GearPawn_COGBenjaminCarmine`, the same for `SP_3`, and `GearPawn_COGBenjaminCarmine x2` pawns; both carry a Lancer and spawn next to the squad. The same classes come out when all four are in the lobby before the launch (Marcus, Dom, Ben, Ben). There the instance that arrives second takes Dom, and in that run it was instance 3. [I] | `net8b/`, `net8c/` (before), `net8e/`, `net8-lobby4/` (after) |
+| 9 | Partial. Four players moved and fired for a short while (`net9-five`, the host's ammo 413 -> 393), and other squad members show in each view. Before the fix, four connected instances stayed up for about 15 minutes without a crash, while Locust drones spawned and died in the census (`net8d`). Not done: ten minutes of real combat, and a desync check beyond screenshots. | `net9-five/`, `net8d/` |
+| 10 | With four players in, a fifth instance sees `NO CAMPAIGNS FOUND`, also after a refresh. Forcing it to connect has no menu path and was not tried. | `net9-five/014040-i5-browser-refreshed.png` |
+| 11 | With the host at `gow2_coop_players=2` (retail caps, `slots_pub=2`), instance 3 sees `NO CAMPAIGNS FOUND` once player 2 is in. | `net11-control/014535-i3-browser.png` |
+| 12 | `--net_traffic_log_sec=10` on all four. Host to each client: 3.0-3.5 KB/s on average, peak 5.3 KB/s, about 29 packets/s. Each client to the host: about 0.7 KB/s, peak 1.6 KB/s. That is under the 7000 B/s cap in this section of chapter 2. | `net9-host-traffic-summary.txt` |
+
+The Windows Firewall prompt: the first time a new `gow2.exe` path binds UDP 1000, Windows asks
+whether public and private networks may reach it. The dialog dims the whole screen
+(`Shell_SystemDim`), and until someone answers it no other window can take the foreground or be
+clicked. Loopback traffic does not need the rule, so the tests above ran with the prompt still open,
+driven through the pad files. Answering it is the player's decision; the test left it open.
 
 ### Stage 2: campaign systems
 
@@ -710,7 +762,7 @@ Notation:
 | Id | Target (ScriptSize) | Offset | Old | New | Fail-closed check | Needed |
 |---|---|---|---|---|---|---|
 | S1-1 | `GearGame.GearGameSP_Base.AtCapacity` (17) | +0x0000; changes at +0x01 and +0x08 (upk 0x8B112D, 0x8B1134) | `04 9A 01 [Engine.GameInfo.NumPlayers] 2C 02 16` = `return NumPlayers == 2` (disk ref FFFFF5F8) | `04 99 01 [..] 2C NN 16` = `return NumPlayers >= N` (0x99 = native 153, `>=`) | Num == 17. Context +0x0A `04 3A [ReturnValue]`, +0x10 `53`. Operand +0x03 equals `Engine.GameInfo.NumPlayers`. | Yes: the cap at PreLogin, Login and PostLogin |
-| S1-2 | `GearGame.GearGameSP_Base.SuggestPawnClassFor` (145 -> 279, grown) | Replace +0x0084..+0x0090; +0x0000..+0x0083 unchanged (upk 0x8B34B1) | `04 20 [GearGame.GearPawn_COGGear] 04 3A [ReturnValue] 53` = `return GearPawn_COGGear` (disk 6F95) | The 147-byte tail below: Ben Carmine, then RedShirt, by `DynamicLoadObject` | Num == Max == 145. Context +0x0061 `04 20 [GearPawn_COGMarcus]`, +0x007E `04 20 [GearPawn_COGDom]`. Every resolved object has the expected class (Class, Function, property). | Yes: gives players 3+ a body that is not Marcus or Dom |
+| S1-2 | `GearGame.GearGameSP_Base.SuggestPawnClassFor` (145 -> 318, grown) | Replace +0x0084..+0x0090; +0x0000..+0x0083 unchanged (upk 0x8B34B1) | `04 20 [GearGame.GearPawn_COGGear] 04 3A [ReturnValue] 53` = `return GearPawn_COGGear` (disk 6F95) | The 186-byte tail below: Ben Carmine, then RedShirt, by `FindObject` | Num == Max == 145. Context +0x0061 `04 20 [GearPawn_COGMarcus]`, +0x007E `04 20 [GearPawn_COGDom]`. Every resolved object has the expected class (Class, Function, property). | Yes: gives players 3+ a body that is not Marcus or Dom |
 | S1-3 | `GearGame.GearMenuGame.ChangeCoopInviteSetting` (178) | +0x0047; change at +0x58 (upk 0x7FD7B9) | `0F 19 00 [Coop] 00 05 00 04 01 [Engine.OnlineGameSettings.NumPublicConnections] 2C 02` = `Coop.NumPublicConnections = 2` (disk refs 00002F73, FFFFF5E7) | `... 2C NN` | Num == 178. `[Coop]` is the parameter of this function. Context +0x0086 `0F 01 [GameInfo.MaxPlayers] 92` (`MaxPlayers = Public + Private`). | Yes: keeps the beacon answering until N players are in |
 | S1-4 | Default object `GearGame.Default__GearCoopGameSettings` | Native +132 (`NumPublicConnections`) | int 2 (disk: tagged IntProperty at upk 0x86E033, `00 00 00 02`) | int N | Name and outer match, and Class is `GearGame.GearCoopGameSettings`. Value at +132 == 2. | Yes, as a guard: settings objects created at DG:25438, 89251 and 92950 copy this default [I which paths skip S1-3] |
 | S1-5 | `GearGame.GearCampaignLobbyGame_Base.InitGame` (169) | +0x009E; change at +0xA5 (upk 0x80118B) | `0F 01 [Engine.GameInfo.MaxPlayers] 2C 02` = `MaxPlayers = 2` (disk FFFFF5FA) | `... 2C NN` | Num == 169. Context +0x00A6 `04 0B`, +0x00A8 `53`. | Yes for joins in the GearStart lobby (`GameInfo.AtCapacity` reads MaxPlayers) |
@@ -722,26 +774,35 @@ disassembly anchors: `sub_828294A0` reads +140 and +156, and `sub_8282B370` pass
 to `XSessionCreate`. [V]
 
 S1-2 tail. In memory, each `[..]` is the object's address; on disk it is the package reference in
-parentheses. The jump target 0x0110 is absolute.
+parentheses. The jump target 0x0100 is absolute.
 
 ```
-+0x0084  0F 00 [ReturnValue (00004DB7)] 13 [GearGame.GearPawn (00006E55)]
-         1C [Core.Object.DynamicLoadObject (FFFFFAB9)]
-         1F "GearGameContent.GearPawn_COGBenjaminCarmine" 00
-         20 [Core.Class (FFFFFE2C)] 27 16
-         ; ReturnValue = class<GearPawn>(DynamicLoadObject("...BenjaminCarmine", class'Class', true))
-+0x00C8  07 01 10 72 00 [ReturnValue] 2A 16
-         ; if (ReturnValue == None) ... else goto 0x0110
-+0x00D3  0F 00 [ReturnValue] 13 [GearGame.GearPawn] 1C [Core.Object.DynamicLoadObject]
-         1F "GearGameContent.GearPawn_COGRedShirt" 00 20 [Core.Class] 27 16
-+0x0110  04 3A [ReturnValue]
-+0x0116  53
++0x0084  07 01 00 77 1C [Core.Object.FindObject (FFFFFAB3)]
+         1F "GearGameContent.GearPawn_COGBenjaminCarmine" 00 20 [Core.Class (FFFFFE2C)] 16 2A 16
+         ; if !(FindObject("...BenjaminCarmine", class'Class') != None) goto 0x0100
++0x00C2  04 13 [GearGame.GearPawn (00006E55)] 1C [Core.Object.FindObject]
+         1F "GearGameContent.GearPawn_COGBenjaminCarmine" 00 20 [Core.Class] 16
+         ; return class<GearPawn>(FindObject("...BenjaminCarmine", class'Class'))
++0x0100  04 13 [GearGame.GearPawn] 1C [Core.Object.FindObject]
+         1F "GearGameContent.GearPawn_COGRedShirt" 00 20 [Core.Class] 16
+         ; return class<GearPawn>(FindObject("...RedShirt", class'Class'))
++0x0137  04 3A [ReturnValue (00004DB7)] 53
+         ; the compiler's closing 'return return', kept but never reached
 ```
 
+- Each branch returns its own expression. The first version stored the class in `ReturnValue` and
+  ended with `return return`. In this build, `EX_ReturnNothing` (`GNatives[0x3A]`, `sub_822536E8`)
+  zeroes the result instead of reading the local, so that version always returned None. Players
+  3+ then fell back to Marcus (Stage 1 results, step 8). [V in code and at run time]
+- `FindObject` searches memory only. The game's own checkpoint code uses it to resolve pawn class
+  paths (`GearAI.ApplyCheckpointRecord+0x006F`). `DynamicLoadObject` could go to disk for a
+  `GearGameContent` package that does not exist when the class is missing.
+- `0x77` is the native `!=` on objects, as in `GearGameSP_Base.GetDefaultPlayerClass+0x0010`
+  (`07 00 40 77 ... 2A 16`).
 - `[ReturnValue]` is copied from the original operand at +0x008C, after the patcher checks that it
   is a property named `ReturnValue` whose outer is this function.
-- `join-spawn/verify_patches.py` builds the same tail and decodes the resulting 279-byte script to
-  its end. [V on disk bytes; the in-memory form has not run yet]
+- `tools/script_patch.py --check` decodes the 318-byte script to its end on the retail package.
+  It ran in the game on 2026-10-15, and players 3 and 4 got `GearPawn_COGBenjaminCarmine`. [V]
 - If both loads return None, `GetDefaultPlayerClass` (DG:47025) falls back to the game's
   `DefaultPawnClass`, which is Marcus. That reintroduces the problem from section 1.3, so Stage 1
   runs only where Ben is loaded.
@@ -790,34 +851,72 @@ Network and SDK:
 
 - Does Windows deliver the game's 255.255.255.255:14001 broadcast to other local instances bound to
   0.0.0.0 with `SO_REUSEADDR`? If it does, fan-out is needed only in `net_bind_ip` mode.
-- Which server cap clamps client rates, `MaxClientRate` or `MaxInternetClientRate`?
+- Which server cap clamps client rates, `MaxClientRate` or `MaxInternetClientRate`? Not answered;
+  the measured rates (next item) stay below both.
 - Does the client's System Link browser filter on `bAllowJoinInProgress` or
-  `NumOpenPublicConnections` in native code?
-- Is a 7000 bytes/s cap per client enough for 4 players? Stage 1 measures it.
+  `NumOpenPublicConnections` in native code? Partly answered: a full session is not listed. With
+  four players in (cap 4), a fifth instance sees `NO CAMPAIGNS FOUND`. With the retail cap, a third
+  instance sees the same once player 2 is in. A session in progress that still has room is listed
+  and joinable. This matches the host side, where `sub_828294A0` stops answering once
+  `NumOpenPublicConnections` is 0. Whether the client also filters was not separated.
+- Is a 7000 bytes/s cap per client enough for 4 players? In the opening of chapter 2, yes. The
+  host sent each client 3.0-3.5 KB/s on average, with a peak of 5.3 KB/s at about 29 packets/s,
+  and received about 0.7 KB/s from each (Stage 1 results, step 12). Heavy fights were not
+  measured.
 
 Running four instances on one PC:
 
-- Do the instances share save and profile folders?
-- Does the game or the runtime enforce a single instance?
-- How does input reach the right instance? Keyboard focus would be per window, but controller
-  routing is unknown.
-- How much CPU and GPU do four recompiled instances need?
+`scripts/coop-instances.ps1` (actions `start`, `shot`/`shots`, `key`/`down`/`up`,
+`pad`/`hold`/`release`, `stats`, `status` and `stop`) starts N instances. Each gets its own
+`--user_data_root`, which can be seeded with a copy of a save; its own log file and test pad file;
+`{i}`-expanded flags (for example `--net_bind_ip=127.0.0.{i}`); and a slot in a non-overlapping
+window grid. It also starts and stops the idle guard.
+
+- **Shared folders.** Yes, until this branch. `OnConfigurePaths` replaced the user data and cache
+  paths with `%LOCALAPPDATA%\GearsOfWar2PC\{user,cache}` even when `--user_data_root` was given, so
+  every instance used one save, one profile and one shader cache, and a test instance would have
+  written into the player's own save folder. Now an explicit `--user_data_root` (the cache follows into its
+  `cache` folder) or `--cache_root` wins. A separate user data root also gives each instance its
+  own `system_link_xuid.txt`, and so its own XUID. `gow2.toml` beside the exe stays shared and is
+  only read. Logs go to `<exe folder>\logs` unless `--log_file` is given. [V]
+- **Single instance.** Nothing enforces one: five instances of one exe ran together. Two
+  instances that share a cache folder do not both get persistent shader storage, because the
+  pipeline storage file is opened with `_wfopen_s`, which does not share. [I from code; the tests
+  used separate caches]
+- **Input.** The runtime gates every input device on window focus. The input system's active
+  callback returns false while the window lacks focus, and that covers keyboard, mouse and pads.
+  Only the focused instance gets input, and one controller drives whichever window is in front.
+  For tests, `--gow2_test_input=<file>` merges a pad state from a per-instance file into guest
+  user 0 with no focus needed (`src/gow2_test_input.cpp`). It is how the four-instance runs were
+  driven. [V]
+- **CPU, GPU and VRAM.** In game, with `resolution_scale=1` and small windows, each instance used
+  2-5 of the 24 logical CPUs (8-22 %, the host lowest), 1.35-1.53 GB of RAM, 650-830 MB of VRAM and
+  10-40 % of the RX 7800 XT's 3D engine. Four in game: about 6 GB of RAM and 3 GB of VRAM in all.
+  A fifth instance waiting in the menus added 1.16 GB and 443 MB (`stats-*.txt`). Every instance
+  picked the RX 7800 XT
+  (`gow2 d3d12_adapter -> 1 (AMD Radeon RX 7800 XT; first dedicated GPU in Windows' high-performance order)`).
 
 Script and engine:
 
-- `REX_HOOK_RAW(sub_8283F780)` links and replaces the call on Windows (section 2). Does it run (the
-  `SCRIPTPATCH startup` log line), and does it link the same way on Android? Are Num and Max of
-  `UStruct::Script` at +88 and +92? The checks fail closed if not.
+- `REX_HOOK_RAW(sub_8283F780)` runs on Windows: every run logs `SCRIPTPATCH startup script
+  packages loaded`. Num and Max of `UStruct::Script` are at +88 and +92, since all six rows validate
+  and the 318-byte script runs. [V] Whether it links the same way on Android is still open.
 - How does the native checkpoint loader match records to PCs, and who sets `bCheckpointDummy`?
 - How does `UWorld::CommitMapChange` treat remote players' pawns once
   `bKillDuringLevelTransition` is cleared?
-- Is `WorldInfo.bNoDefaultInventoryForPlayer` set in the Act 1 maps? The actor header parse failed.
-  If it is set, extra players spawn unarmed.
+- Is `WorldInfo.bNoDefaultInventoryForPlayer` set in the Act 1 maps? Not in chapter 2: players 3
+  and 4 spawned with a Lancer (350 rounds in their HUD).
 - When a streaming sub-level that exported Ben Carmine unloads (chapters 3-4), does a live pawn keep
   the class alive? Can a client that has not streamed that sub-level resolve the class?
-- Does the Minh_Kim skeleton have the player camera bones (`b_MF_Camera`, `b_MF_Camera_Root`)? Only
-  a byte search supports it so far.
-- When `DynamicLoadObject` misses (chapter 1), does it touch the disk or raise a disc error?
+- Does the Minh_Kim skeleton have the player camera bones (`b_MF_Camera`, `b_MF_Camera_Root`)?
+  The Ben Carmine players get the normal over-the-shoulder camera (`net8e/013055-i3-joined.png`), so
+  it works in practice; the skeleton itself was not parsed.
+- S1-2 now uses `FindObject`, which never touches the disk, so a miss (chapter 1) returns None
+  and the player becomes a Marcus clone. That chapter has not been run.
+- With the link on, does a solo campaign host a LAN session, as Stage 1 item 2 infers? About 40 s
+  of solo play made no `XGISessionCreate`. Only HOST CO-OP CAMPAIGN created one.
+- The campaign lobby shows two player slots. Players 3 and 4 join and play, but each lobby shows
+  only two of the four names.
 - Is `sub_825E2780` the only way pawns enter `PawnList`?
 - The Kismet of `SP_Hospital_03` and `SP_Sinkhole_W` was not scanned (LZX decompression failed at
   chunk 20). The first is a chapter 2 map.
