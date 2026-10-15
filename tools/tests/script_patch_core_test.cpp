@@ -2,14 +2,40 @@
 // from the rows themselves; no game files needed. Build target gow2_script_patch_test.
 #include "gow2_script_patches.h"
 
+#include "gow2_guest.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
+
+#if !defined(_WIN32)
+#ifndef MAP_ANONYMOUS
+#ifdef MAP_ANON
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+#endif
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
+#endif
 
 namespace {
 
@@ -23,6 +49,62 @@ void Expect(bool ok, std::string_view what) {
   if (ok) return;
   ++g_failures;
   std::printf("FAIL: %.*s\n", static_cast<int>(what.size()), what.data());
+}
+
+// Independent of guest::PhysicalHostOffset so a wrong header fails the test.
+constexpr uint32_t TestHostOffset(uint32_t addr) {
+#if defined(_WIN32) || (defined(__APPLE__) && defined(__aarch64__))
+  return addr >= 0xE0000000u ? 0x1000u : 0u;
+#else
+  (void)addr;
+  return 0u;
+#endif
+}
+
+constexpr size_t GuestReservationSize() { return 0x1'0000'0000ULL + 0x20000; }
+
+constexpr uint32_t kLowCommitBytes = 4u * 1024u * 1024u;
+constexpr uint32_t kHighCommitStart = 0xDFFF0000u;
+constexpr uint32_t kHighCommitEnd = 0xE0020000u;
+constexpr uint32_t kPhysAllocStart = 0xE0000000u;
+constexpr uint32_t kPhysAllocEnd = 0xE0010000u;
+
+uint8_t* ReserveGuestRange() {
+#if defined(_WIN32)
+  return static_cast<uint8_t*>(VirtualAlloc(nullptr, GuestReservationSize(), MEM_RESERVE, PAGE_NOACCESS));
+#else
+  void* p = mmap(nullptr, GuestReservationSize(), PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  return (p == MAP_FAILED) ? nullptr : static_cast<uint8_t*>(p);
+#endif
+}
+
+bool CommitGuestRange(uint8_t* base, uint32_t start, uint32_t len) {
+#if defined(_WIN32)
+  return VirtualAlloc(base + start, len, MEM_COMMIT, PAGE_READWRITE) != nullptr;
+#else
+  return mprotect(base + start, len, PROT_READ | PROT_WRITE) == 0;
+#endif
+}
+
+void ReleaseGuestRange(uint8_t* base) {
+#if defined(_WIN32)
+  VirtualFree(base, 0, MEM_RELEASE);
+#else
+  munmap(base, GuestReservationSize());
+#endif
+}
+
+std::shared_ptr<uint8_t> MakeGuestMemory() {
+  uint8_t* base = ReserveGuestRange();
+  if (base == nullptr) return {};
+  bool low = CommitGuestRange(base, 0u, kLowCommitBytes);
+  bool high = CommitGuestRange(base, kHighCommitStart, kHighCommitEnd - kHighCommitStart);
+  if (!low || !high) {
+    ReleaseGuestRange(base);
+    return {};
+  }
+  return std::shared_ptr<uint8_t>(base, ReleaseGuestRange);
 }
 
 std::vector<std::string_view> SplitDotted(std::string_view dotted) {
@@ -47,29 +129,41 @@ std::string ClassForPart(size_t total, size_t index, std::string_view cls) {
 
 class FakeGuest {
  public:
-  FakeGuest() : mem_(4u * 1024u * 1024u) {}
-  uint8_t* base() { return mem_.data(); }
+  FakeGuest() : mem_(MakeGuestMemory()) {}
+  uint8_t* base() { return mem_.get(); }
+  const uint8_t* base() const { return mem_.get(); }
+  uint8_t* Host(uint32_t addr) { return base() + addr + TestHostOffset(addr); }
+  const uint8_t* Host(uint32_t addr) const { return base() + addr + TestHostOffset(addr); }
   uint32_t Alloc(uint32_t size) {
     uint32_t aligned = (brk_ + 15u) & ~15u;
     size_t need = static_cast<size_t>(aligned) + static_cast<size_t>(size);
-    if (need > mem_.size()) return 0u;
+    if (need > kLowCommitBytes) return 0u;
     brk_ = aligned + size;
     return aligned;
   }
-  uint32_t Top() const { return (brk_ + 15u) & ~15u; }
-  uint8_t U8(uint32_t addr) const { return mem_[addr]; }
-  uint32_t U32(uint32_t addr) const {
-    return (static_cast<uint32_t>(mem_[addr]) << 24u) |
-           (static_cast<uint32_t>(mem_[addr + 1u]) << 16u) |
-           (static_cast<uint32_t>(mem_[addr + 2u]) << 8u) |
-           static_cast<uint32_t>(mem_[addr + 3u]);
+  uint32_t AllocPhysical(uint32_t size) {
+    uint32_t aligned = (phys_brk_ + 15u) & ~15u;
+    uint64_t need = static_cast<uint64_t>(aligned) + size;
+    if (need > kPhysAllocEnd) return 0u;
+    phys_brk_ = aligned + size;
+    return aligned;
   }
-  void Put8(uint32_t addr, uint8_t value) { mem_[addr] = value; }
+  uint32_t Top() const { return (brk_ + 15u) & ~15u; }
+  uint8_t U8(uint32_t addr) const { return *Host(addr); }
+  uint32_t U32(uint32_t addr) const {
+    // One Host call per byte so a value crossing 0xE0000000 lands correctly.
+    return (static_cast<uint32_t>(*Host(addr)) << 24u) |
+           (static_cast<uint32_t>(*Host(addr + 1u)) << 16u) |
+           (static_cast<uint32_t>(*Host(addr + 2u)) << 8u) |
+           static_cast<uint32_t>(*Host(addr + 3u));
+  }
+  void Put8(uint32_t addr, uint8_t value) { *Host(addr) = value; }
   void Put32(uint32_t addr, uint32_t value) {
-    mem_[addr] = static_cast<uint8_t>(value >> 24u);
-    mem_[addr + 1u] = static_cast<uint8_t>(value >> 16u);
-    mem_[addr + 2u] = static_cast<uint8_t>(value >> 8u);
-    mem_[addr + 3u] = static_cast<uint8_t>(value);
+    // One Host call per byte so a value crossing 0xE0000000 lands correctly.
+    *Host(addr) = static_cast<uint8_t>(value >> 24u);
+    *Host(addr + 1u) = static_cast<uint8_t>(value >> 16u);
+    *Host(addr + 2u) = static_cast<uint8_t>(value >> 8u);
+    *Host(addr + 3u) = static_cast<uint8_t>(value);
   }
   uint32_t Name(std::string_view text, bool wide = false) {
     std::string folded;
@@ -167,7 +261,7 @@ class FakeGuest {
     uint32_t data = Alloc(size);
     if (data != 0u) {
       for (size_t i = 0u; i < bytes.size(); ++i) {
-        mem_[data + static_cast<uint32_t>(i)] = bytes[i];
+        Put8(data + static_cast<uint32_t>(i), bytes[i]);
       }
     }
     Put32(function + 84u, data);
@@ -212,8 +306,9 @@ class FakeGuest {
     path_cache_["Core.Class|Class"] = cls;
     path_cache_["Core.Package|Class"] = pkg;
   }
-  std::vector<uint8_t> mem_;
+  std::shared_ptr<uint8_t> mem_;
   uint32_t brk_ = 0x1000u;
+  uint32_t phys_brk_ = kPhysAllocStart;
   std::vector<uint32_t> name_addrs_;
   std::unordered_map<std::string, uint32_t> name_by_folded_;
   std::vector<uint32_t> object_addrs_;
@@ -385,6 +480,35 @@ void CheckSuggestGrow(FakeGuest& guest, uint32_t suggest, uint32_t old_data, con
   Expect(guest.U8(data + 0xC8u) == 0x07 && guest.U8(data + 0xC9u) == 0x01 && guest.U8(data + 0xCAu) == 0x10, "Suggest tail jump");
   Expect(guest.U8(data + 278u) == 0x53, "Suggest last byte 0x53");
   Expect(PrefixMatches(guest, old_data, old_bytes, static_cast<uint32_t>(old_bytes.size())), "Suggest old buffer unchanged");
+}
+
+bool RawHostBytesAreZero(const uint8_t* base, uint32_t offset, uint32_t count) {
+  for (uint32_t i = 0u; i < count; ++i) {
+    if (base[offset + i] != 0u) return false;
+  }
+  return true;
+}
+
+ScriptRow MakeGrowPrefixEditRow(std::string_view id, uint16_t edit_offset) {
+  ScriptRow row;
+  row.id = id;
+  row.function = {"Pkg.ClassG.FuncG", "Function"};
+  row.script_size = 10u;
+  row.byte_edits.push_back({edit_offset, static_cast<uint8_t>(0x9A), kPlayers});
+  GrowEdit grow;
+  grow.keep = 6u;
+  grow.new_size = 14u;
+  TailPiece head;
+  head.bytes.push_back(static_cast<uint8_t>(0xAA));
+  TailPiece text;
+  text.bytes = AsciiZ("hi");
+  TailPiece target;
+  target.object = {"Pkg.ClassC.GrowTarget", "Class"};
+  grow.tail.push_back(std::move(head));
+  grow.tail.push_back(std::move(text));
+  grow.tail.push_back(std::move(target));
+  row.grow = std::move(grow);
+  return row;
 }
 
 void TestRealGroupApplies() {
@@ -580,6 +704,96 @@ void TestHashDependsOnPlayers() {
   Expect(GroupHash(first, 4) == GroupHash(second, 4), "hash stable across builds");
 }
 
+void TestGuestBytesCrossThePhysicalBoundary() {
+  FakeGuest guest;
+  guest.Put8(0xDFFFFFFEu, 0x11);
+  guest.Put8(0xDFFFFFFFu, 0x22);
+  guest.Put8(0xE0000000u, 0x33);
+  guest.Put8(0xE0000001u, 0x44);
+  Expect(::rex::glue::guest::LoadU32(guest.base(), 0xDFFFFFFEu) == 0x11223344u, "cross-boundary LoadU32");
+  std::vector<uint8_t> want{static_cast<uint8_t>(0x11), static_cast<uint8_t>(0x22),
+                            static_cast<uint8_t>(0x33), static_cast<uint8_t>(0x44)};
+  Expect(::rex::glue::guest::ReadBytes(guest.base(), 0xDFFFFFFEu, 4u) == want, "cross-boundary ReadBytes");
+  ::rex::glue::guest::WriteBytes(guest.base(), 0xDFFFFFFFu,
+                                 std::vector<uint8_t>{static_cast<uint8_t>(0xA1), static_cast<uint8_t>(0xA2)});
+  Expect(guest.U8(0xDFFFFFFFu) == 0xA1, "cross-boundary WriteBytes low");
+  Expect(guest.U8(0xE0000000u) == 0xA2, "cross-boundary WriteBytes high");
+}
+
+void TestGrowIntoPhysicalHeap() {
+  PatchGroup group = CoopStage1Group(false);
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  uint32_t suggest = guest.Path("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function");
+  uint32_t old_data = guest.U32(suggest + 84u);
+  std::vector<uint8_t> old_bytes = ReadBytes(guest, old_data, guest.U32(suggest + 88u));
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.AllocPhysical(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "physical heap applies");
+  Expect(guest.U32(suggest + 84u) == 0xE0000000u, "physical heap data at 0xE0000000");
+  CheckSuggestGrow(guest, suggest, old_data, old_bytes);
+  if (TestHostOffset(0xE0000000u) != 0u) {
+    // Wrong place on purpose: untranslated host bytes must stay zero.
+    Expect(RawHostBytesAreZero(guest.base(), 0xE0000000u, 279u), "physical heap wrong place untouched");
+  }
+}
+
+void TestGrowWithPrefixEditUsesEditedPrefix() {
+  ScriptRow row = MakeGrowPrefixEditRow("G-2", 0x02u);
+  PatchGroup group;
+  group.name = "test";
+  group.scripts.push_back(std::move(row));
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  uint32_t func = guest.Path("Pkg.ClassG.FuncG", "Function");
+  uint32_t old_data = guest.U32(func + 84u);
+  std::vector<uint8_t> old_bytes = ReadBytes(guest, old_data, 10u);
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult first = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(first.applied, "grown prefix edit applies");
+  Expect(first.lines.size() == 1u &&
+             first.lines[0] == "G-2 Pkg.ClassG.FuncG: script grown to 14 bytes, with 1 write(s)",
+         "grown prefix edit line");
+  uint32_t data = guest.U32(func + 84u);
+  Expect(guest.U32(func + 88u) == 14u && guest.U32(func + 92u) == 14u, "grown prefix edit Num==Max==14");
+  Expect(guest.U8(data) == 0x0B && guest.U8(data + 1u) == 0x0B && guest.U8(data + 2u) == 0x04 &&
+             guest.U8(data + 3u) == 0x0B && guest.U8(data + 4u) == 0x0B && guest.U8(data + 5u) == 0x0B,
+         "grown prefix edit keeps edited prefix");
+  Expect(guest.U8(data + 6u) == 0xAA, "grown prefix edit tail byte");
+  Expect(guest.U8(data + 7u) == 'h' && guest.U8(data + 8u) == 'i' && guest.U8(data + 9u) == 0, "grown prefix edit tail text");
+  uint32_t target = guest.Path("Pkg.ClassC.GrowTarget", "Class");
+  Expect(guest.U32(data + 10u) == target, "grown prefix edit tail operand");
+  Expect(guest.U8(old_data + 2u) == 0x9A, "grown prefix edit old byte 2 unchanged");
+  Expect(PrefixMatches(guest, old_data, old_bytes, 10u), "grown prefix edit old buffer unchanged");
+  uint32_t top = guest.Top();
+  GroupResult second = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(second.applied, "grown prefix edit second applies");
+  Expect(second.lines.size() == 1u && EndsWithApplied(second.lines[0]), "grown prefix edit second already applied");
+  Expect(guest.Top() == top, "grown prefix edit second no allocation");
+}
+
+void TestGrowEditPastKeptPrefixSkips() {
+  ScriptRow row = MakeGrowPrefixEditRow("G-3", 0x07u);
+  PatchGroup group;
+  group.name = "test";
+  group.scripts.push_back(std::move(row));
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  uint32_t func = guest.Path("Pkg.ClassG.FuncG", "Function");
+  uint32_t data = guest.U32(func + 84u);
+  uint32_t num = guest.U32(func + 88u);
+  uint32_t max = guest.U32(func + 92u);
+  std::vector<uint8_t> bytes = ReadBytes(guest, data, num);
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(!result.applied, "past-prefix edit skips");
+  Expect(result.failed_row == "G-3", "past-prefix edit failed_row");
+  Expect(result.reason == "+0x0007 is past the kept prefix +0x0006", "past-prefix edit reason");
+  Expect(guest.U32(func + 84u) == data && guest.U32(func + 88u) == num && guest.U32(func + 92u) == max,
+         "past-prefix edit script unchanged");
+  Expect(PrefixMatches(guest, data, bytes, 10u), "past-prefix edit bytes unchanged");
+}
+
 }  // namespace
 
 int main() {
@@ -597,6 +811,10 @@ int main() {
   TestWideAndCaseInsensitiveNames();
   TestPlayersOutOfRangeSkips();
   TestHashDependsOnPlayers();
+  TestGuestBytesCrossThePhysicalBoundary();
+  TestGrowIntoPhysicalHeap();
+  TestGrowWithPrefixEditUsesEditedPrefix();
+  TestGrowEditPastKeptPrefixSkips();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return (g_failures == 0) ? 0 : 1;
 }

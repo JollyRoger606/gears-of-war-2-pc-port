@@ -277,6 +277,107 @@ class AnyRefModel(FakeModel):
         return ["any"]
 
 
+def grow_edit_row(row_id="G-2"):
+    return sp.ScriptRow(row_id, "test grow with edit", FUNC_G, 10,
+                        byte_edits=(sp.ByteEdit(0x02, 0x9A, sp.PLAYERS),),
+                        grow=sp.Grow(6, 14, (sp.Raw(b"\xAA"), sp.Text("hi"), GROW_TARGET)))
+
+
+def grow_edit_setup(full_data, num):
+    model = FakeModel()
+    target = model.add(GROW_TARGET)
+    value = model.operand_value(target)
+    handle = model.add(FUNC_G, script=sp.ScriptArray(full_data, num, num))
+    return model, handle, value
+
+
+def test_grow_with_prefix_edit():
+    prefix = bytearray(range(10))
+    prefix[2] = 0x9A
+    model, handle, value = grow_edit_setup(bytes(prefix), 10)
+    plan = sp.plan_group(model, [grow_edit_row()], 4)
+    out = sp.apply_plan(model, plan)
+    expected = bytes(prefix[:2]) + b"\x04" + bytes(prefix[3:6]) + b"\xAAhi\x00" + value.to_bytes(4, "big")
+    assert out[handle] == expected
+    assert plan.entries[0].writes == 1
+    assert sp.group_lines(plan) == [f"G-2 {FUNC_G.path}: script grown to 14 bytes, with 1 write(s)"]
+    assert model.scripts[handle].data == bytes(prefix)
+
+
+def grown_with_byte_2(byte_2):
+    prefix = bytearray(range(6))
+    prefix[2] = byte_2
+    model = FakeModel()
+    value = model.operand_value(model.add(GROW_TARGET))
+    full = bytes(prefix) + b"\xAAhi\x00" + value.to_bytes(4, "big")
+    handle = model.add(FUNC_G, script=sp.ScriptArray(full, 14, 14))
+    return model, handle, full
+
+
+def test_grow_with_edit_already_applied():
+    model, _, _ = grown_with_byte_2(0x04)
+    plan = sp.plan_group(model, [grow_edit_row()], 4)
+    assert plan.entries[0].writes == 0
+    assert sp.group_lines(plan) == [f"G-2 {FUNC_G.path}: already applied"]
+
+
+def test_grow_with_edit_pending_in_grown_script():
+    model, handle, full = grown_with_byte_2(0x9A)
+    plan = sp.plan_group(model, [grow_edit_row()], 4)
+    out = sp.apply_plan(model, plan)
+    expected = full[:2] + b"\x04" + full[3:]
+    assert plan.entries[0].writes == 1
+    assert sp.group_lines(plan) == [f"G-2 {FUNC_G.path}: 1 write(s)"]
+    assert out[handle] == expected
+
+
+def test_grow_byte_edit_past_keep():
+    model = FakeModel()
+    model.add(GROW_TARGET)
+    model.add(FUNC_G, script=sp.ScriptArray(bytes(range(10)), 10, 10))
+    row = sp.ScriptRow("G-3", "test grow past keep", FUNC_G, 10,
+                       byte_edits=(sp.ByteEdit(0x07, 0x07, 0x00),),
+                       grow=sp.Grow(6, 14, (sp.Raw(b"\xAA"), sp.Text("hi"), GROW_TARGET)))
+    with pytest.raises(sp.PatchSkip) as exc:
+        sp.plan_group(model, [row], 4)
+    assert exc.value.row == "G-3"
+    assert exc.value.reason == "+0x0007 is past the kept prefix +0x0006"
+
+
+def test_grow_operand_edit_past_keep():
+    model = FakeModel()
+    model.add(GROW_TARGET)
+    old = model.add(OLD_REF)
+    model.add(NEW_REF)
+    data = bytearray(10)
+    data[4:8] = model.operand_value(old).to_bytes(4, "big")
+    model.add(FUNC_G, script=sp.ScriptArray(bytes(data), 10, 10))
+    row = sp.ScriptRow("G-3", "test grow past keep", FUNC_G, 10,
+                       operand_edits=(sp.OperandEdit(0x04, OLD_REF, NEW_REF),),
+                       grow=sp.Grow(6, 14, (sp.Raw(b"\xAA"), sp.Text("hi"), GROW_TARGET)))
+    with pytest.raises(sp.PatchSkip) as exc:
+        sp.plan_group(model, [row], 4)
+    assert exc.value.row == "G-3"
+    assert "is past the kept prefix" in exc.value.reason
+
+
+def test_check_table_real_rows():
+    sp.check_table()
+
+
+def test_check_table_bad_row(monkeypatch):
+    bad = sp.ScriptRow("X-1", "test bad row", FUNC_G, 10,
+                       byte_edits=(sp.ByteEdit(0x07, 0x07, 0x00),),
+                       grow=sp.Grow(6, 14, (sp.Raw(b"\xAA"),)))
+    monkeypatch.setitem(sp.ROWS, "X-1", bad)
+    with pytest.raises(ValueError) as exc:
+        sp.check_table()
+    assert str(exc.value).startswith("X-1: ")
+    with pytest.raises(ValueError) as exc:
+        sp.render_cpp()
+    assert str(exc.value).startswith("X-1: ")
+
+
 def test_real_suggest_tail_assembles():
     model = AnyRefModel()
     model.values["any"] = 0x80001000

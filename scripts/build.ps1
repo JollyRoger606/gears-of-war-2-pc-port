@@ -75,6 +75,12 @@ if (-not $Sdk) { Fail 'Give the ReXGlue SDK folder with -Sdk <folder> or set REX
 $Sdk = (Resolve-Path $Sdk).Path
 $rexglue = Join-Path $Sdk 'bin\rexglue.exe'
 if (-not (Test-Path $rexglue)) { Fail "rexglue.exe not found in $Sdk\bin." }
+# A worktree whose generated\ is a link to another checkout would regenerate that checkout's code:
+# a fresh build directory runs the rexglue codegen step even with -SkipCodegen.
+$generatedItem = Get-Item 'generated' -Force -ErrorAction SilentlyContinue
+if ($generatedItem -and $generatedItem.LinkType) {
+    Fail "generated\ is a $($generatedItem.LinkType) to $($generatedItem.Target). Building here would rewrite that folder. Replace it with a copy: cmd /c rmdir generated, then copy the other checkout's generated\ here."
+}
 if (-not (Test-Path 'game\default.xex')) {
     Fail 'game\default.xex is missing. Copy default.xex from your own copy of the game into the game folder.'
 }

@@ -1,12 +1,21 @@
 # Campaign co-op beyond two players
 
 Status: Stage 1 is in progress. SDK patch `0010-system-link-sessions` (section 3, Stage 1, item 2)
-builds for Windows, compiles for Android and passes its unit tests, but has not run in the game
-yet. The script patches in guest memory (sections 2 and 4) build and pass their offline check on a
-retail package, but have not run in the game either; everything else is design only.
-SDK patch 0011-network-crossplay (Stage 4 networking) and the Android app's network permissions
-and Wi-Fi locks build for Windows and Android and pass their unit tests, but have not run in the
-game yet.
+builds for Windows and passes its unit tests. For Android it has only passed an NDK arm64
+`-fsyntax-only` check of the touched files; it has not been built or linked there. The script
+patches in guest memory (sections 2 and 4) build for Windows and pass their offline check on a
+retail package; their `src/` files have passed the same NDK check and nothing more on Android.
+Neither has run in the game yet, and everything else is design only.
+
+Before this branch merges: rebase on master, check that 0002-0010 still apply in order on
+`923c1a5` (`git apply --check`, one patch after the other), and run `scripts/build-android.ps1` once
+on the merged tree. After the merge, the Android build applies every `sdk/patches/*.patch` and globs
+`src/*.cpp`, so it is the first build to see this code.
+
+On the `crossplay` branch, SDK patch 0011-network-crossplay (Stage 4 networking) sits on top of
+this 0010, and `scripts/build-android.ps1` has built and linked 0002-0011 there. Two copies of the
+crossplay build have joined each other's campaign over loopback on one PC; PC with phone has not
+run yet. See [NETWORK_PLAY.md](NETWORK_PLAY.md).
 
 This document condenses four read-only investigations from 2026-10-14 (join and spawn path,
 campaign systems, patch mechanism, network). A second pass re-checked each one, and the corrections
@@ -212,10 +221,22 @@ Decision: change UnrealScript bytecode and default objects in guest memory, from
   3. Default-object field write.
   4. Grown script. Allocate a new buffer with the game's own allocator (`GMalloc` at
      [0x8310B12C], vtable +4 = Malloc(size, align), called with align 8 as the package loader does at
-     0x8226F610), copy the bytes, then write Data, Num and Max. Never free the old buffer.
-     Allocating outside `GMalloc` risks a mismatched free when the array is destroyed. [I] The
-     buffer is allocated while the group is still being checked, so a later failed check leaks that
-     one block and writes nothing to the game.
+     0x8226F610), fill it with the kept prefix and then the tail, and write Data, Num and Max. The
+     row's own byte and operand edits go into the new prefix, so the old buffer is never written,
+     and never freed. Allocating outside `GMalloc` risks a mismatched free when the array is
+     destroyed. [I] The buffer is allocated while the group is still being checked, so a later
+     failed check leaks that one block; nothing, the new buffer included, is written before the
+     whole group has passed. An edit after the kept prefix would be lost, so it is a table error:
+     the group is skipped with `+0x0007 is past the kept prefix +0x0006`, and
+     `tools/script_patch.py` refuses to print such a row.
+- **Guest addresses.** Every read, write and copy goes through `src/gow2_guest.h`, which places a
+  guest address where the runtime does. On Windows the heap at 0xE0000000 and above sits 0x1000
+  higher in host memory (`PhysicalHostOffset` in the SDK's `xmemory.h`; a `static_assert` in the
+  hook keeps the two equal), and copies go byte by byte, so a range may cross 0xE0000000. `GMalloc`'s
+  pool pages come from `XPhysicalAlloc` and land at 0xA0000000 today, but `sub_82AAA130` clears the
+  large-page flag when [0x830D9B2C] is set (`rlwinm r5,r5,0,3,1`), and a 4 KiB-page block would come
+  from the 0xE0000000 heap. [V for the flag change, I for the heap] The core test puts a grown script
+  at 0xE0000000 and checks that nothing lands 0x1000 below it.
 - **Fail closed.** The patcher validates a group completely before it writes any byte. Each row must
   pass all of these:
   - the function is found exactly once;
@@ -302,8 +323,8 @@ Work:
 2. **SDK patch `0010-system-link-sessions` (M2a), applied after 0002-0007:**
    - SendTo/RecvFrom: fill `sockaddr_in` in network order, swap the received port, and write
      `from` only when the call succeeded.
-   - `XNetGetEthernetLinkStatus`: return 0x0B (active, 100 Mbps, full duplex), with a setting to
-     report the link as down.
+   - `XNetGetEthernetLinkStatus`: return 0x0B (active, 100 Mbps, full duplex) when System Link is
+     turned on, and 0 (cable unplugged) otherwise, as before.
    - `XGISessionCreate`:
      - When flags bit 0 (HOST) is set, write into `XSESSION_INFO` a random XNKID with the
        system-link marker, the host XNADDR and a random XNKEY, and write a random nonce. [V for the
@@ -334,15 +355,31 @@ Work:
 
    | Setting | Default | Effect |
    |---|---|---|
-   | `net_link_active` | true | `XNetGetEthernetLinkStatus` returns 0x0B; false returns 0 (unplugged cable, co-op off) |
-   | `user_xuid` | empty | XUID the game sees. Empty: the one in `system_link_xuid.txt` in the user data folder, created on the first run as `0xB13E` plus 48 random bits |
+   | `net_link_active` | false | true: `XNetGetEthernetLinkStatus` returns 0x0B and System Link works. false: it returns 0 (unplugged cable), as before 0010. `gow2_coop_players` 3 or more turns it on unless `gow2.toml` or the command line set it |
+   | `user_xuid` | empty | XUID the game sees. Empty with the link on: the one in `system_link_xuid.txt` in the user data folder, created on the first such run as `0xB13E` plus 48 random bits. Empty with the link off: the fixed offline XUID 0xB13EBABEBABEBABE, and no file is created |
    | `user_name` | `User` | Gamertag, up to 15 characters |
-   | `net_local_ip` | empty | `XNADDR.ina`. Empty: `net_bind_ip` when set, else 127.0.0.1 |
+   | `net_local_ip` | empty | `XNADDR.ina`. Empty: `net_bind_ip` when set, else the address of the adapter that holds the default route, else 127.0.0.1 (with a warning that other PCs cannot join). The log line `[netlink] link active: local <ip> (<where from>)` names it; set it by hand when that is not the LAN address |
    | `net_bind_ip` | empty | Rewrites `0.0.0.0` binds and logs `[netlink] bind 0.0.0.0:1000 -> 127.0.0.2:1000 (net_bind_ip)` |
    | `net_broadcast_targets` | empty | Unicast copies of every 255.255.255.255 send, skipping this instance (`net_bind_ip`, else `net_local_ip`); the list is logged once |
    | `net_random_seed` | 0 | Non-zero: `XNetRandom`, XNKIDs, XNKEYs and nonces come from a SplitMix64 stream with this seed |
 
+   Every one of these settings needs a restart. The network ones are read once, when the kernel
+   starts, and the game threads only read that copy: the settings panel cannot move the advertised
+   address under a session that already handed it out, and no thread reads a string the panel is
+   rewriting.
+
    Decisions taken while implementing:
+
+   - System Link is opt-in. With the defaults a solo game behaves as before 0010: the link reports
+     down, so the game creates no LAN session and should bind only UDP 0.0.0.0:1000 as before [I;
+     Stage 1 test run 3 checks it]; it sees the offline XUID, and nothing is written to the user
+     data folder. What still differs without the link are fixes that do not depend on it: socket
+     addresses in network order, a random `XNetRandom` and a per-instance MAC in
+     `XNetGetTitleXnAddr` instead of CC:CC:CC:CC:CC:CC.
+     `gow2_coop_players` 3 or more turns the link on in `OnPreSetup`, before the kernel reads it, and
+     logs `SCRIPTPATCH coop: gow2_coop_players=4 turns System Link on (net_link_active=true)`; an
+     explicit `net_link_active` in `gow2.toml` or on the command line wins. Two-player System Link
+     needs `--net_link_active=true`.
 
    - Saves and profile files stay keyed by the old fixed identity. `UserProfile::xuid()`
      (0xB13EBABEBABEBABE) still names the content folder and `name()` ("User") the profile-settings
@@ -350,7 +387,7 @@ Work:
      `XamUserGetSigninInfo`, `XamUserGetName`, `XamUserGetGamerTag`, profile-setting reads and
      `XamContentGetCreator`. Changing `user_xuid` or `user_name` never moves a save. Whether the game
      accepts an existing save under a new XUID is a test item; `user_xuid=B13EBABEBABEBABE` restores the
-     old value.
+     old value. With the link off the game keeps seeing 0xB13EBABEBABEBABE.
    - The MAC is `02` plus five bytes of SplitMix64 over the XUID and the IP, so instances on one PC
      differ even when they share a XUID.
    - Session handles are 0xCAFE0004, 0xCAFE0008 and so on. Each session object is a zeroed 16-byte
@@ -362,12 +399,14 @@ Work:
      `XSessionGetDetails` fills the 128-byte `XSESSION_LOCAL_DETAILS` and as many 16-byte members as the
      caller's size allows, right after it. The only caller, `sub_828333C8`, passes 640 bytes.
    - `XNetRegisterKey`, `XNetUnregisterKey` and `XNetUnregisterInAddr` return 0.
-   - On Android the patch compiles; errno maps to WSA codes for `sendto`, `setsockopt` and `bind`
-     only. The rest of the POSIX work stays in Stage 4.
+   - On Android the patch has only passed an NDK arm64 `-fsyntax-only` check; it has not been built
+     or linked. errno maps to WSA codes for `sendto`, `setsockopt` and `bind` only, and
+     `XSocket::SetOption` and `socket_ioctl` still hand the 360's SOL_SOCKET (0xFFFF) and FIONBIO
+     (0x8004667E) to the POSIX calls unchanged. Android System Link needs the Stage 4 mappings.
 
-   With the link reported active, a solo campaign also creates its LAN session and answers System
-   Link queries on UDP 14001, as a 360 with a cable would. [I] That is the main change to
-   single-player behaviour, and the Stage 1 test checks it.
+   With the link on, a solo campaign also creates its LAN session and answers System Link queries
+   on UDP 14001, as a 360 with a cable would, so anyone on the LAN can find it. [I] That is why the
+   link is off unless co-op asks for it.
 3. **Tools.** Done: the package and script tools are in `tools/ue3/` (one line each in its
    README), next to `tools/script_patch.py`.
 
@@ -386,7 +425,10 @@ Offline:
    SuggestPawnClassFor go to 0x48, 0x67 and 0x84.
 2. Unit tests on synthetic bytecode: `python -m pytest tools/tests/test_script_patch.py` and the
    `gow2_script_patch_test` target. A wrong old byte, a wrong `Num`, a wrong pointer operand, or a
-   function found twice must each skip the whole group. Both pass (18 tests, 56 checks).
+   function found twice must each skip the whole group, and so must an edit past the kept prefix
+   of a grown row. A grown row's own edits must land in the new buffer, and a grown script placed
+   at 0xE0000000 must be written where the game reads it. Both pass (25 tests, 88
+   checks).
 
 One instance, no network:
 
@@ -399,11 +441,20 @@ One instance, no network:
 5. Add `--gow2_coop_patch_fail_test=true`. The log shows `SCRIPTPATCH coop: skipped (S1-1: +0x0000
    expected FB, found 04); the game stays retail`, and the game stays retail.
 
-With SDK patch 0010, the single-instance runs also check its defaults: the log shows
-`Signed-in player: XUID <16 hex digits>, gamertag 'User'`, an existing save loads, and with
-`--system_link_trace=true` the solo campaign logs `XGISessionCreate ... flags=0x00000021 ... host=true
-known=true ... host_ip=127.0.0.1` and play is unchanged. With `--net_link_active=false` the trace
-shows `XNetGetEthernetLinkStatus ... ret=0x0` and no session is created, as before 0010.
+With SDK patch 0010, the single-instance runs also check its defaults. Run 3 (no co-op, no network
+settings) must look like a run before 0010: the log shows `[netlink] link reported down
+(net_link_active=false): no System Link` and `Signed-in player: XUID B13EBABEBABEBABE, gamertag
+'User'`, an existing save loads, no `system_link_xuid.txt` appears in the user data folder, no
+Windows Firewall prompt appears beyond any the port already raised for UDP 1000, and with
+`--system_link_trace=true` the trace shows `XNetGetEthernetLinkStatus ... ret=0x0`, a single bind
+(`0.0.0.0:1000`) and no `XGISessionCreate`.
+
+Run 4 (`--gow2_coop_players=4`) also logs `SCRIPTPATCH coop: gow2_coop_players=4 turns System Link
+on (net_link_active=true)`, `[netlink] link active: local <ip> (<where from>)` and a `Signed-in
+player` line with the per-install XUID (`B13E` plus 12 hex digits), creates `system_link_xuid.txt`,
+and with `--system_link_trace=true` the solo campaign logs `XGISessionCreate ... flags=0x00000021 ...
+host=true known=true ... host_ip=<that ip>` and play is unchanged. Load an existing save in this run
+too: it is the first run under a new XUID.
 
 Network (needs SDK patch 0010):
 
@@ -411,7 +462,8 @@ Network (needs SDK patch 0010):
    client finds the session (the beacon names 127.0.0.1), runs `open 127.0.0.1` and takes over the
    AI Dom. This is the two-player baseline; the script patches play no part yet. Capture with
    `system_link_trace`. Settings: host `--net_bind_ip=127.0.0.1`, client `--net_bind_ip=127.0.0.2`,
-   both `--net_broadcast_targets=127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4 --system_link_trace=true`,
+   both `--net_link_active=true --net_broadcast_targets=127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4
+   --system_link_trace=true`,
    and a different XUID per instance (`--user_xuid=...`, or a separate `--user_data_root`, which also
    separates the saves).
 

@@ -237,6 +237,21 @@ def _check_operands(model, row, data, in_scope):
                             f"{operand.ref.path} ({operand.ref.cls}) at 0x{expected:08X}")
 
 
+def _require_in_kept_prefix(row, offset, size):
+    if offset + size > row.grow.keep:
+        raise PatchSkip(row.id, f"+0x{offset:04X} is past the kept prefix +0x{row.grow.keep:04X}")
+
+
+# A grow keeps only the prefix, so an edit after it would be dropped without a word.
+def _check_edits_in_kept_prefix(row):
+    if row.grow is None:
+        return
+    for edit in row.byte_edits:
+        _require_in_kept_prefix(row, edit.offset, 1)
+    for edit in row.operand_edits:
+        _require_in_kept_prefix(row, edit.offset, 4)
+
+
 def _plan_byte_edits(row, data, new_data, players, in_scope):
     writes = 0
     for edit in row.byte_edits:
@@ -272,7 +287,7 @@ def _plan_operand_edits(model, row, data, new_data, in_scope):
 
 
 # The new script bytes, or None when the row grows nothing or the tail is already there.
-def _plan_grow(model, row, script, grown):
+def _plan_grow(model, row, script, grown, new_data):
     if row.grow is None:
         return None
     tail = _assemble_tail(model, row.grow, row.id)
@@ -282,7 +297,7 @@ def _plan_grow(model, row, script, grown):
         return None
     if script.max != script.num:
         raise PatchSkip(row.id, f"Script.Max is {script.max}, Num {script.num}")
-    return script.data[:row.grow.keep] + tail
+    return bytes(new_data[:row.grow.keep]) + tail
 
 
 def _plan_script(model, row, players):
@@ -299,10 +314,11 @@ def _plan_script(model, row, players):
     data = script.data
     _check_bytes(row, data, in_scope)
     _check_operands(model, row, data, in_scope)
+    _check_edits_in_kept_prefix(row)
     new_data = bytearray(data)
     writes = _plan_byte_edits(row, data, new_data, players, in_scope)
     writes += _plan_operand_edits(model, row, data, new_data, in_scope)
-    grown_script = _plan_grow(model, row, script, grown)
+    grown_script = _plan_grow(model, row, script, grown, new_data)
     if grown_script is not None:
         return ScriptPlan(row, handle, bytes(grown_script), writes, row.grow.new_size)
     return ScriptPlan(row, handle, bytes(new_data), writes, 0)
@@ -349,7 +365,10 @@ def group_lines(plan):
         if isinstance(entry, ScriptPlan):
             head = f"{row.id} {row.function.path}: "
             if entry.grown_size:
-                lines.append(head + f"script grown to {entry.grown_size} bytes")
+                line = head + f"script grown to {entry.grown_size} bytes"
+                if entry.writes > 0:
+                    line += f", with {entry.writes} write(s)"
+                lines.append(line)
             elif entry.writes == 0:
                 lines.append(head + "already applied")
             else:
@@ -450,7 +469,18 @@ def _default_lines(row):
     ]
 
 
+def check_table():
+    for row in ROWS.values():
+        if not isinstance(row, ScriptRow):
+            continue
+        try:
+            _check_edits_in_kept_prefix(row)
+        except PatchSkip as e:
+            raise ValueError(f"{e.row}: {e.reason}") from None
+
+
 def render_cpp():
+    check_table()
     lines = [
         "// gow2 - ReXGlue Recompiled Project",
         "//",
