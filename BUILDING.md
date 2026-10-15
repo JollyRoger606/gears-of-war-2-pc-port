@@ -60,6 +60,35 @@ addresses and are not supported.
 3. After codegen and before compiling, the post-codegen patcher
    `tools\patch_switch_traps.py` runs over the generated code.
 
+## Tests
+
+`scripts\test-host.ps1` runs the tests that need no game data, phone or second PC: the host
+test targets `gow2_test_input_test`, `gow2_script_patch_test` and `gow2_save_dir_test` (after
+`scripts\build.ps1`), the touch controls model test, the SDK's System Link and session unit tests
+(after `scripts\build-sdk.ps1`) and `python -m pytest tools`. The exit code is the number of
+failed steps.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test-host.ps1 -LowPriority
+```
+
+## Release zip
+
+The release zip holds `out\build\release\gow2.exe` and SDK DLLs built without NVIDIA DLSS: the
+DLSS SDK license keeps NVIDIA's NGX library out of an open-source release (THIRD_PARTY_NOTICES.md,
+"NVIDIA DLSS").
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-sdk.ps1 -NoDlss
+pwsh -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 0.1.1
+```
+
+`-NoDlss` installs the DLLs into `out\sdk-nodlss\` and leaves `out\sdk\`, the DLLs
+`scripts\build.ps1` puts next to `gow2.exe`, as they are. It shares the SDK build tree with the
+everyday build, so the next `scripts\build-sdk.ps1` without it compiles `rexgpu-xenos.dll` again.
+`package.ps1` writes `out\package\gow2-recomp-<version>-win64.zip` and its `.sha256`. It refuses
+game files and any `.dll` or `.exe` that holds an NVIDIA NGX name (`nvsdk_ngx`, `nvngx`).
+
 ## gow2_manifest.toml
 
 The manifest drives code generation. Two sections worth knowing about:

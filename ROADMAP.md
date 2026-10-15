@@ -9,7 +9,8 @@ Each phase keeps the previous one working.
 - [x] Act 1 loads and runs in real time (input race in the runtime fixed with the XAM input guard).
 - [x] First level playable with the keyboard (Act 1, early).
 - [ ] The whole campaign (solo and split-screen co-op).
-- [ ] Saves and checkpoints next to the executable (portable install).
+- [x] Saves, profile settings and achievements in any folder: `gow2_save_dir` (`saves` next to
+      the executable for a portable install, or a cloud-synced folder; [docs/SAVES.md](docs/SAVES.md)).
 - [ ] Keyboard and mouse that feel native. Mouse aiming now goes through the engine's own PC
       mouse axes (`MouseX`/`MouseY` into `aMouseX`/`aMouseY`), with no stick emulation and no
       aim friction or adhesion for the mouse (`src/gow2_mouse_aim.cpp`, SDK patch 0006); the
@@ -24,8 +25,10 @@ Each phase keeps the previous one working.
       later multiplayer fixes need.
 - [ ] Horde and versus over System Link (LAN). A friend of the project reports he already
       added System Link to a Gears port; find out which one and whether it can be reused.
-      ReXGlue 0.10.0.9 stubs most of it (XGI sessions return success without state,
-      `XNetGetTitleXnAddr` advertises loopback); GrizzlyOne95's
+      System Link itself works for campaign co-op: ReXGlue 0.10.0.9 stubbed it (XGI sessions
+      returned success without state, `XNetGetTitleXnAddr` advertised loopback), and SDK patches
+      0010 and 0011 add sessions, real XNet addresses and the port remap
+      ([docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md)). Horde and versus have not been tried. GrizzlyOne95's
       [LAN co-op audit](https://github.com/GrizzlyOne95/gears-judgement-recomp/blob/main/docs/LAN_COOP_NETWORK_AUDIT.md)
       for Judgment lays out the trace -> session service -> replication milestones.
 - [ ] Stability: no unregistered-function FATALs in a full playthrough (hints complete),
@@ -47,15 +50,20 @@ port reached more platforms and added features.
 - [ ] Touch controls on Android in the style of mobile shooters (left virtual stick, drag to
       look through the same native mouse path, buttons for fire, aim, cover, reload, melee and
       weapon swap), plus controllers and keyboard with or without a mouse.
-- [ ] Cross-play between PC and Android: both run the same recompiled game, so it follows from
-      System Link working on Android.
+- [x] Cross-play between PC and Android: a PC and a phone joined each other's System Link
+      campaign on one LAN on 2026-10-15 (patch 0011, [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md));
+      the phone still renders only a few frames per second in game.
 - [ ] Campaign co-op for more than two players. The cap of two is in the game's script
       (`GearGameSP_Base.InitGame` sets `MaxPlayers = 2`, the co-op menu
       `NumPublicConnections = 2`), while versus already takes 10. Extra players would join
       as Carmine-style COG soldiers (`SuggestPawnClassFor` already falls back to
       `GearPawn_COGGear` for a third player). Target four first, then as many as the
-      cinematics, checkpoints and bandwidth allow.
-- [ ] Online play beyond LAN (System Link over the internet / relay).
+      cinematics, checkpoints and bandwidth allow. Stage 1 is done: four players on one PC played
+      Act 1 chapter 2 on 2026-10-15 ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)); chapter
+      travel with extra players and the other Stage 2-3 items remain.
+- [ ] Online play beyond LAN (System Link over the internet / relay). Built in patch 0011
+      (`net_peers`, `net_public_address`, `net_allow_peers`; [docs/ONLINE.md](docs/ONLINE.md)),
+      not tested over the internet yet.
 
 ## Phase 3 - Modern enhancements
 

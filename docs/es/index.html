@@ -367,8 +367,8 @@
               <li>Mirada con mouse que se sienta como un juego de PC (el arreglo llega en la 0.1.1)</li>
               <li>La campaña completa: solo se ha jugado el acto 1</li>
               <li>FSR 4, FSR 3.1 y DLSS: incluidos, todavía no se activan en este juego</li>
-              <li>System Link (Horda y Versus en LAN): capa de sockets corregida, faltan las sesiones</li>
-              <li>Versiones para Linux y Android</li>
+              <li>System Link en una versión publicada: la campaña cooperativa funciona en el repositorio (PC y teléfonos Android, cuatro jugadores verificados en un mismo PC); Horda, Versus y el juego por internet sin probar</li>
+              <li>Una versión para Linux, y Android a una tasa de cuadros jugable</li>
             </ul>
           </div>
           <div class="panel plate issues">
@@ -489,13 +489,13 @@
           <details>
             <summary>¿Hay multijugador, Horda o cooperativo?</summary>
             <div class="faq__answer">
-              <p>Todavía no. System Link (juego en LAN para Horda y Versus) se está implementando: las llamadas de red del juego ya se registran y sus opciones de socket ya llegan bien a Windows, pero faltan las sesiones. El cooperativo en pantalla dividida forma parte del objetivo de la campaña completa.</p>
+              <p>La campaña cooperativa por System Link funciona en el repositorio, todavía no en una versión publicada. PC y teléfonos Android en la misma red se unieron a la campaña del otro (verificado el 2026-10-15), y cuatro copias en un mismo PC jugaron juntas el capítulo 2 del Acto 1. Se activa con <code>net_link_active = true</code> en cada jugador; guías: <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/NETWORK_PLAY.md">juego en red</a>, <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/COOP_N_PLAYERS.md">más de dos jugadores</a> y <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">juego por internet</a> (implementado, sin probar). Horda y Versus no se han probado. El cooperativo en pantalla dividida forma parte del objetivo de la campaña completa.</p>
             </div>
           </details>
           <details>
             <summary>¿Hay versión para Android o Linux?</summary>
             <div class="faq__answer">
-              <p>No una que se pueda jugar. En Android, el shell de la app corre en un Samsung Galaxy S25 Ultra con una biblioteca provisional, y ya se compila un APK con las bibliotecas del juego, pero todavía no se ha ejecutado en un teléfono. El plan está en <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
+              <p>Todavía no una que se pueda jugar. En un Samsung Galaxy S25 Ultra, el APK compilado desde el repositorio juega el inicio del Acto 1 con controles táctiles y se une a la campaña por System Link de un PC, pero solo a unos 3 a 5 cuadros por segundo. El plan y el estado están en <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
               <p>Una versión para Linux x64 con Vulkan está planeada como el primer destino fuera de Windows.</p>
             </div>
           </details>

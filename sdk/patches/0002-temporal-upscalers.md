@@ -118,6 +118,11 @@ and measured GoW2 render sizes replacing Judgment's 720p/1440p assumptions.
   `amd_fidelityfx_loader_dx12.dll` / `amd_fidelityfx_upscaler_dx12.dll`
   (`signedbin`) into `out\sdk\`. The patch is self-contained (new files are
   part of the diff, no separate files-copy step).
+- `-NoDlss` builds the release DLLs: no DLSS SDK is fetched, `GOW2_DLSS_SDK` names a folder that
+  does not exist (`DLSS (NGX) support: OFF`), `nvngx_dlss.dll` is not installed, and the DLLs go
+  to `out\sdk-nodlss\`; the build fails if an installed DLL still holds `nvsdk_ngx` or `nvngx`.
+  For that reason the DLSS failure status names no NVIDIA file:
+  `DLSS: unavailable (NGX init failed or no DLSS runtime DLL)`.
 
 ## Verified in game (2026-10-14, Radeon RX 7800 XT, `resolution_scale = 1`)
 

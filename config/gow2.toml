@@ -5,6 +5,16 @@
 # to get the built-in default back. Most settings can also be changed in game from the
 # runtime's settings overlay.
 
+# ---------- Saves ----------
+# Folder for your saves, profile settings and achievements. Empty = the default
+# (%LOCALAPPDATA%\GearsOfWar2PC\user on Windows). Point it at a cloud-synced folder to back up
+# and sync your campaign; the first start copies your existing saves there. Single quotes keep
+# backslashes as typed. See docs/SAVES.md.
+#   gow2_save_dir = '%OneDrive%\GearsOfWar2\saves'
+#   gow2_save_dir = 'D:\Dropbox\GearsOfWar2'
+#   gow2_save_dir = "saves"   (portable: a folder next to gow2.exe)
+gow2_save_dir = ""
+
 # ---------- Display ----------
 fullscreen = true
 
@@ -84,3 +94,29 @@ keybind_dpad_down = "3"
 keybind_dpad_left = "4"
 keybind_back = "Tab"
 keybind_start = "Return,Escape"
+
+# ---------- Co-op beyond two players ----------
+# Campaign co-op player cap: 2 keeps the retail game; 3 to 255 apply the Stage 1 script
+# patches and turn System Link on. See docs/COOP_N_PLAYERS.md.
+# gow2_coop_players = 2
+
+# ---------- Network (System Link) ----------
+# System Link (LAN and internet co-op) stays off until this is true on every player's copy;
+# gow2_coop_players 3+ turns it on by itself. See docs/NETWORK_PLAY.md.
+# net_link_active = true
+# Guest ports below 1024 move up by this offset, with the link on or off (the game's UDP 1000
+# becomes 41000); every player needs the same value.
+# net_port_offset = 40000
+# This PC's LAN address (and prefix) when the automatic choice is wrong.
+# net_local_ip = "192.168.1.10/24"
+# Internet play. On the host: the name or address friends reach it at.
+# net_public_address = "gow2.example.com"
+# On each friend's PC: the host's name or address (comma-separated list).
+# net_peers = "gow2.example.com"
+# On an internet host: the friends' addresses, ranges or names. Without it, a host with
+# net_public_address lets in only the local network and net_peers.
+# net_allow_peers = "friend1.example.com, 203.0.113.7"
+# system_link_trace = false
+# Log the UDP bytes and packets sent to and received from each peer every this many seconds
+# ([nettraffic] lines; 0 = off).
+# net_traffic_log_sec = 0

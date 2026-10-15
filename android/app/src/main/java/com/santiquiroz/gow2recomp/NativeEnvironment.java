@@ -10,6 +10,8 @@ import java.io.File;
 
 final class NativeEnvironment {
     private static final String TAG = "Gow2Activity";
+    // The runtime reads it only when net_local_ip is empty, so a configured address still wins.
+    private static final String LOCAL_IP_VAR = "REX_DETECTED_LOCAL_IP";
 
     private NativeEnvironment() {
     }
@@ -25,6 +27,16 @@ final class NativeEnvironment {
         // SDL reads its hints from the environment. The runtime's window is resizable and names no
         // orientation, which makes SDL allow every orientation and the phone turns the game upright.
         set("SDL_ORIENTATIONS", "LandscapeLeft LandscapeRight");
+        applyLocalIp();
+    }
+
+    private static void applyLocalIp() {
+        String localIp = LocalNetworkAddress.detect();
+        if (localIp != null) {
+            set(LOCAL_IP_VAR, localIp);
+        } else {
+            Log.w(TAG, "no Wi-Fi or hotspot IPv4 address; System Link uses the runtime's default");
+        }
     }
 
     private static void set(String name, File dir) {

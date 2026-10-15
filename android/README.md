@@ -369,8 +369,13 @@ was at hand.
 
 Solo campaign opens a UDP socket for its session layer, so the app asks for `INTERNET` (without it
 the campaign stops at "Error initializing network layer"). Apps may not bind ports below 1024: patch
-0007 binds the guest's port 1000 as 31000 (a `XSocket: guest port ...` log line) and translates the
-socket options and `FIONBIO`/`FIONREAD` the game passes with Winsock numbers.
+0011 adds `net_port_offset` (40000) to every guest port below 1024, on the phone and the PC alike, so
+the game's port 1000 binds as 41000 (with `system_link_trace=true`, a
+`[netlink] bind port 1000 -> 41000 (net_port_offset)` log line), and it maps the socket options and
+`FIONBIO`/`FIONREAD` the game passes with Winsock numbers to the host's. Patch 0007 alone shifted
+those ports by 30000 (31000); 0011 replaces that code, so a phone and a PC meet on 41000. For System
+Link the app also asks for the Wi-Fi permissions, holds Wi-Fi locks and passes its Wi-Fi address as
+`REX_DETECTED_LOCAL_IP`; see [docs/NETWORK_PLAY.md](../docs/NETWORK_PLAY.md).
 
 ### Frame rate log
 

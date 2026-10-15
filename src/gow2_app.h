@@ -4,20 +4,28 @@
 
 #pragma once
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <optional>
+#include <random>
 #include <string>
 
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
+#include <rex/system.h>
 
 #include "gow2_coalesced.h"
+#include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
 #include "gow2_gpu_pick.h"
+#include "gow2_machine_xuid.h"
 #include "gow2_mouse_aim.h"
+#include "gow2_save_dir.h"
 #include "gow2_sha_table.h"
 #include "gow2_utf8_guard.h"
 #include "gow2_xam_input_guard.h"
@@ -202,10 +210,12 @@ class Gow2App : public rex::ReXApp {
 #endif
   }
 
+  static bool IsSetByPlayer(const char* name) {
+    return rex::cvar::GetFlagSource(name) != rex::cvar::Source::kDefault;
+  }
+
   static bool SetIfUnset(const char* name, const std::string& value) {
-    if (rex::cvar::GetFlagSource(name) != rex::cvar::Source::kDefault) {
-      return false;
-    }
+    if (IsSetByPlayer(name)) return false;
     return rex::cvar::SetFlagByName(name, value);
   }
 
@@ -294,6 +304,7 @@ class Gow2App : public rex::ReXApp {
     PrepareCoalesced();
     PickRenderGpu();
     SetUpscaleTarget();
+    rex::glue::EnableSystemLinkForCoop();
     config.gpu_plugin = "xenos";
     // Guest content names are raw bytes; the runtime's UTF-8 decoder throws on a bad lead byte.
     rex::glue::InstallUtf8Guard();
@@ -308,10 +319,13 @@ class Gow2App : public rex::ReXApp {
     paths.game_data_root = ResolveContentRoot(paths.game_data_root);
     paths.update_data_root = paths.game_data_root / "$SystemUpdate";
 #ifdef _WIN32
+    // An explicit --user_data_root (cache then defaults to its cache folder) or --cache_root wins:
+    // one PC can run several instances, each with its own saves, profile and shader cache.
     if (wchar_t local[MAX_PATH]{}; GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH)) {
       const std::filesystem::path base = std::filesystem::path(local) / L"GearsOfWar2PC";
-      paths.cache_root = base / "cache";
-      paths.user_data_root = base / "user";
+      const bool own_user_root = IsSetByPlayer("user_data_root");
+      if (!own_user_root) paths.user_data_root = base / "user";
+      if (!own_user_root && !IsSetByPlayer("cache_root")) paths.cache_root = base / "cache";
       std::error_code ec;
       std::filesystem::create_directories(paths.cache_root, ec);
       std::filesystem::create_directories(paths.user_data_root, ec);
@@ -319,6 +333,79 @@ class Gow2App : public rex::ReXApp {
 #endif
     game_data_root_ = paths.game_data_root;
     cache_root_ = paths.cache_root;
+  }
+
+  static void ReportSaveDir(const rex::glue::SaveDirChoice& saves) {
+    if (saves.summary.empty()) return;
+    if (saves.is_warning) {
+      REXLOG_WARN("{}", saves.summary);
+      rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Warning, saves.summary);
+      return;
+    }
+    REXLOG_INFO("{}", saves.summary);
+  }
+
+  // The command line outranks gow2.toml: a test instance's --user_data_root keeps its own saves
+  // even when gow2.toml points gow2_save_dir at the player's cloud folder.
+  static bool UserDataRootOutranksSaveDir() {
+    return rex::cvar::GetFlagSource("user_data_root") > rex::cvar::GetFlagSource("gow2_save_dir");
+  }
+
+  static void ReportSaveDirOutranked(const std::filesystem::path& user_data_root) {
+    if (rex::glue::SaveDirSetting().empty()) return;
+    const std::u8string root = user_data_root.u8string();
+    REXLOG_INFO("gow2_save_dir ignored: --user_data_root keeps saves, profile settings and "
+                "achievements in {}",
+                std::string(root.begin(), root.end()));
+  }
+
+  // gow2.toml is loaded by now (OnConfigurePaths runs before it), and the runtime is not built yet.
+  std::optional<rex::PathConfig> OnFinalizePaths(const rex::PathConfig& defaults,
+                                                 std::function<void(rex::PathConfig)> resume) override {
+    (void)resume;
+    rex::PathConfig paths = defaults;
+    if (UserDataRootOutranksSaveDir()) {
+      ReportSaveDirOutranked(paths.user_data_root);
+      return paths;
+    }
+    const rex::glue::SaveDirChoice saves = rex::glue::ChooseUserDataRoot(
+        rex::glue::SaveDirSetting(), paths.user_data_root, paths.cache_root,
+        paths.config_path.parent_path());
+    ReportSaveDir(saves);
+    PinMachineXuid(paths.user_data_root, saves.user_data_root != paths.user_data_root);
+    paths.user_data_root = saves.user_data_root;
+    return paths;
+  }
+
+  static uint64_t RandomXuidBits() {
+    std::random_device device;
+    return (uint64_t{device()} << 32) | device();
+  }
+
+  static std::string PathUtf8(const std::filesystem::path& path) {
+    const std::u8string text = path.u8string();
+    return std::string(text.begin(), text.end());
+  }
+
+  // Patch 0010 keeps the System Link XUID in the user data folder, which gow2_save_dir may point at
+  // a folder several PCs sync: the XUID stays in this PC's default folder and reaches 0010 as
+  // user_xuid, so two PCs never join one session under the same XUID.
+  static void PinMachineXuid(const std::filesystem::path& machine_root, bool user_root_moved) {
+    const bool link_active = rex::cvar::GetFlagByName("net_link_active") == "true";
+    const bool xuid_set = !rex::cvar::GetFlagByName("user_xuid").empty();
+    if (!rex::glue::ShouldPinMachineXuid(user_root_moved, link_active, xuid_set)) return;
+    const rex::glue::MachineXuid machine =
+        rex::glue::LoadOrCreateMachineXuid(machine_root, RandomXuidBits);
+    const std::string file = PathUtf8(machine_root / rex::glue::kMachineXuidFileName);
+    if (!rex::cvar::SetFlagByName("user_xuid", machine.xuid)) {
+      REXLOG_WARN("Could not set user_xuid to this PC's System Link XUID {} ({})", machine.xuid, file);
+      return;
+    }
+    REXLOG_INFO("System Link XUID {} {} {}: it stays on this PC, gow2_save_dir moves only the saves",
+                machine.xuid, machine.created ? "made and kept in" : "read from", file);
+    if (!machine.saved) {
+      REXLOG_WARN("Could not write {}: the System Link XUID {} lasts this run only", file, machine.xuid);
+    }
   }
 
   // Override virtual hooks for customization:

@@ -367,8 +367,8 @@
               <li>Mouse look that feels like a PC game (fix ships in 0.1.1)</li>
               <li>The full campaign: only Act 1 has been played</li>
               <li>FSR 4, FSR 3.1 and DLSS: built in, not active for this game yet</li>
-              <li>System Link (LAN Horde and Versus): socket layer fixed, sessions not done</li>
-              <li>Linux and Android builds</li>
+              <li>System Link in a release: campaign co-op works in the repository (PC and Android phones, four players verified on one PC); Horde, Versus and internet play untested</li>
+              <li>A Linux build, and Android at a playable frame rate</li>
             </ul>
           </div>
           <div class="panel plate issues">
@@ -489,13 +489,13 @@
           <details>
             <summary>Is there multiplayer, Horde or co-op?</summary>
             <div class="faq__answer">
-              <p>Not yet. System Link (LAN play for Horde and Versus) is being implemented: the game's network calls are traced and its socket options now reach Windows correctly, but sessions are not implemented. Split-screen co-op is part of the full-campaign goal.</p>
+              <p>Campaign co-op over System Link works in the repository, not in a release yet. PCs and Android phones on one network joined each other's campaign (verified 2026-10-15), and four copies on one PC played Act 1 chapter 2 together. Turn it on with <code>net_link_active = true</code> on every player; guides: <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/NETWORK_PLAY.md">network play</a>, <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/COOP_N_PLAYERS.md">more than two players</a> and <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">playing over the internet</a> (built, not tested yet). Horde and Versus have not been tried. Split-screen co-op is part of the full-campaign goal.</p>
             </div>
           </details>
           <details>
             <summary>Is there an Android or Linux version?</summary>
             <div class="faq__answer">
-              <p>Not a playable one. On Android, the app shell runs on a Samsung Galaxy S25 Ultra with a placeholder library, and an APK with the game's libraries builds, but it has not run on a phone yet. The plan is in <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
+              <p>Not a playable one yet. On a Samsung Galaxy S25 Ultra the APK built from the repository plays the start of Act 1 with touch controls and joins a PC's System Link campaign, but only at about 3 to 5 frames per second. The plan and status are in <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
               <p>A Linux x64 build with Vulkan is planned as the first non-Windows target.</p>
             </div>
           </details>

@@ -34,7 +34,9 @@ Read in English: [README.md](README.md)
 - [ ] Mirada con mouse que se sienta como un juego de PC (arreglo en progreso, ver Problemas conocidos)
 - [ ] Reescalado temporal FSR 4 / DLSS (incluido, todavía no se activa en este juego)
 - [ ] Campaña completa de principio a fin
-- [ ] System Link (capa de sockets corregida y trazada; faltan las sesiones)
+- [x] Campaña cooperativa por System Link: cuatro jugadores en un mismo PC (loopback) y PC con un teléfono Android en la misma LAN, verificado el 2026-10-14 y el 2026-10-15
+- [ ] Juego por internet (implementado: `net_peers`, `net_public_address`, `net_allow_peers`; sin probar)
+- [ ] Horda y Versus por System Link
 
 Ver el plan completo en [ROADMAP.md](ROADMAP.md).
 
@@ -96,6 +98,7 @@ Un mando funciona al mismo tiempo. Todas las asignaciones están en `gow2.toml`.
 - `gow2_ao_upscaling_fix` — oclusión ambiental sin artefactos al escalar.
 - `gow2_dof_upscaling_fix` — profundidad de campo sin artefactos al escalar.
 - `mnk_sensitivity` — sensibilidad del mouse.
+- `gow2_save_dir` — carpeta de partidas guardadas, ajustes del perfil y logros; apúntala a una carpeta de OneDrive, Google Drive o Dropbox para tener la campaña en la nube ([docs/SAVES.md](docs/SAVES.md)).
 
 Los parches comunitarios vienen de [xenia-canary/game-patches](https://github.com/xenia-canary/game-patches) (autores illusion y boma); los sitios y valores parcheados para este XEX se aplican al código generado, cada uno detrás de su ajuste `gow2_*`.
 
@@ -107,7 +110,8 @@ Medido en un Ryzen 9 7900X3D + Radeon RX 7800 XT, Acto 1, `resolution_scale = 2`
 
 - Resolución nativa mediante `resolution_scale` (ver Ajustes).
 - FSR: el runtime de la versión viene compilado con AMD FidelityFX. `present_effect = "fsr"` renderiza con un `resolution_scale` menor y reescala con FSR 1 más nitidez; `"cas"` solo aplica nitidez. Medido con `resolution_scale = 1` y FSR 1 a 1440p: unos 85 fps en el Acto 1.
-- Reescalado temporal: FSR 4.1 (Radeon RX 7000/9000, con las DLL firmadas del FidelityFX SDK 2.3 de AMD), FSR 3.1 en otras GPU y DLSS en NVIDIA (con tu propio `nvngx_dlss.dll`, ver THIRD_PARTY_NOTICES.md) vienen incluidos, portados de la recompilación de Gears of War: Judgment. Todavía no se activa en este juego: su detección de la escena espera la estructura de frame de Judgment y se está calibrando. Desactivado por defecto (`gow2_temporal`, `gow2_upscaler`).
+- Reescalado temporal: FSR 4.1 en Radeon RX 7000/9000 y FSR 3.1 en otras GPU, con las DLL firmadas del FidelityFX SDK 2.3 de AMD, portados de la recompilación de Gears of War: Judgment. Apagado por defecto: pon `gow2_temporal = true` y `gow2_upscaler = "fsr4"` o `"fsr3"`, y baja `resolution_scale` para que el reescalador tenga margen. FSR 4 se comprobó en el juego con una Radeon RX 7800 XT (de 1280x704 a 2560x1408).
+- La versión publicada no trae DLSS: la licencia del SDK de DLSS de NVIDIA no lo permite en una versión de código abierto (ver THIRD_PARTY_NOTICES.md). Solo las compilaciones hechas desde el código fuente con tu propia copia del SDK de DLSS de NVIDIA pueden usarlo.
 - Paquetes de texturas: ver la siguiente sección. Probado con una textura reemplazada por una versión del doble de tamaño:
 
   ![Una textura de la pantalla de título reemplazada por una versión recoloreada de 2048x2048](docs/screenshots/texture-pack-test.jpg)
@@ -126,7 +130,13 @@ Un reemplazo se aplica cuando tiene al menos tantos niveles de mipmap como la te
 
 ## System Link
 
-El juego en red local (LAN) para Horda y Versus se está implementando en el runtime. Listo hasta ahora: `system_link_trace = true` registra cada llamada de red y de sesión del juego (líneas `[netlink]`), las llamadas no implementadas devuelven errores correctos y las opciones de socket llegan a Windows con el orden de bytes correcto (el búfer de recepción de 128 KiB del juego quedaba en 512 bytes; reportado al SDK como rexglue-sdk#512). Siguiente paso: direcciones XNet reales y el servicio de sesiones, para que dos PC (o dos instancias en un mismo PC) se encuentren. Ver [ROADMAP.md](ROADMAP.md).
+La campaña cooperativa por System Link funciona entre PC, teléfonos Android y varias copias en un mismo PC. Viene apagada: pon `net_link_active = true` en `gow2.toml` (o pasa `--net_link_active=true`) en la copia de cada jugador y usa la misma compilación en todas; `gow2_coop_players` 3 o más la enciende sola. El puerto UDP 1000 del juego pasa a ser 41000 en todas las plataformas (`net_port_offset`, porque Android no puede usar puertos por debajo de 1024) y la baliza de System Link usa UDP 14001, así que un PC anfitrión necesita una regla del Firewall de Windows para esos dos puertos. `system_link_trace = true` registra cada llamada de red y de sesión del juego (líneas `[netlink]`).
+
+- [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): un PC y un teléfono en la misma red, los ajustes, varias copias en un mismo PC y solución de problemas.
+- [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): cooperativo con más de dos jugadores (`gow2_coop_players`; cuatro verificados en un mismo PC) y lo que aún falta, como el cambio de capítulo con jugadores extra.
+- [docs/ONLINE.md](docs/ONLINE.md): jugar por internet con reenvío de puertos o una VPN (Tailscale, ZeroTier). Implementado, sin probar.
+
+Horda y Versus por System Link no se han probado. Ver [ROADMAP.md](ROADMAP.md).
 
 ## Problemas conocidos
 

@@ -34,7 +34,9 @@ Leer en español: [README.es.md](README.es.md)
 - [ ] Mouse look that feels like a PC game (fix in progress, see Known issues)
 - [ ] FSR 4 / DLSS temporal upscaling (built in, not active for this game yet)
 - [ ] Full campaign play-through
-- [ ] System Link (socket layer fixed and traced; sessions not implemented yet)
+- [x] System Link campaign co-op: four players on one PC (loopback) and PC with an Android phone on one LAN, verified 2026-10-14 and 2026-10-15
+- [ ] Internet play (built: `net_peers`, `net_public_address`, `net_allow_peers`; not tested yet)
+- [ ] System Link Horde and Versus
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 
@@ -96,6 +98,7 @@ A controller works at the same time. All bindings are in `gow2.toml`.
 - `gow2_ao_upscaling_fix` — ambient occlusion without artifacts when scaled.
 - `gow2_dof_upscaling_fix` — depth of field without artifacts when scaled.
 - `mnk_sensitivity` — mouse sensitivity.
+- `gow2_save_dir` — folder for saves, profile settings and achievements; point it at a OneDrive, Google Drive or Dropbox folder to keep the campaign in the cloud ([docs/SAVES.md](docs/SAVES.md)).
 
 The community patches come from [xenia-canary/game-patches](https://github.com/xenia-canary/game-patches) (authors illusion and boma); the patched sites and values for this XEX are applied to the generated code, each behind its `gow2_*` setting.
 
@@ -107,7 +110,8 @@ Measured on a Ryzen 9 7900X3D + Radeon RX 7800 XT, Act 1, `resolution_scale = 2`
 
 - Native resolution via `resolution_scale` (see Settings).
 - FSR: the release runtime is built with AMD FidelityFX. `present_effect = "fsr"` renders at a lower `resolution_scale` and upscales with FSR 1 plus sharpening; `"cas"` only sharpens. Measured with `resolution_scale = 1` and FSR 1 to 1440p: about 85 fps in Act 1.
-- Temporal upscaling: FSR 4.1 (Radeon RX 7000/9000, through AMD's signed FidelityFX SDK 2.3 DLLs), FSR 3.1 on other GPUs and DLSS on NVIDIA (bring your own `nvngx_dlss.dll`, see THIRD_PARTY_NOTICES.md) are built in, ported from the Gears of War: Judgment recompilation. It does not switch on for this game yet: its scene detection still expects Judgment's frame layout and is being calibrated. Off by default (`gow2_temporal`, `gow2_upscaler`).
+- Temporal upscaling: FSR 4.1 on Radeon RX 7000/9000 and FSR 3.1 on other GPUs, through AMD's signed FidelityFX SDK 2.3 DLLs, ported from the Gears of War: Judgment recompilation. Off by default: set `gow2_temporal = true` and `gow2_upscaler = "fsr4"` or `"fsr3"`, and lower `resolution_scale` so the upscaler has room to work. FSR 4 was checked in game on a Radeon RX 7800 XT (1280x704 upscaled to 2560x1408).
+- No DLSS in the release: NVIDIA's DLSS SDK license does not allow it in an open-source release (see THIRD_PARTY_NOTICES.md). Only builds made from source with your own copy of NVIDIA's DLSS SDK can use it.
 - Texture packs: see the next section. Tested with a texture replaced by a version twice its size:
 
   ![A title-screen texture replaced by a recoloured 2048x2048 version](docs/screenshots/texture-pack-test.jpg)
@@ -126,7 +130,13 @@ A replacement is picked up when it has at least as many mip levels as the game t
 
 ## System Link
 
-LAN play for Horde and Versus is being implemented in the runtime. Done so far: `system_link_trace = true` logs every network and session call the game makes (`[netlink]` lines), unimplemented calls return proper errors, and socket options reach Windows in the right byte order (the game's 128 KiB receive buffer used to become 512 bytes; reported upstream as rexglue-sdk#512). Next: real XNet addresses and the session service, so two PCs (or two instances on one PC) find each other. See [ROADMAP.md](ROADMAP.md).
+Campaign co-op over System Link works between PCs, Android phones and several copies on one PC. It is off by default: set `net_link_active = true` in `gow2.toml` (or pass `--net_link_active=true`) on every player's copy, and use the same build everywhere; `gow2_coop_players` 3 or more turns it on by itself. The game's UDP port 1000 becomes 41000 on every platform (`net_port_offset`, because Android cannot bind ports below 1024) and the System Link beacon uses UDP 14001, so a PC that hosts needs a Windows Firewall rule for those two ports. `system_link_trace = true` logs every network and session call the game makes (`[netlink]` lines).
+
+- [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): a PC and a phone on one network, the settings, several copies on one PC, troubleshooting.
+- [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): co-op with more than two players (`gow2_coop_players`; four verified on one PC) and what is still missing, such as chapter travel with extra players.
+- [docs/ONLINE.md](docs/ONLINE.md): playing over the internet with port forwarding or a VPN (Tailscale, ZeroTier). Built, not tested yet.
+
+Horde and Versus over System Link have not been tried. See [ROADMAP.md](ROADMAP.md).
 
 ## Known issues
 

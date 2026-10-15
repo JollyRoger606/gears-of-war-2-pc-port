@@ -10,8 +10,13 @@
   The zip never contains game data. Packaging is refused (exit 1) if a file
   named default.xex or any *.xxx / *.tfc / *.bik file would end up in staging.
 
+  The zip never contains NVIDIA DLSS either: packaging is refused (exit 1) if a
+  staged .dll or .exe holds the name nvsdk_ngx / NVSDK_NGX (the NGX library) or
+  nvngx (the DLSS runtime) in any case. Build the release DLLs with
+  scripts\build-sdk.ps1 -NoDlss.
+
 .PARAMETER Version
-  Release version string, e.g. "0.1.0". Used in the zip and top folder name.
+  Release version string, e.g. "0.1.1". Used in the zip and top folder name.
 
 .PARAMETER BuildDir
   Folder with the already-built binaries. Default: out\build\release.
@@ -19,7 +24,9 @@
 .PARAMETER SdkDir
   Optional folder with source-built rexruntime.dll / rexgpu-xenos.dll and AMD
   FidelityFX DLLs. When it exists, files found there replace the BuildDir ones
-  and every amd_fidelityfx_*.dll found there is added. Default: out\sdk.
+  and every amd_fidelityfx_*.dll found there is added. Default: out\sdk-nodlss
+  (scripts\build-sdk.ps1 -NoDlss). out\sdk, the everyday build, links DLSS and
+  is refused.
 
 .PARAMETER OutDir
   Output folder for the zip and staging area. Default: out\package.
@@ -28,7 +35,8 @@
   Settings file shipped as gow2.toml. Default: config\gow2.toml.
 
 .EXAMPLE
-  .\scripts\package.ps1 -Version "0.1.0"
+  .\scripts\build-sdk.ps1 -NoDlss
+  .\scripts\package.ps1 -Version "0.1.1"
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -36,7 +44,7 @@ param(
 
     [string]$BuildDir = 'out\build\release',
 
-    [string]$SdkDir = 'out\sdk',
+    [string]$SdkDir = 'out\sdk-nodlss',
 
     [string]$OutDir = 'out\package',
 
@@ -44,6 +52,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Find-NgxBinaries: NVIDIA NGX names left in a built binary.
+. (Join-Path $PSScriptRoot 'ngx-scan.ps1')
 
 function Fail([string]$Message) {
     Write-Host "ERROR: $Message" -ForegroundColor Red
@@ -233,6 +244,16 @@ function Assert-NoGameFiles([string]$StageDir) {
     }
 }
 
+function Assert-NoNgx([string]$StageDir) {
+    $withNgx = @(Find-NgxBinaries $StageDir)
+    if (-not $withNgx.Count) {
+        Write-Host 'No NVIDIA NGX names in the staged .dll and .exe files.'
+        return
+    }
+    foreach ($b in $withNgx) { Write-Host "NVIDIA NGX in staging: $($b.Path) ($($b.Markers))" -ForegroundColor Red }
+    Fail 'Refusing to package: NVIDIA DLSS (NGX) must not ship in the release. Build the DLLs with scripts\build-sdk.ps1 -NoDlss and package with -SdkDir out\sdk-nodlss (the default).'
+}
+
 function New-ReleaseZip([string]$StageDir, [string]$ZipPath) {
     if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
     Compress-Archive -Path $StageDir -DestinationPath $ZipPath -Force
@@ -277,6 +298,9 @@ Write-QuickstartFile $stageDir
 
 Step 'Game-data safety check'
 Assert-NoGameFiles $stageDir
+
+Step 'NVIDIA DLSS check'
+Assert-NoNgx $stageDir
 
 Step 'Compressing release zip'
 New-ReleaseZip $stageDir $zipPath
