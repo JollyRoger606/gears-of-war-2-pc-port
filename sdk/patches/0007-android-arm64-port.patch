@@ -2075,10 +2075,10 @@ index 4fcfd7b..7565c36 100644
  
  std::string to_utf8(const std::u16string_view source) {
 diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
-index a744375..ab2e134 100644
+index a744375..9d6d647 100644
 --- a/src/graphics/command_processor.cpp
 +++ b/src/graphics/command_processor.cpp
-@@ -31,16 +31,27 @@
+@@ -31,16 +31,39 @@
  #include <rex/math.h>
  #include <rex/memory.h>
  #include <rex/memory/ring_buffer.h>
@@ -2087,9 +2087,21 @@ index a744375..ab2e134 100644
  #include <rex/system/kernel_state.h>
  #include <rex/system/user_module.h>
  
++#if REX_PLATFORM_ANDROID
++#include <chrono>
++#include <thread>
++#endif
++
  REXCVAR_DEFINE_BOOL(vsync, true, "GPU", "Enable vertical sync");
  
 +#if REX_PLATFORM_ANDROID
++REXCVAR_DEFINE_INT32(gpu_worker_spin_us, 50, "GPU",
++                     "Microseconds the GPU command thread polls for new commands, pausing with an "
++                     "ISB between polls, before it sleeps on the write pointer event; -1 keeps the "
++                     "500 yields")
++    .range(-1, 10000)
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
 +// Re-uploading every CPU-written page at each frame end costs a Vulkan render pass per upload on a
 +// tiling GPU (Gears of War 2: ~1,850 uploads and ~1,600 passes a frame, half the frame rate on the
 +// Adreno 830); the memory watches still catch the CPU's writes.
@@ -2106,6 +2118,56 @@ index a744375..ab2e134 100644
  
  REXCVAR_DEFINE_BOOL(occlusion_query_enable, true, "GPU", "Enable host occlusion query handling")
      .lifecycle(rex::cvar::Lifecycle::kHotReload);
+@@ -86,6 +109,16 @@ using namespace rex::graphics::xenos;
+ 
+ namespace {
+ 
++#if REX_PLATFORM_ANDROID
++static void PauseGpuWorkerPoll() {
++#if defined(__aarch64__)
++  __asm__ __volatile__("isb" ::: "memory");
++#else
++  std::this_thread::yield();
++#endif
++}
++#endif
++
+ ReadbackResolveMode ParseReadbackResolveMode(std::string_view value) {
+   if (value == "fast") {
+     return ReadbackResolveMode::kFast;
+@@ -217,6 +250,22 @@ void CommandProcessor::WorkerThreadMain() {
+       // We spin here waiting for new ones, as the overhead of waiting on our
+       // event is too high.
+       PrepareForWait();
++#if REX_PLATFORM_ANDROID
++      const int32_t spin_us = REXCVAR_GET(gpu_worker_spin_us);
++      if (spin_us >= 0) {
++        const auto spin_deadline =
++            std::chrono::steady_clock::now() + std::chrono::microseconds(spin_us);
++        do {
++          if (std::chrono::steady_clock::now() < spin_deadline) {
++            PauseGpuWorkerPoll();
++          } else {
++            rex::thread::Wait(write_ptr_index_event_.get(), true, std::chrono::milliseconds(5));
++          }
++          write_ptr_index = write_ptr_index_.load();
++        } while (worker_running_ && pending_fns_.empty() &&
++                 (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
++      } else {
++#endif
+       uint32_t loop_count = 0;
+       do {
+         // If we spin around too much, revert to a "low-power" state.
+@@ -231,6 +280,9 @@ void CommandProcessor::WorkerThreadMain() {
+         write_ptr_index = write_ptr_index_.load();
+       } while (worker_running_ && pending_fns_.empty() &&
+                (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
++#if REX_PLATFORM_ANDROID
++      }
++#endif
+       ReturnFromWait();
+       if (!worker_running_ || !pending_fns_.empty()) {
+         continue;
 diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
 index 1774f97..85b169c 100644
 --- a/src/graphics/pipeline/shader/spirv_translator.cpp

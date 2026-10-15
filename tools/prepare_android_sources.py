@@ -5,8 +5,9 @@ barriers (patch_memory_barriers.py), and those must never reach the Windows tree
 build compiles a copy:
 
   1. copies <source> into <dest>.staging,
-  2. runs patch_switch_traps.py, patch_game_patches.py and patch_memory_barriers.py on that copy
-     (all three are idempotent, so a source the Windows build already patched is fine),
+  2. runs patch_switch_traps.py, patch_game_patches.py, patch_memory_barriers.py and
+     patch_spin_hints.py on that copy (all are idempotent, so a source the Windows build
+     already patched is fine),
   3. moves into <dest> only the files whose bytes changed, so ninja recompiles only those, and
      deletes files that are no longer in <source>.
 
@@ -24,7 +25,12 @@ from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parent
-PATCHERS = ("patch_switch_traps.py", "patch_game_patches.py", "patch_memory_barriers.py")
+PATCHERS = (
+    "patch_switch_traps.py",
+    "patch_game_patches.py",
+    "patch_memory_barriers.py",
+    "patch_spin_hints.py",
+)
 SKIPPED_SUFFIXES = (".tmp",)
 
 
