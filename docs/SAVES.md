@@ -97,6 +97,16 @@ after `gow2.toml` is loaded and before the runtime is built):
 
 The setting takes effect on the next start.
 
+Every build of the game copies `config/gow2.toml` over the `gow2.toml` next to `gow2.exe` (a CMake
+post-build step), so a `gow2_save_dir` line written there disappears at the next build and the saves
+quietly go back to the default folder. If you build the game yourself, put the line in
+`config/gow2.toml` too, or start the game with `--gow2_save_dir=<folder>` from a shortcut.
+
+Test runs must not share this folder. `scripts/run-instances.ps1` (System Link tests with several
+copies on one PC, `docs/NETWORK_PLAY.md`) passes `--gow2_save_dir=<run>\<name>\saves` to every copy;
+the command line outranks `gow2.toml`, so the copies never write your real, cloud-synced save at the
+same time.
+
 ## Keeping saves safe and synced
 
 ### 1. A cloud folder (the one-line setup)
