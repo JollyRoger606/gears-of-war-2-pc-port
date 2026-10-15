@@ -79,8 +79,9 @@ copies them from the repository at build time for every variant, so there is one
 git; it stops the build when one of them is missing. `tools/check_android_libs.py` fails an APK
 without `assets/licenses/LICENSE` and `assets/licenses/THIRD_PARTY_NOTICES.md`.
 `THIRD_PARTY_NOTICES.md` has an "Android APK" section with what each of the five libraries
-contains, every component's license, and how to get the FFmpeg and libmspack sources (LGPL 2.1,
-linked statically into `librexruntime.so`) and rebuild and relink them.
+contains (and a "Windows release zip" section for the PC package), every component's license, and
+how to get the FFmpeg and libmspack sources (LGPL 2.1, linked statically into `librexruntime.so`
+and the Windows `rexruntime.dll`) and rebuild and relink them.
 
 ## Install and run
 
@@ -116,6 +117,13 @@ intro movie and the opening cutscene of "Tip of the Spear", and in gameplay the 
 Marcus, a drag on the right side turns the camera, LB opens Tac/Com and RT fires the Lancer (the
 ammo count drops). Checkpoints saved there load again from the save slot screen.
 
+With `gow2_touch_log` the game thread read the pad 135 to 660 ms apart in that area, while another
+thread read it every 16 ms. Five quick taps of the D-pad, one of R3 and one of X each reached the
+game thread; a steady 4 s drag across the look area gave the game thread 13 reads of 15226 to 21346
+(about 21100 while the finger moved at a constant speed, none of them 0); a drag that started on
+RT kept firing and turned the camera on every read. The gear opens the settings overlay, a quick
+tap selects in it, and "Save to config" wrote `gow2.toml` beside the logs.
+
 Frame rate in that first gameplay area: 2.6 to 5.2 game frames per second (`gow2_frame_log`), with
 the GPU held at 160 to 222 MHz of its 1.2 GHz by the phone's thermal limit (thermal status 2 to 3,
 skin 42 to 45 C, after hours of testing while charging; `thermal_pwrlevel` 13 to 14 in
@@ -147,10 +155,15 @@ The steps, each skipped when its output is current:
    `0007-android-arm64-port.patch`), with the same clone, marker and symlink repair as
    `scripts\build-sdk.ps1` (shared in `scripts\sdk-source.ps1`). `out\sdk-android-patched.txt`
    records the commit and the patch hashes; when a patch changes (or that file is deleted), the
-   tree is reset and patched again. `-Clean` leaves the clone alone.
-1. `rexglue codegen` when `generated\default` is missing, when `gow2_manifest.toml` or
-   `game\default.xex` is newer than `generated\default\sources.cmake` (only with `-Sdk` and the
-   xex; without them the script warns and builds the existing code), or with `-Codegen`.
+   tree is reset and patched again. `-Clean` leaves the clone alone. The tree is then compared with
+   `923c1a5` plus the series (see [Building your own SDK tree](#building-your-own-sdk-tree)).
+1. `rexglue codegen` on every build when `-Sdk` and `game\default.xex` are available (it skips the
+   work when `generated\default` is current), and whenever `generated\default` is missing or with
+   `-Codegen`. Without them, `generated\default\codegen.d` (the inputs codegen read: the xex, the
+   manifest and `hints\*.toml`) decides: inputs that were read in another worktree must equal this
+   tree's files (line endings aside), otherwise the build stops, and inputs newer than
+   `codegen.build.stamp` print a warning and the existing code is built. A `generated\` folder
+   shared between worktrees of different branches would mix their code; give each its own.
 2. `tools/prepare_android_sources.py` copies `generated\default` to `out\android\generated\default`
    and applies the switch-trap, game and ARM memory-barrier patches to the copy; files whose
    bytes did not change keep their timestamps, so ninja recompiles only the changed ones. The
@@ -164,8 +177,14 @@ The steps, each skipped when its output is current:
    for the clean clone) and warns when it names a commit other than that tree's `HEAD`.
 4. Builds `libSDL3.so`, `librexruntime.so` and `librexgpu-xenos.so`, then `libgow2.so`, and stages
    them with the NDK's `libc++_shared.so` in `out\android\jniLibs\arm64-v8a`.
-5. `tools/check_android_libs.py` checks the staged libraries, then Gradle builds
-   `assembleDebug -Pgow2.gameLibraries=true` and the APK is checked again.
+5. `tools/check_android_libs.py` checks the staged libraries, then the old APK is deleted (Gradle
+   packs a debug APK incrementally into the existing file, which kept every rebuild's dead space),
+   Gradle builds `assembleDebug -Pgow2.gameLibraries=true` and the APK is checked again.
+
+Every source is compiled with `-ffile-prefix-map` for the repository (`gow2-recomp/...`), the SDK
+tree (`rexglue-sdk/...`) and the NDK (`android-ndk/...`), so `__FILE__` strings and debug info hold
+no absolute paths: the libraries do not depend on where the checkout lives and carry none of the
+builder's folders.
 
 Logs are in `out\android\logs`. A first build took 10 minutes on a busy 24-thread PC, plus the SDK
 clone; a rebuild after a source change takes about a minute.
@@ -174,18 +193,19 @@ clone; a rebuild after a source change takes about a minute.
 
 `-SdkSource <folder>` (or `REXGLUE_SDK_ANDROID`) builds that rexglue-sdk tree instead of
 `out\sdk-android-src`, for example the worktree you change the Android port in: ReXGlue `923c1a5`
-with all of `sdk\patches` applied. Before anything else the script checks the tree for files and
-texts only the current patches add and stops with the list of what is missing:
-`include\rex\main_android.h` and `thirdparty\ffmpeg-android\config.h` (0007; an older Android tree
-changed FFmpeg's config inside the FFmpeg submodule instead), `GOW2_VFS_OVERRIDES` and
-`src\input\stick_deadzone.h` (0005), and `mnk_mouse_stick` (0006). How to turn your changes back
-into `0007-android-arm64-port.patch` is in [`sdk/patches/README.md`](../sdk/patches/README.md).
+with all of `sdk\patches` applied. Before anything else the script compares the tree's files with
+`923c1a5` plus every patch, through temporary git indexes, so the tree's own index and commits
+stay as they are (about 2 s). An identical tree passes. A tree with changes beyond the series
+passes with the list of the extra paths. A tree that lacks part of the series, or changes lines it
+adds, stops the build with the list of paths that differ; when your tree is the newer one,
+regenerate `0007-android-arm64-port.patch` from it first, as
+[`sdk/patches/README.md`](../sdk/patches/README.md) describes.
 
 `libgow2.so` holds the recompiled code, the port's code from `src/` and the SDK's SDL entry point
 (`windowed_app_main_sdl.cpp`, which exports `SDL_main` on Android). The version script
 `gamelibs/libgow2.map` keeps the recompiled code's ~98,000 symbols local, so the library exports
 only `SDL_main` (which `SDLActivity` finds with `dlsym`). That shrank `libgow2.so` in the APK from
-62.2 MB to 52.0 MB (APK 79.2 MB to 71.6 MB) and its load time from 10-15 ms to 2-7 ms. Every file
+62.2 MB to 52.0 MB and its load time from 10-15 ms to 2-7 ms; the whole APK, packed from scratch, is 67.6 MB. Every file
 in `src/` is built except the Windows-only ones listed in `gamelibs/CMakeLists.txt`
 (`gow2_xam_input_guard.cpp`, `gow2_utf8_guard.cpp`, `gow2_crash_watch.cpp`);
 `gamelibs/gow2_android_glue.cpp` stands in for them: it suppresses the disc-error box itself, logs
@@ -218,7 +238,9 @@ how Android's linker resolves app libraries); a library other than `libSDL3.so` 
 `Java_org_libsdl_app_*` symbols; or `libgow2.so` does not export `SDL_main`; or `libgow2.so` exports
 anything besides `SDL_main` (`--main-exports` lists the allowed names); or an APK lacks
 `assets/licenses/LICENSE` or `assets/licenses/THIRD_PARTY_NOTICES.md` (`--no-notices` skips that
-check).
+check); or a library contains an absolute build path: the repository root, the NDK folder or a
+`--forbid-path` (the build script passes the SDK tree), with either slash and in any case
+(`--allow-build-paths` skips that check).
 
 ### Self-test on the phone
 
@@ -237,8 +259,11 @@ same driver called without `InputSystem` does see overlapping threads (so the ch
 race). The guest `XamInputGetState`, `XamInputGetCapabilities(Ex)`, `XamInputSetState` and
 `XamInputGetKeystroke(Ex)` call exactly those four methods. On the S25 Ultra it prints
 `runtime_selftest: 18 checks, 0 failed`. The script then runs `gow2_touch_model_test`
-(`gamelibs/tests/touch_model_test.cpp`, pure C++): the touch layout, finger ownership, stick, look
-window, tap latch and aim toggle (`touch_model_test: 50 checks, 0 failed`).
+(`gamelibs/tests/touch_model_test.cpp`, pure C++): the touch layout, finger ownership, the stick,
+taps held until each reader has seen them (also while a second reader polls every 16 ms), look
+speed between reads 300 and 900 ms apart, the look curve's direction and smoothness, RT and LT
+drags that turn the camera, R3, the settings control and the aim toggle
+(`touch_model_test: 105 checks, 0 failed`).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\test-android-device.ps1 -LowPriority
@@ -272,19 +297,40 @@ same time.
 | Where (landscape) | Control |
 |---|---|
 | Left 40% of the screen, below the top 15% | Floating left stick: it is centred where the finger lands, full tilt at 10% of the screen height |
-| Rest of the right side | Look: the right stick follows the finger's travel over the last 200 ms, full tilt at one screen height per second (`gow2_touch_look_gain` scales it), with a square root and a 0.3 minimum so slow drags get past the game's look dead zone. The game's own aim assist stays on |
-| Right side, large | RT (fire); LT (aim, held, or toggled with `gow2_touch_aim_toggle`) |
+| Rest of the right side | Look: the right stick follows the finger's speed between two reads of the pad (its travel since the game's previous read over the time since then), full tilt at one screen height per second (`gow2_touch_look_gain` scales it). The deflection keeps the drag's direction and gets a square root and a minimum of about 0.4 so slow drags get past the game's look dead zone; within 8 degrees of an axis it snaps to the axis, blending back to the drag's angle by 16 degrees. The game's own aim assist stays on |
+| Right side, large | RT (fire); LT (aim, held, or toggled with `gow2_touch_aim_toggle`). A finger on RT or LT that slides also turns the camera |
 | Bottom right | A (cover, run), B (melee), X (reload, use) |
 | Right side | Y, RB (active reload) |
+| Left of RT | R3 (right-stick click: zoom while aiming, for example the Longshot's scope) |
 | Top left | LB (Tac/Com) |
 | Left, above the stick | D-pad (weapons, menus) |
 | Top centre | Back, Start |
+| Top right corner (gear) | Opens and closes the runtime's settings overlay (`bind_settings`, F4 on a keyboard) |
 
-Each finger owns the control it touched first until it lifts; a tap shorter than a game frame stays
-pressed for 100 ms; losing focus releases everything. The controls are a translucent ImGui overlay
-(`gow2_touch_opacity`, `gow2_touch_scale`) drawn with each game frame, not at the display's refresh
-rate (patch 0007's `ImGuiDialog::WantsContinuousPaint`). A controller button, a key or a mouse hides
-them for `gow2_touch_hide_seconds` (10); the next touch shows them again.
+Each finger owns the control it touched first until it lifts. A tap stays pressed until the game has
+read it, and for at least 100 ms. Every thread that reads the pad (`XamInputGetState`) and the
+key-event reader (`XamInputGetKeystroke`) count as separate readers, because in gameplay the game
+thread reads once per slow frame while another thread reads every 16 ms; each reader sees every tap
+and the look travel since its own previous read. A second tap of the same control between two
+reads gets a release in between, and a tap no read sees within 2 s is dropped. Losing focus
+releases everything. Fingers reach the controls through an SDL event watch as the activity hands
+them over, with SDL's event times, instead of after the UI thread's next present, which can take a
+whole slow game frame. There is no L3 control. `gow2_touch_log=true` logs every read that is not
+neutral (`TOUCHPAD` lines, with the reading thread).
+
+The controls are a translucent ImGui overlay (`gow2_touch_opacity`, `gow2_touch_scale`) drawn with
+each game frame, not at the display's refresh rate (patch 0007's
+`ImGuiDialog::WantsContinuousPaint`). While a controller is connected, using it (any button, or an
+axis past about a quarter) hides them until the next touch; unplugging the last controller shows
+them at once. A key or a mouse hides them for `gow2_touch_hide_seconds` (10). The first touch on
+hidden controls only shows them.
+
+The gear opens the settings overlay, where the `gow2_touch_*` settings are; ImGui takes touches
+like a mouse there, and the game's pad reads neutral while the overlay is open. Its "Save to config"
+writes `gow2.toml` in `Android/data/com.santiquiroz.gow2recomp/files`, beside the `logs` folder.
+A keyboard or mouse found at launch makes `mnk_mode` /
+`mnk_mouse` that launch's default value instead of a changed one, so saving does not keep them
+for a later launch without the device.
 
 Patch 0007 makes the SDK's window deliver Android finger events to its listeners and drop the mouse
 events SDL makes up from fingers and pens. On Windows the SDK does not deliver finger events, the
