@@ -9,8 +9,7 @@
 #include <windows.h>
 #endif
 #if defined(__ANDROID__)
-#include <SDL3/SDL_system.h>
-#include <jni.h>
+#include "gow2_android_devices.h"
 #endif
 
 #include <rex/cvar.h>
@@ -431,80 +430,6 @@ bool AnyPhysicalGamepad() {
 #endif
 
 #if defined(__ANDROID__)
-constexpr jint kConfigKeyboardQwerty = 2;
-constexpr jint kConfigHardKeyboardHiddenYes = 2;
-
-bool ClearJavaException(JNIEnv* env) {
-  if (env->ExceptionCheck()) {
-    env->ExceptionClear();
-    return true;
-  }
-  return false;
-}
-
-jobject CallObjectGetter(JNIEnv* env, jobject object, const char* method, const char* signature) {
-  if (object == nullptr) return nullptr;
-  jclass cls = env->GetObjectClass(object);
-  if (cls == nullptr) {
-    ClearJavaException(env);
-    return nullptr;
-  }
-  jmethodID id = env->GetMethodID(cls, method, signature);
-  jobject result = nullptr;
-  if (id != nullptr) {
-    result = env->CallObjectMethod(object, id);
-    if (ClearJavaException(env)) {
-      if (result != nullptr) env->DeleteLocalRef(result);
-      result = nullptr;
-    }
-  } else {
-    ClearJavaException(env);
-  }
-  env->DeleteLocalRef(cls);
-  return result;
-}
-
-jint ReadIntField(JNIEnv* env, jobject object, const char* field, jint fallback) {
-  if (object == nullptr) return fallback;
-  jclass cls = env->GetObjectClass(object);
-  if (cls == nullptr) {
-    ClearJavaException(env);
-    return fallback;
-  }
-  jfieldID id = env->GetFieldID(cls, field, "I");
-  jint value = fallback;
-  if (id != nullptr) {
-    value = env->GetIntField(object, id);
-    if (ClearJavaException(env)) value = fallback;
-  } else {
-    ClearJavaException(env);
-  }
-  env->DeleteLocalRef(cls);
-  return value;
-}
-
-bool PhysicalKeyboardConnected() {
-  JNIEnv* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
-  if (env == nullptr) return false;
-  jobject activity = static_cast<jobject>(SDL_GetAndroidActivity());
-  if (activity == nullptr) return false;
-  jobject resources =
-      CallObjectGetter(env, activity, "getResources", "()Landroid/content/res/Resources;");
-  jobject configuration = nullptr;
-  if (resources != nullptr) {
-    configuration = CallObjectGetter(env, resources, "getConfiguration",
-                                     "()Landroid/content/res/Configuration;");
-  }
-  jint keyboard = ReadIntField(env, configuration, "keyboard", 0);
-  jint hidden = ReadIntField(env, configuration, "hardKeyboardHidden", 0);
-  if (configuration != nullptr) env->DeleteLocalRef(configuration);
-  if (resources != nullptr) env->DeleteLocalRef(resources);
-  env->DeleteLocalRef(activity);
-  // Configuration.keyboard is QWERTY only while an alphabetic, non-virtual keyboard is attached;
-  // SDL keeps no keyboard list on Android, so SDL_HasKeyboard() is always false there.
-  return keyboard == kConfigKeyboardQwerty && hidden != kConfigHardKeyboardHiddenYes;
-}
-
 bool AndroidKeyboardPromptsWanted() {
   const bool keyboard = PhysicalKeyboardConnected();
   // Without mnk_mode the keyboard does not reach the game, so its labels would be wrong.

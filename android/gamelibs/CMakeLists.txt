@@ -151,10 +151,16 @@ set_property(TARGET gow2 APPEND PROPERTY LINK_DEPENDS "${GOW2_EXPORTS_MAP}")
 rexglue_configure_target(gow2 GPU_PLUGINS xenos)
 
 #----------------------------------------------------------------------------------------------
-# On-device self-test of the runtime (scripts/test-android-device.ps1); not part of the APK
+# On-device tests (scripts/test-android-device.ps1): the runtime self-test and the touch-controls
+# model test; not part of the APK
 #----------------------------------------------------------------------------------------------
 add_executable(gow2_runtime_selftest EXCLUDE_FROM_ALL tests/runtime_selftest.cpp)
 target_link_libraries(gow2_runtime_selftest PRIVATE rex::runtime)
+# Pure C++ without the SDK; the static C++ library lets it run without libc++_shared.so.
+add_executable(gow2_touch_model_test EXCLUDE_FROM_ALL
+    tests/touch_model_test.cpp "${GOW2_ROOT}/src/gow2_touch_model.cpp")
+target_include_directories(gow2_touch_model_test PRIVATE "${GOW2_ROOT}/src")
+target_link_options(gow2_touch_model_test PRIVATE -static-libstdc++)
 
 #----------------------------------------------------------------------------------------------
 # Staging for Gradle
