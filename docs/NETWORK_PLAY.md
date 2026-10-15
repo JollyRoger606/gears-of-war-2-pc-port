@@ -80,6 +80,35 @@ its own log and its own save folder, and without the loopback settings of
 "Testing on one PC" below. `scripts\instance-input.ps1` sends it keys. The
 menu path is the client's path from that section.
 
+### Tested on 2026-10-15
+
+The PC (Ethernet, 192.168.10.10) and a Galaxy S25 Ultra (Wi-Fi,
+192.168.10.114) on one home network, both built from the same commit:
+
+- Phone hosts, PC joins with `--net_peers=192.168.10.114`: the PC's
+  System Link Browser lists the phone's campaign, both lobbies list both
+  players, and both load Act 1 chapter 1. The PC log shows the phone's
+  beacon answer arriving (`first datagram from 192.168.10.114:14001 on
+  local port 14001 (190 bytes)`), so Windows Firewall lets the reply in.
+- PC hosts, phone joins with no `net_peers`: the phone's broadcast search
+  reaches the PC (`first datagram from 192.168.10.114:14001`), the phone
+  lists the PC's campaign and joins, and both load chapter 2. This needs
+  the inbound rule for that `gow2.exe` path (see Windows Firewall below).
+- In game, each player sees the other move when the other moves.
+
+Both logs show `XGISessionJoinRemote ... members=2` with the other
+side's XUID, and game traffic on port 41000 in both directions. The phone
+renders a few frames per second in game (docs/ANDROID.md), so let the PC
+host once its firewall rule is in place. In chapter 1 the second player's
+sticks did nothing until they held LB for the objectives prompt.
+
+A script can drive the phone without touching the screen: put
+`gow2_test_input = "/storage/emulated/0/Android/data/com.santiquiroz.gow2recomp/files/pad.txt"`
+in the phone's `gow2.toml`, then write pad lines to that file with
+`adb shell "echo 'A' > /sdcard/Android/data/com.santiquiroz.gow2recomp/files/pad.txt"`
+(format in `src/gow2_test_input.h`; an empty line releases everything).
+Hold a menu direction only briefly, or the menu repeats it.
+
 ### Windows Firewall
 
 The phone hosts because the PC's network profile is Public. Inbound rules

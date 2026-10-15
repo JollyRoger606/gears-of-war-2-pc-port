@@ -14,8 +14,9 @@ on the merged tree. After the merge, the Android build applies every `sdk/patche
 
 On the `crossplay` branch, SDK patch 0011-network-crossplay (Stage 4 networking) sits on top of
 this 0010, and `scripts/build-android.ps1` has built and linked 0002-0011 there. Two copies of the
-crossplay build have joined each other's campaign over loopback on one PC; PC with phone has not
-run yet. See [NETWORK_PLAY.md](NETWORK_PLAY.md).
+crossplay build have joined each other's campaign over loopback on one PC, and on 2026-10-15 a PC
+and a Galaxy S25 Ultra joined each other's campaign on one Wi-Fi network, with either one hosting.
+See [NETWORK_PLAY.md](NETWORK_PLAY.md).
 
 Merge order: this 0010 first, then 0011. Master's 0007 (6fe0d18, 2026-10-15) shifts Android
 guest ports 1-1023 by 30000 and translates socket options and FIONBIO/FIONREAD on Android. On
@@ -664,14 +665,17 @@ Status (2026-10-15): SDK patch 0011-network-crossplay implements the Stage 4 net
 It now sits on the opt-in 0010 (6a8e519): System Link needs `net_link_active=true` on every
 copy, PC and phone (docs/NETWORK_PLAY.md). It builds for Windows and passes its unit tests
 (70 System Link cases: "All tests passed (1439 assertions in 70 test cases)",
-out/logs/unit-tests-4.log). The loopback run below used the 0011 before this rebase. It has
-not run on the phone yet. The Android app adds the INTERNET, ACCESS_NETWORK_STATE,
+out/logs/unit-tests-4.log). The loopback run below used the 0011 before this rebase. The
+Android app adds the INTERNET, ACCESS_NETWORK_STATE,
 ACCESS_WIFI_STATE, CHANGE_WIFI_MULTICAST_STATE and WAKE_LOCK permissions, holds a Wi-Fi
 MulticastLock and a low-latency WifiLock (WIFI_MODE_FULL_LOW_LATENCY) from onCreate to
 onDestroy, and sets REX_DETECTED_LOCAL_IP to the Wi-Fi or hotspot address. For setup,
 see docs/NETWORK_PLAY.md. On 2026-10-14 two PC copies on loopback played chapter 2
-together with 0011 (docs/NETWORK_PLAY.md, "Testing on one PC"); the PC-phone tests are
-still open. The text below the table is the original design; it is unchanged.
+together with 0011 (docs/NETWORK_PLAY.md, "Testing on one PC"). On 2026-10-15 the PC
+(192.168.10.10, Ethernet) and the phone (192.168.10.114, Wi-Fi) joined in both directions:
+phone host with PC client in Act 1 chapter 1, PC host with phone client in chapter 2, each
+player seeing the other move (docs/NETWORK_PLAY.md, "Tested on 2026-10-15"). The text below
+the table is the original design; it is unchanged.
 
 | Setting | Default | Effect |
 |---|---|---|
@@ -733,7 +737,7 @@ Decisions taken while implementing:
   192.168.10.10/24 (default-route adapter), ..., LAN broadcast 192.168.10.255,
   255.255.255.255, port offset 40000".
 
-Still open: the version gate; the Stage 4 tests.
+Still open: the version gate; the 30 minutes of Stage 4 test 1 and tests 2 to 4.
 
 **Wire compatibility.** Guest code builds every packet byte in big-endian guest memory, and the
 runtime passes the bytes through raw, so both platforms put the same bytes on the wire. [I,
