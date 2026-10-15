@@ -1388,7 +1388,7 @@ index 0000000..0619953
 +}  // namespace rex::graphics::d3d12::gow2
 diff --git a/src/graphics/d3d12/gow2_upscale.cpp b/src/graphics/d3d12/gow2_upscale.cpp
 new file mode 100644
-index 0000000..cc7460f
+index 0000000..8a86043
 --- /dev/null
 +++ b/src/graphics/d3d12/gow2_upscale.cpp
 @@ -0,0 +1,766 @@
@@ -1999,7 +1999,7 @@ index 0000000..cc7460f
 +  if (backend_sel == 1) {
 +    if (!DlssInit(g.device.Get())) {
 +      g.dlss_failed = true;
-+      SetUpscaleStatus(DlssCompiledIn() ? "DLSS: unavailable (NGX init failed or no nvngx_dlss.dll)"
++      SetUpscaleStatus(DlssCompiledIn() ? "DLSS: unavailable (NGX init failed or no DLSS runtime DLL)"
 +                                        : "DLSS: not built into this plugin");
 +      return false;
 +    }
