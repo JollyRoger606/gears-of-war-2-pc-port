@@ -5,6 +5,16 @@
 # to get the built-in default back. Most settings can also be changed in game from the
 # runtime's settings overlay.
 
+# ---------- Saves ----------
+# Folder for your saves, profile settings and achievements. Empty = the default
+# (%LOCALAPPDATA%\GearsOfWar2PC\user on Windows). Point it at a cloud-synced folder to back up
+# and sync your campaign; the first start copies your existing saves there. Single quotes keep
+# backslashes as typed. See docs/SAVES.md.
+#   gow2_save_dir = '%OneDrive%\GearsOfWar2\saves'
+#   gow2_save_dir = 'D:\Dropbox\GearsOfWar2'
+#   gow2_save_dir = "saves"   (portable: a folder next to gow2.exe)
+gow2_save_dir = ""
+
 # ---------- Display ----------
 fullscreen = true
 

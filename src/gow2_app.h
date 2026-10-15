@@ -7,17 +7,21 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <optional>
 #include <string>
 
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
+#include <rex/system.h>
 
 #include "gow2_coalesced.h"
 #include "gow2_crash_watch.h"
 #include "gow2_gpu_pick.h"
 #include "gow2_mouse_aim.h"
+#include "gow2_save_dir.h"
 #include "gow2_sha_table.h"
 #include "gow2_utf8_guard.h"
 #include "gow2_xam_input_guard.h"
@@ -279,6 +283,29 @@ class Gow2App : public rex::ReXApp {
 #endif
     game_data_root_ = paths.game_data_root;
     cache_root_ = paths.cache_root;
+  }
+
+  static void ReportSaveDir(const rex::glue::SaveDirChoice& saves) {
+    if (saves.summary.empty()) return;
+    if (saves.is_warning) {
+      REXLOG_WARN("{}", saves.summary);
+      rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Warning, saves.summary);
+      return;
+    }
+    REXLOG_INFO("{}", saves.summary);
+  }
+
+  // gow2.toml is loaded by now (OnConfigurePaths runs before it), and the runtime is not built yet.
+  std::optional<rex::PathConfig> OnFinalizePaths(const rex::PathConfig& defaults,
+                                                 std::function<void(rex::PathConfig)> resume) override {
+    (void)resume;
+    rex::PathConfig paths = defaults;
+    const rex::glue::SaveDirChoice saves = rex::glue::ChooseUserDataRoot(
+        rex::glue::SaveDirSetting(), paths.user_data_root, paths.cache_root,
+        paths.config_path.parent_path());
+    paths.user_data_root = saves.user_data_root;
+    ReportSaveDir(saves);
+    return paths;
   }
 
   // Override virtual hooks for customization:
