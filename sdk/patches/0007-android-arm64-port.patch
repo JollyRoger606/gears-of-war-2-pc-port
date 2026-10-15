@@ -4029,7 +4029,7 @@ index 91ac08f..0964025 100644
        shader_header.ucode_data_hash = shader->ucode_data_hash();
        shader_header.ucode_dword_count = shader->ucode_dword_count();
 diff --git a/src/graphics/vulkan/render_target_cache.cpp b/src/graphics/vulkan/render_target_cache.cpp
-index 0298f06..bca9f62 100644
+index 0298f06..12abf77 100644
 --- a/src/graphics/vulkan/render_target_cache.cpp
 +++ b/src/graphics/vulkan/render_target_cache.cpp
 @@ -1140,6 +1140,9 @@ bool VulkanRenderTargetCache::Resolve(const memory::Memory& memory,
@@ -4042,7 +4042,41 @@ index 0298f06..bca9f62 100644
    // Nothing to copy/clear.
    if (!resolve_info.coordinate_info.width_div_8 || !resolve_info.height_div_8) {
      return true;
-@@ -4546,6 +4549,75 @@ VkPipeline const* VulkanRenderTargetCache::GetTransferPipelines(TransferPipeline
+@@ -4020,14 +4023,19 @@ VkShaderModule VulkanRenderTargetCache::GetTransferShader(TransferShaderKey key)
+                 builder.createBinOp(spv::OpUMod, type_uint, host_depth_source_tile_index,
+                                     host_depth_source_pitch_tiles);
+             // Finally calculate the host depth source texture coordinates.
++            // The host depth source has its own sample count (as in the D3D12 transfer shader).
++            const uint32_t host_depth_tile_width_samples =
++                tile_width_samples >>
++                uint32_t(key.host_depth_source_msaa_samples >= xenos::MsaaSamples::k4X);
++            const uint32_t host_depth_tile_height_samples =
++                tile_height_samples >>
++                uint32_t(key.host_depth_source_msaa_samples >= xenos::MsaaSamples::k2X);
+             spv::Id host_depth_source_pixel_x_int = builder.createUnaryOp(
+                 spv::OpBitcast, type_int,
+                 builder.createBinOp(
+                     spv::OpIAdd, type_uint,
+                     builder.createBinOp(spv::OpIMul, type_uint,
+-                                        builder.makeUintConstant(tile_width_samples >>
+-                                                                 uint32_t(key.source_msaa_samples >=
+-                                                                          xenos::MsaaSamples::k4X)),
++                                        builder.makeUintConstant(host_depth_tile_width_samples),
+                                         host_depth_source_tile_index_x),
+                     host_depth_source_tile_pixel_x));
+             spv::Id host_depth_source_pixel_y_int = builder.createUnaryOp(
+@@ -4035,9 +4043,7 @@ VkShaderModule VulkanRenderTargetCache::GetTransferShader(TransferShaderKey key)
+                 builder.createBinOp(
+                     spv::OpIAdd, type_uint,
+                     builder.createBinOp(spv::OpIMul, type_uint,
+-                                        builder.makeUintConstant(tile_height_samples >>
+-                                                                 uint32_t(key.source_msaa_samples >=
+-                                                                          xenos::MsaaSamples::k2X)),
++                                        builder.makeUintConstant(host_depth_tile_height_samples),
+                                         host_depth_source_tile_index_y),
+                     host_depth_source_tile_pixel_y));
+             // Load the host depth source.
+@@ -4546,6 +4552,75 @@ VkPipeline const* VulkanRenderTargetCache::GetTransferPipelines(TransferPipeline
    return transfer_pipelines_.emplace(key, pipelines).first->second.data();
  }
  
@@ -4118,7 +4152,7 @@ index 0298f06..bca9f62 100644
  void VulkanRenderTargetCache::PerformTransfersAndResolveClears(
      uint32_t render_target_count, RenderTarget* const* render_targets,
      const std::vector<Transfer>* render_target_transfers,
-@@ -4557,6 +4629,12 @@ void VulkanRenderTargetCache::PerformTransfersAndResolveClears(
+@@ -4557,6 +4632,12 @@ void VulkanRenderTargetCache::PerformTransfersAndResolveClears(
    uint64_t current_submission = command_processor_.GetCurrentSubmission();
    DeferredCommandBuffer& command_buffer = command_processor_.deferred_command_buffer();
  
@@ -5388,20 +5422,21 @@ index 8197bb4..5bcc9ba 100644
    // Extensions promoted to a Vulkan version supported by the device.
  #define XE_UI_VULKAN_FUNCTION_PROMOTED(extension_name, core_name)                                \
 diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
-index 23645ef..37534db 100644
+index 23645ef..f1c5f04 100644
 --- a/src/ui/vulkan/vulkan_presenter.cpp
 +++ b/src/ui/vulkan/vulkan_presenter.cpp
-@@ -34,6 +34,9 @@
+@@ -34,6 +34,10 @@
  #endif
  
  #if REX_PLATFORM_ANDROID
++#include <android/api-level.h>
 +#include <android/native_window.h>
 +#include <dlfcn.h>
 +
  #include <rex/ui/surface_android.h>
  #endif
  #if REX_PLATFORM_GNU_LINUX
-@@ -49,6 +52,24 @@
+@@ -49,6 +53,24 @@
  REXCVAR_DEFINE_BOOL(present_render_pass_clear, true, "UI/Presenter",
                      "Clear render pass during presentation");
  
@@ -5426,7 +5461,7 @@ index 23645ef..37534db 100644
  REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_immediate, true, "UI/Vulkan",
                      "Allow immediate present mode (no vsync)");
  
-@@ -57,11 +78,37 @@ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_mailbox, true, "UI/Vulkan",
+@@ -57,11 +79,43 @@ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_mailbox, true, "UI/Vulkan",
  
  REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_fifo_relaxed, true, "UI/Vulkan",
                      "Allow FIFO relaxed present mode");
@@ -5442,10 +5477,16 @@ index 23645ef..37534db 100644
 +void RequestAndroidFrameRate(ANativeWindow* window) {
 +  using SetFrameRate = int32_t (*)(ANativeWindow*, float, int8_t);
 +  static const SetFrameRate set_frame_rate = [] {
-+    auto function = reinterpret_cast<SetFrameRate>(
-+        dlsym(RTLD_DEFAULT, "ANativeWindow_setFrameRate"));
++    void* library = dlopen("libnativewindow.so", RTLD_NOW | RTLD_LOCAL);
++    if (!library) {
++      library = dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
++    }
++    auto function = library ? reinterpret_cast<SetFrameRate>(
++                                  dlsym(library, "ANativeWindow_setFrameRate"))
++                            : nullptr;
 +    if (!function) {
-+      REXLOG_INFO("VulkanPresenter: ANativeWindow_setFrameRate is not available (Android 10)");
++      REXLOG_INFO("VulkanPresenter: ANativeWindow_setFrameRate is not available (API level {})",
++                  android_get_device_api_level());
 +    }
 +    return function;
 +  }();
@@ -5464,7 +5505,7 @@ index 23645ef..37534db 100644
  #if defined(REX_HAS_FIDELITYFX_RUNTIME) && REX_HAS_FIDELITYFX_RUNTIME
  namespace {
  
-@@ -109,6 +156,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL FfxVkGetDeviceProcAddrCompat(VkDevice d
+@@ -109,6 +163,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL FfxVkGetDeviceProcAddrCompat(VkDevice d
  namespace shaders {
  #include "../shaders/vulkan_spirv/guest_output_bilinear_dither_ps.h"
  #include "../shaders/vulkan_spirv/guest_output_bilinear_ps.h"
@@ -5474,7 +5515,7 @@ index 23645ef..37534db 100644
  #if defined(REX_HAS_FIDELITYFX_SDK)
  #include "../shaders/vulkan_spirv/guest_output_ffx_cas_resample_dither_ps.h"
  #include "../shaders/vulkan_spirv/guest_output_ffx_cas_resample_ps.h"
-@@ -885,6 +935,12 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
+@@ -885,6 +942,12 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
      // Successfully attached (at least for now).
    }
  
@@ -5487,7 +5528,7 @@ index 23645ef..37534db 100644
    // From now on, in case of failure,
    // paint_context_.DestroySwapchainAndVulkanSurface must be called before
    // returning.
-@@ -2027,6 +2083,9 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+@@ -2027,6 +2090,9 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
            uint32_t effect_constants_size = 0;
            union {
              BilinearConstants bilinear;
@@ -5497,7 +5538,7 @@ index 23645ef..37534db 100644
  #if defined(REX_HAS_FIDELITYFX_SDK)
              CasSharpenConstants cas_sharpen;
              CasResampleConstants cas_resample;
-@@ -2035,6 +2094,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+@@ -2035,6 +2101,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
  #endif
            } effect_constants;
            switch (guest_output_paint_pipeline_layout_index) {
@@ -5510,7 +5551,7 @@ index 23645ef..37534db 100644
              case kGuestOutputPaintPipelineLayoutIndexBilinear: {
                effect_constants_size = sizeof(effect_constants.bilinear);
                effect_constants.bilinear.Initialize(guest_output_flow, i);
-@@ -2331,6 +2396,11 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+@@ -2331,6 +2403,11 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
        guest_output_paint_push_constant_ranges;
    for (size_t i = 0; i < size_t(kGuestOutputPaintPipelineLayoutCount); ++i) {
      switch (GuestOutputPaintPipelineLayoutIndex(i)) {
@@ -5522,7 +5563,7 @@ index 23645ef..37534db 100644
        case kGuestOutputPaintPipelineLayoutIndexBilinear:
          guest_output_paint_push_constant_range_ffx.size = sizeof(BilinearConstants);
          break;
-@@ -2381,6 +2451,12 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+@@ -2381,6 +2458,12 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
    for (size_t i = 0; i < size_t(GuestOutputPaintEffect::kCount); ++i) {
      GuestOutputPaintEffect guest_output_paint_effect = GuestOutputPaintEffect(i);
      switch (guest_output_paint_effect) {
