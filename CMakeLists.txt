@@ -61,6 +61,14 @@ add_executable(gow2_test_input_test EXCLUDE_FROM_ALL
 )
 target_include_directories(gow2_test_input_test PRIVATE src)
 
+# Host-side test of the gow2_save_dir logic on temporary folders (no game data, no SDK). Not part
+# of the default build: cmake --build <dir> --target gow2_save_dir_test, then run the exe.
+add_executable(gow2_save_dir_test EXCLUDE_FROM_ALL
+    tools/tests/save_dir_test.cpp
+    src/gow2_save_dir.cpp
+)
+target_include_directories(gow2_save_dir_test PRIVATE src)
+
 # SDL's gamepad mapping database; the input driver looks for it in the working directory.
 add_custom_command(TARGET gow2 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -130,11 +138,3 @@ add_custom_command(TARGET gow2 POST_BUILD
             ${CMAKE_BINARY_DIR}/CMakeFiles/gow2_recomp.dir/generated/default
     COMMENT "Checking that no patched source is newer than its object"
     VERBATIM)
-
-# Host-side test of the gow2_save_dir logic on temporary folders (no game data, no SDK). Not part
-# of the default build: cmake --build <dir> --target gow2_save_dir_test, then run the exe.
-add_executable(gow2_save_dir_test EXCLUDE_FROM_ALL
-    tools/tests/save_dir_test.cpp
-    src/gow2_save_dir.cpp
-)
-target_include_directories(gow2_save_dir_test PRIVATE src)
