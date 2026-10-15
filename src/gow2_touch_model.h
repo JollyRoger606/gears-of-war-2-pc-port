@@ -127,7 +127,15 @@ class TouchModel {
     int64_t down_ms = 0;
   };
 
+  struct LookTravel {
+    int64_t ms = 0;
+    float dx = 0;
+    float dy = 0;
+  };
+
   bool IsButtonPressed(size_t index, ControlId id, int64_t now_ms) const;
+  void ForgetOldLookTravel(int64_t now_ms);
+  void LookStick(int64_t now_ms, int16_t* rx, int16_t* ry) const;
 
   float width_ = 0;
   float height_ = 0;
@@ -148,13 +156,7 @@ class TouchModel {
   uint32_t look_pointer_id_ = 0;
   float look_last_x_ = 0;
   float look_last_y_ = 0;
-  int64_t look_last_ms_ = 0;
-  int64_t look_last_move_ms_ = 0;
-  float look_pending_dx_ = 0;
-  float look_pending_dy_ = 0;
-  bool look_has_sample_ = false;
-  float look_vx_ = 0;
-  float look_vy_ = 0;
+  std::vector<LookTravel> look_travel_;
 };
 
 }  // namespace rex::glue::touch

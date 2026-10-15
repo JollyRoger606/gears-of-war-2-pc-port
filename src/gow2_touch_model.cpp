@@ -17,9 +17,11 @@ constexpr float kStickIdleX = 0.17f;
 constexpr float kStickIdleY = 0.72f;
 constexpr float kHitSlop = 1.2f;
 constexpr int64_t kMinPressMs = 100;
-constexpr int64_t kLookHoldMs = 60;
-constexpr float kLookSmoothing = 0.5f;
-constexpr float kLookFullSpeed = 2.0f;
+// The look speed is the finger travel of the last 200 ms. The thread that delivers touches also
+// presents frames and can stall for a whole slow frame, then hand over a burst; a window longer
+// than that keeps the stick steady while the guest polls in between.
+constexpr int64_t kLookWindowMs = 200;
+constexpr float kLookFullSpeed = 1.0f;
 constexpr float kLookDeadZone = 0.30f;
 constexpr float kLookAxisNoise = 0.02f;
 constexpr float kLookMinorAxisRatio = 0.35f;
@@ -87,7 +89,9 @@ float ShapeLookAxis(float val, float max_raw) {
     return 0.0f;
   }
   float sign = (val > 0.0f) ? 1.0f : -1.0f;
-  float scaled = std::min(abs_val, 1.0f);
+  // The game's look response past its dead zone is convex; the square root keeps slow drags from
+  // vanishing in it.
+  float scaled = std::sqrt(std::min(abs_val, 1.0f));
   return sign * (kLookDeadZone + (1.0f - kLookDeadZone) * scaled);
 }
 
@@ -165,13 +169,6 @@ void TouchModel::PointerDown(uint32_t pointer, float x, float y, int64_t now_ms)
       look_pointer_id_ = pointer;
       look_last_x_ = x;
       look_last_y_ = y;
-      look_last_ms_ = now_ms;
-      look_last_move_ms_ = now_ms;
-      look_pending_dx_ = 0.0f;
-      look_pending_dy_ = 0.0f;
-      look_has_sample_ = false;
-      look_vx_ = 0.0f;
-      look_vy_ = 0.0f;
     }
   }
 
@@ -196,31 +193,10 @@ void TouchModel::PointerMove(uint32_t pointer, float x, float y, int64_t now_ms)
     stick_curr_x_ = x;
     stick_curr_y_ = y;
   } else if (it->target == PointerTarget::kLook) {
-    look_pending_dx_ += (x - look_last_x_);
-    look_pending_dy_ += (y - look_last_y_);
+    ForgetOldLookTravel(now_ms);
+    look_travel_.push_back(LookTravel{now_ms, x - look_last_x_, y - look_last_y_});
     look_last_x_ = x;
     look_last_y_ = y;
-
-    int64_t dt_ms = now_ms - look_last_ms_;
-    if (dt_ms <= 0 || height_ <= 0.0f) {
-      return;
-    }
-    float dt_sec = static_cast<float>(dt_ms) / kMsPerSecond;
-    float sample_vx = (look_pending_dx_ / height_) / dt_sec;
-    float sample_vy = (look_pending_dy_ / height_) / dt_sec;
-    look_pending_dx_ = 0.0f;
-    look_pending_dy_ = 0.0f;
-
-    if (!look_has_sample_) {
-      look_vx_ = sample_vx;
-      look_vy_ = sample_vy;
-      look_has_sample_ = true;
-    } else {
-      look_vx_ = kLookSmoothing * sample_vx + (1.0f - kLookSmoothing) * look_vx_;
-      look_vy_ = kLookSmoothing * sample_vy + (1.0f - kLookSmoothing) * look_vy_;
-    }
-    look_last_ms_ = now_ms;
-    look_last_move_ms_ = now_ms;
   }
 }
 
@@ -241,11 +217,9 @@ void TouchModel::PointerUp(uint32_t pointer, int64_t now_ms) {
     stick_active_ = false;
     stick_pointer_id_ = 0;
   } else if (it->target == PointerTarget::kLook) {
+    // Its travel stays in the look window, so a flick shorter than a game frame still turns.
     look_active_ = false;
     look_pointer_id_ = 0;
-    look_has_sample_ = false;
-    look_vx_ = 0.0f;
-    look_vy_ = 0.0f;
   }
 
   pointers_.erase(it);
@@ -267,13 +241,7 @@ void TouchModel::ReleaseAll() {
   look_pointer_id_ = 0;
   look_last_x_ = 0.0f;
   look_last_y_ = 0.0f;
-  look_last_ms_ = 0;
-  look_last_move_ms_ = 0;
-  look_pending_dx_ = 0.0f;
-  look_pending_dy_ = 0.0f;
-  look_has_sample_ = false;
-  look_vx_ = 0.0f;
-  look_vy_ = 0.0f;
+  look_travel_.clear();
 }
 
 bool TouchModel::IsButtonPressed(size_t index, ControlId id, int64_t now_ms) const {
@@ -286,6 +254,29 @@ bool TouchModel::IsButtonPressed(size_t index, ControlId id, int64_t now_ms) con
     }
   }
   return false;
+}
+
+void TouchModel::ForgetOldLookTravel(int64_t now_ms) {
+  while (!look_travel_.empty() && look_travel_.front().ms <= now_ms - kLookWindowMs) {
+    look_travel_.erase(look_travel_.begin());
+  }
+}
+
+void TouchModel::LookStick(int64_t now_ms, int16_t* rx, int16_t* ry) const {
+  float travel_x = 0.0f;
+  float travel_y = 0.0f;
+  for (const LookTravel& step : look_travel_) {
+    if (step.ms > now_ms - kLookWindowMs) {
+      travel_x += step.dx;
+      travel_y += step.dy;
+    }
+  }
+  const float window_sec = static_cast<float>(kLookWindowMs) / kMsPerSecond;
+  const float raw_x = travel_x / height_ / window_sec / kLookFullSpeed * settings_.look_gain;
+  const float raw_y = -travel_y / height_ / window_sec / kLookFullSpeed * settings_.look_gain;
+  const float max_raw = std::max(std::abs(raw_x), std::abs(raw_y));
+  *rx = QuantizeAxis(ShapeLookAxis(raw_x, max_raw));
+  *ry = QuantizeAxis(ShapeLookAxis(raw_y, max_raw));
 }
 
 PadState TouchModel::Sample(int64_t now_ms) const {
@@ -329,15 +320,7 @@ PadState TouchModel::Sample(int64_t now_ms) const {
     }
   }
 
-  if (look_active_ && look_has_sample_ && (now_ms - look_last_move_ms_ <= kLookHoldMs)) {
-    float raw_x = (look_vx_ / kLookFullSpeed) * settings_.look_gain;
-    float raw_y = (-look_vy_ / kLookFullSpeed) * settings_.look_gain;
-    float max_raw = std::max(std::abs(raw_x), std::abs(raw_y));
-    float axis_x = ShapeLookAxis(raw_x, max_raw);
-    float axis_y = ShapeLookAxis(raw_y, max_raw);
-    state.thumb_rx = QuantizeAxis(axis_x);
-    state.thumb_ry = QuantizeAxis(axis_y);
-  }
+  LookStick(now_ms, &state.thumb_rx, &state.thumb_ry);
 
   return state;
 }

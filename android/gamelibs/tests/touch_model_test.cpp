@@ -91,46 +91,70 @@ void TestStickNotInTopStrip() {
   CHECK("stick_not_in_top_strip", model.Sample(10) == PadState{}, "all zero PadState");
 }
 
+// Moves pointer 1 across the look area by `step` heights every 10 ms from t=10 to t=last_ms.
+void DragLook(TouchModel& model, float step_x, float step_y, int last_ms) {
+  float x = 0.60f * kW;
+  float y = 0.30f * kH;
+  model.PointerDown(1, x, y, 0);
+  for (int t = 10; t <= last_ms; t += 10) {
+    x += step_x * kH;
+    y += step_y * kH;
+    model.PointerMove(1, x, y, t);
+  }
+}
+
 void TestLookFastSwipe() {
   TouchModel model;
   model.SetViewport(kW, kH);
-  model.PointerDown(1, 0.60f * kW, 0.30f * kH, 0);
-  for (int i = 1; i <= 5; ++i) {
-    float x = 0.60f * kW + static_cast<float>(i) * 0.02f * kH;
-    model.PointerMove(1, x, 0.30f * kH, i * 10);
-  }
-  PadState pad50 = model.Sample(50);
-  CHECK("look_fast_swipe_rx", pad50.thumb_rx == 32767, "thumb_rx == 32767");
-  CHECK("look_fast_swipe_ry", pad50.thumb_ry == 0, "thumb_ry == 0");
-  PadState pad_held = model.Sample(50 + 60 + 1);
-  CHECK("look_fast_swipe_held_rx", pad_held.thumb_rx == 0, "thumb_rx == 0 when held");
-  CHECK("look_fast_swipe_held_ry", pad_held.thumb_ry == 0, "thumb_ry == 0 when held");
+  DragLook(model, 0.01f, 0.0f, 300);  // 1 height per second
+  PadState moving = model.Sample(300);
+  CHECK("look_fast_swipe_rx", moving.thumb_rx == 32767, "thumb_rx == 32767");
+  CHECK("look_fast_swipe_ry", moving.thumb_ry == 0, "thumb_ry == 0");
+  PadState stopped = model.Sample(300 + 200 + 1);
+  CHECK("look_fast_swipe_held_rx", stopped.thumb_rx == 0, "thumb_rx == 0 once the window passed");
 }
 
 void TestLookSlowDrag() {
   TouchModel model;
   model.SetViewport(kW, kH);
-  model.PointerDown(1, 0.60f * kW, 0.30f * kH, 0);
-  for (int i = 1; i <= 5; ++i) {
-    float x = 0.60f * kW + static_cast<float>(i) * 0.002f * kH;
-    model.PointerMove(1, x, 0.30f * kH, i * 10);
-  }
-  PadState pad = model.Sample(50);
-  int16_t expected = static_cast<int16_t>(std::round((0.30f + 0.70f * 0.1f) * 32767.0f));
-  CHECK("look_slow_drag_rx", std::abs(pad.thumb_rx - expected) <= 2, "thumb_rx near expected");
+  DragLook(model, 0.002f, 0.0f, 300);  // 0.2 heights per second
+  PadState pad = model.Sample(300);
+  int16_t expected = static_cast<int16_t>(std::round((0.30f + 0.70f * std::sqrt(0.2f)) * 32767.0f));
+  CHECK("look_slow_drag_rx", std::abs(pad.thumb_rx - expected) <= 40, "thumb_rx near expected");
   CHECK("look_slow_drag_ry", pad.thumb_ry == 0, "thumb_ry == 0");
 }
 
 void TestLookUpIsPositive() {
   TouchModel model;
   model.SetViewport(kW, kH);
+  DragLook(model, 0.0f, -0.01f, 200);
+  CHECK("look_up_is_positive", model.Sample(200).thumb_ry > 0, "thumb_ry > 0");
+}
+
+void TestLookFlickBetweenPolls() {
+  TouchModel model;
+  model.SetViewport(kW, kH);
   model.PointerDown(1, 0.60f * kW, 0.30f * kH, 0);
-  for (int i = 1; i <= 5; ++i) {
-    float y = 0.30f * kH - static_cast<float>(i) * 0.02f * kH;
-    model.PointerMove(1, 0.60f * kW, y, i * 10);
+  CHECK("flick_before", model.Sample(100).thumb_rx == 0, "no travel yet");
+  for (int i = 1; i <= 3; ++i) {
+    model.PointerMove(1, 0.60f * kW + static_cast<float>(i) * 0.02f * kH, 0.30f * kH, 100 + i * 10);
   }
-  PadState pad = model.Sample(50);
-  CHECK("look_up_is_positive", pad.thumb_ry > 0, "thumb_ry > 0");
+  model.PointerUp(1, 135);
+  CHECK("flick_after_lift", model.Sample(200).thumb_rx > 0, "a flick that ended still turns");
+  CHECK("flick_spent", model.Sample(400).thumb_rx == 0, "only for the length of the window");
+}
+
+void TestLookSurvivesLateEvents() {
+  TouchModel model;
+  model.SetViewport(kW, kH);
+  model.PointerDown(1, 0.60f * kW, 0.30f * kH, 0);
+  CHECK("late_idle", model.Sample(200).thumb_rx == 0, "no travel");
+  // A stalled delivery thread hands over 200 ms of travel at once.
+  for (int i = 1; i <= 4; ++i) {
+    model.PointerMove(1, 0.60f * kW + static_cast<float>(i) * 0.05f * kH, 0.30f * kH, 396 + i);
+  }
+  CHECK("late_burst", model.Sample(400).thumb_rx == 32767, "1 height/s over the window");
+  CHECK("late_burst_steady", model.Sample(550).thumb_rx == 32767, "polls before the next burst");
 }
 
 void TestMultiTouchCombines() {
@@ -305,6 +329,8 @@ int main() {
   TestLookFastSwipe();
   TestLookSlowDrag();
   TestLookUpIsPositive();
+  TestLookFlickBetweenPolls();
+  TestLookSurvivesLateEvents();
   TestMultiTouchCombines();
   TestPointerKeepsItsButton();
   TestAimToggle();

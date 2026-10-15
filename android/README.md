@@ -110,6 +110,21 @@ Vulkan 1.3.284, all 22 core features it checks (among them `vertexPipelineStores
 `VK_EXT_fragment_shader_interlock` or `VK_EXT_memory_budget`, and presents frames through SDL's
 Vulkan renderer.
 
+With the game's libraries the phone plays Act 1 with touch only: the touch Start button passes the
+PRESS START screen, the D-pad, A, B and Y drive the menus, Solo Campaign > New Campaign plays the
+intro movie and the opening cutscene of "Tip of the Spear", and in gameplay the floating stick moves
+Marcus, a drag on the right side turns the camera, LB opens Tac/Com and RT fires the Lancer (the
+ammo count drops). Checkpoints saved there load again from the save slot screen.
+
+Frame rate in that first gameplay area: 2.6 to 5.2 game frames per second (`gow2_frame_log`), with
+the GPU held at 160 to 222 MHz of its 1.2 GHz by the phone's thermal limit (thermal status 2 to 3,
+skin 42 to 45 C, after hours of testing while charging; `thermal_pwrlevel` 13 to 14 in
+`/sys/class/kgsl/kgsl-3d0`). The GPU is 99% busy, so these numbers say little about a cool phone:
+after a few minutes' rest (thermal status 2, GPU allowed up to 734 MHz) the same place ran at 13.6
+to 16.8 fps for about ten seconds, then fell back to 3 to 6 fps as the cap returned. The menus run
+at 30 to 50 fps.
+Large parts of the scene render black.
+
 ## Game build
 
 `scripts/build-android.ps1` builds the APK with the game's libraries from a clean clone of this
@@ -221,7 +236,9 @@ platforms). 8 threads calling `InputSystem`'s `GetState`, `GetCapabilities`, `Se
 same driver called without `InputSystem` does see overlapping threads (so the check can detect the
 race). The guest `XamInputGetState`, `XamInputGetCapabilities(Ex)`, `XamInputSetState` and
 `XamInputGetKeystroke(Ex)` call exactly those four methods. On the S25 Ultra it prints
-`runtime_selftest: 18 checks, 0 failed`.
+`runtime_selftest: 18 checks, 0 failed`. The script then runs `gow2_touch_model_test`
+(`gamelibs/tests/touch_model_test.cpp`, pure C++): the touch layout, finger ownership, stick, look
+window, tap latch and aim toggle (`touch_model_test: 50 checks, 0 failed`).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\test-android-device.ps1 -LowPriority
@@ -242,6 +259,64 @@ There is exactly one SDL in the process: the SDK's Android build makes SDL3 a sh
 loads it first, so its `JNI_OnLoad` sets up the JNI state the runtime's SDL calls use. A static SDL
 inside the runtime would be a second copy without that state.
 
+## Controls
+
+### Touch
+
+`gow2_touch=auto` (the default on Android) turns the on-screen controls on when the phone has a
+touchscreen (`Configuration.touchscreen`). Fingers drive a virtual Xbox 360 pad
+(`src/gow2_touch_controls.cpp`, layout and pointer logic in `src/gow2_touch_model.cpp`) that the
+SDK merges with real pads for the first player, so a controller and the touch controls work at the
+same time.
+
+| Where (landscape) | Control |
+|---|---|
+| Left 40% of the screen, below the top 15% | Floating left stick: it is centred where the finger lands, full tilt at 10% of the screen height |
+| Rest of the right side | Look: the right stick follows the finger's travel over the last 200 ms, full tilt at one screen height per second (`gow2_touch_look_gain` scales it), with a square root and a 0.3 minimum so slow drags get past the game's look dead zone. The game's own aim assist stays on |
+| Right side, large | RT (fire); LT (aim, held, or toggled with `gow2_touch_aim_toggle`) |
+| Bottom right | A (cover, run), B (melee), X (reload, use) |
+| Right side | Y, RB (active reload) |
+| Top left | LB (Tac/Com) |
+| Left, above the stick | D-pad (weapons, menus) |
+| Top centre | Back, Start |
+
+Each finger owns the control it touched first until it lifts; a tap shorter than a game frame stays
+pressed for 100 ms; losing focus releases everything. The controls are a translucent ImGui overlay
+(`gow2_touch_opacity`, `gow2_touch_scale`) drawn with each game frame, not at the display's refresh
+rate (patch 0007's `ImGuiDialog::WantsContinuousPaint`). A controller button, a key or a mouse hides
+them for `gow2_touch_hide_seconds` (10); the next touch shows them again.
+
+Patch 0007 makes the SDK's window deliver Android finger events to its listeners and drop the mouse
+events SDL makes up from fingers and pens. On Windows the SDK does not deliver finger events, the
+touch files are not built and `gow2_touch` defaults to `off`.
+
+### Controllers, keyboard and mouse
+
+Controllers (USB or Bluetooth) go through the SDK's SDL driver as before. A physical keyboard or an
+external mouse attached when the game starts turns on the keyboard/mouse driver (`mnk_mode`, with
+the same key binds as on Windows); a mouse also sets `mnk_mouse`, so the native mouse look of
+`src/gow2_mouse_aim.cpp` installs. The runtime log records the choice in an `INPUTDEV` line. The
+devices are found through JNI (`src/gow2_android_devices.cpp`): the keyboard from
+`Configuration.keyboard`, the mouse from `InputDevice` entries that are external, not virtual and
+have `SOURCE_MOUSE` (the S25 Ultra's built-in `sec_touchpad` reports `SOURCE_MOUSE` too). A keyboard
+or mouse plugged in after the start is not picked up. Only the keyboard path was exercised on the
+phone, with `adb shell input keyevent` and `mnk_mode=true` in `gow2.toml`; no real keyboard or mouse
+was at hand.
+
+### Network
+
+Solo campaign opens a UDP socket for its session layer, so the app asks for `INTERNET` (without it
+the campaign stops at "Error initializing network layer"). Apps may not bind ports below 1024: patch
+0007 binds the guest's port 1000 as 31000 (a `XSocket: guest port ...` log line) and translates the
+socket options and `FIONBIO`/`FIONREAD` the game passes with Winsock numbers.
+
+### Frame rate log
+
+`gow2_frame_log=true` (in `gow2.toml` beside the logs) logs the game's own frame rate every five
+seconds as `FRAMES` lines, counted at the player's input step. Presented frames do not measure it on
+a phone: Android lowers the display's refresh rate, and runtime overlays repaint without new game
+frames.
+
 ## Menu prompts
 
 With `gow2_prompts=auto` the menus show the controller glyphs unless a physical keyboard is attached
@@ -252,6 +327,12 @@ unchanged: keyboard labels unless an XInput controller is connected at launch.
 
 ## Not done yet
 
-- Gameplay: on the Galaxy S25 Ultra the game reaches the PRESS START title screen in landscape
-  (intro video and audio work); nothing past it is verified yet.
-- Controller and touch mapping, and a separate `:game` process.
+- Speed: 3 to 5 game frames per second on a thermally capped GPU (see above); a measurement on a cool
+  phone, and the Xenos path's cost on the Adreno 830, are next.
+- Rendering: large parts of the scene are black in gameplay.
+- A checkpoint written by an older build (before the network fixes) crashes on load: the main
+  thread's guest stack overflows in `sub_8255E4A8`, which calls itself through an object listed as
+  its own child (`Unhandled guest access violation: write of guest 0x7014FFD0`). New campaigns and
+  their checkpoints load.
+- Keyboard and mouse hot-plug, a test with a real keyboard and mouse, and a separate `:game`
+  process.

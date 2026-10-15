@@ -2,9 +2,12 @@
 
 Status (October 2026): `scripts/build-android.ps1` builds an APK with the game's own libraries
 (SDK, GPU plugin and the recompiled game for arm64) from a clean clone of this repository, the SDK
-included, and on the phone the game boots to the PRESS START title screen in landscape with the
-intro video and audio. Target device for bring-up: Samsung Galaxy S25 Ultra (Snapdragon 8 Elite,
-Adreno 830, Vulkan 1.3).
+included. On the phone the game plays the start of Act 1 with on-screen touch controls (also
+controllers, and a keyboard and mouse attached at launch): menus, the campaign intro, the opening
+cutscene and gameplay, where Marcus moves, turns the camera and fires. It runs at about 3 to 5 game frames
+per second while the phone's thermal limit holds the GPU at its lowest clocks, and parts of the
+scene render black. Target device for bring-up: Samsung Galaxy S25 Ultra (Snapdragon 8 Elite,
+Adreno 830, Vulkan 1.3). Controls: [`android/README.md`](../android/README.md#controls).
 
 ## Building the APK
 
@@ -127,13 +130,21 @@ copy of the generated code.
    copied to app storage), controller and touch input, a separate `:game` process.
    The shell exists in [`android/`](../android/README.md), packages the game libraries with
    `-Pgow2.gameLibraries=true` and the license texts in `assets/licenses/`, and runs the game on
-   the S25 Ultra; input mapping and the `:game` process remain. On Android `gow2_prompts=auto`
-   keeps the controller glyphs unless a physical keyboard drives the game.
+   the S25 Ultra. Input: on-screen touch controls (a virtual pad merged with real pads), SDL
+   controllers, and the keyboard/mouse driver when a keyboard or mouse is attached at launch (not
+   yet tried with a real keyboard or mouse). The `:game` process remains. On Android `gow2_prompts=auto` keeps the controller glyphs unless
+   a physical keyboard drives the game.
 4. **Bring-up on the S25 Ultra** with the stock driver first, then Turnip through adrenotools;
    record `vulkaninfo` for the device. Started in October 2026: with the stock driver the game
-   reaches the PRESS START title screen.
+   reaches gameplay in Act 1 once the app may open sockets (`INTERNET`) and patch 0007 maps the
+   guest's privileged port and Winsock socket options and ioctls. Large parts of the scene render
+   black.
 5. **Measure.** If the generic Xenos path cannot hold 30 fps in Act 1, the proven alternative is a
-   renderer written for Unreal Engine 3's draw calls, which is a large project of its own.
+   renderer written for Unreal Engine 3's draw calls, which is a large project of its own. First
+   numbers (`gow2_frame_log`): 3 to 5 game frames per second in the first gameplay area with the
+   GPU 99% busy but thermally capped at 160-222 MHz of 1.2 GHz, and 13.6 to 16.8 for the first
+   seconds after the phone had cooled a little (GPU up to 734 MHz). A sustained measurement on a
+   cool phone is next.
 6. **More players and online** last, through hooks into the engine's session code (shared with
    the PC System Link work).
 

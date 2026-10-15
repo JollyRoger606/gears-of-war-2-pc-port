@@ -25,6 +25,7 @@
 
 #if defined(__ANDROID__)
 #include "gow2_android_devices.h"
+#include "gow2_frame_stats.h"
 #include "gow2_touch_controls.h"
 #endif
 
@@ -317,7 +318,12 @@ class Gow2App : public rex::ReXApp {
   // Override virtual hooks for customization:
   // void OnPostInitLogging() override {}
   // void OnLoadXexImage(std::string& xex_image) override {}
-  void OnPostSetup() override { rex::glue::InstallNativeMouseAim(window()); }
+  void OnPostSetup() override {
+    rex::glue::InstallNativeMouseAim(window());
+#if defined(__ANDROID__)
+    rex::glue::InstallFrameStats();
+#endif
+  }
 #if defined(__ANDROID__)
   void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
     touch_overlay_ = rex::glue::CreateTouchOverlay(drawer, touch_);
