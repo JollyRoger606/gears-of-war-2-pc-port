@@ -6,6 +6,57 @@ black regions in Act 1 gameplay, 2.6 to 6 game frames per second with the GPU th
 the Galaxy S25 Ultra, in order. Each experiment says what to set, what to capture and what counts as
 a result. The switches it uses keep today's behaviour unless a step sets them.
 
+## Results of the October 15 session
+
+Run on a warm phone (thermal status 2-3, skin 41-45 C, GPU capped at 160-342 MHz), so frame rates
+are compared as GPU megacycles per game frame (capped clock x busy / fps) at the same cap. The
+table with every run, its screenshot and its log is in the session's `out\device\results.md`.
+
+- **Frame rate: fixed half of it.** `GPUSTATS` showed about 1,600 render passes per game frame for
+  about 3,000 draws, 98 % of them ended by a barrier, and about 1,850 guest memory uploads per
+  frame (about 21 MB, 85 % of it vertex buffers). Only about 2 % of those pages had been
+  invalidated by CPU writes: the SDK's `clear_memory_page_state` (on by default) drops the valid
+  bit of every CPU-uploaded page at each frame end, so the whole working set (about 6,000 pages) is
+  uploaded again every frame, each upload a transfer that ends the Vulkan render pass. With it off,
+  at the same 222 MHz cap: 9.4 instead of 4.6 fps (23.4 instead of 47.8 Mcycles/frame), 155 render
+  passes and about 46 uploads per frame. Patch 0007 now defaults it to off on Android; the memory
+  watches still invalidate pages the CPU writes (on Windows it stays on). A walkthrough with both
+  settings (the Epic logo movie, the main menu, the save slot screen, loading, gameplay, walking and
+  turning) showed the same picture, the movie and the HUD updating, at 9.7-9.9 instead of 5.0 fps.
+- **Baseline from a cool start (step 1, with the fix).** The phone stayed on USB power (it cannot
+  be unplugged remotely), so the gate was not reached: the run started at thermal status 0,
+  `thermal_pwrlevel` 0, skin 34.0 C and battery 33.9 C, brightness 19, Motion smoothness on
+  (`refresh_rate_mode` 1). The first 40 s of gameplay ran at 26-29 fps with the GPU at 734 MHz
+  (at times the game's own 30 fps cap; GPU busy 74-99 %), then 19-23 fps at 525-660 MHz for two
+  minutes, 14-16 fps at 342-443 MHz, and 9-13 fps at 222 MHz from the fourth minute on, when the
+  skin had reached 44 C (thermal status 2). GPU megacycles per game frame stayed at 23-28 down to
+  342 MHz and 16-19 at 222 MHz (median 24.2 over 132 quiet windows). The October 14 code managed
+  13.6-16.8 fps at up to 734 MHz in the same place. Repeat on other days before trusting the
+  decay; the cost now sits close to the game's frame cap at the higher clocks, so the next limit
+  may be the CPU side (`top -H` during play, step 1).
+- **Black scene: not a GPU state problem.** None of experiments 2, 3, 5, 7-10 changed it, nor did
+  the PC's texture cache limits, invalid fetch constants allowed, or the four minutes waited in
+  place. Experiment 4 does not apply (the game issues no occlusion queries in this view, `ends 0`)
+  and experiment 6 is ruled out (the first gameplay with every pipeline built during play and the
+  later runs with all of them loaded from storage look the same). The new diagnostics rule out the
+  rest of the GPU state: depth test forced to pass for color draws, the depth prepass skipped,
+  stencil off, a whole-target scissor, face culling off and user clip planes / vertex kill dropped
+  (the game uses neither) all leave the same black shape. No needed texture is missing
+  (`missing_textures` now counts only the signed or unsigned view a texture actually uses: 0) and no
+  DXT texture is loaded as all zeros. Painting every draw that tests against the scene depth with a
+  constant magenta fragment shader (`vulkan_android_depth_experiment = 16`) paints the whole scene
+  except the black region: no scene draw reaches those pixels at all, so the buildings and the sky
+  there are either never drawn or drawn off-screen. A one-frame draw trace
+  (`vulkan_android_trace_frame_after_seconds`) shows plain float positions (format 57) and non-zero
+  vertex data in every draw, and every mesh drawn in the depth prepass also has its base-pass draws
+  (3,093 draws: 109 prepass meshes, all but six 36-vertex boxes drawn again with color). The game
+  data on the phone matches the PC copy file for file. So the missing objects are either absent
+  from both passes or rasterize nowhere in both. Next: an occlusion query around every draw of the
+  traced frame (with the depth test and culling off) to name the draws that produce no samples, then
+  their vertex shaders and constants; or a frame capture (RenderDoc or AGI), and a comparison with
+  the PC on the same checkpoint, to tell a CPU-side difference (culling, streaming) from a vertex
+  shader that places those objects wrongly.
+
 ## What the build adds
 
 The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) has:
@@ -17,6 +68,8 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   gameplay.
 - **`FRAMES` lines with the clock.** `gow2_frame_log` lines end with `gpu <MHz> of <MHz> busy <%>
   pwrlevel <n> thermal <status> headroom <h>`; any value Android hides from the app reads `n/a`.
+  Android 16 on the S25 Ultra hides `gpuclk` from the app and from `adb shell`, so the clock is read
+  from `devfreq/cur_freq` (or `clock_mhz`) instead.
 - **`GPUSTATS` lines** (`vulkan_android_stats_log = true`), every five seconds:
   `swaps` / `unpresented` (frames not shown because a pipeline was still being built), `draws` /
   `pending` (draws skipped for that reason), `no_ps` / `no_ps_color` (draws without a pixel shader,
@@ -26,7 +79,15 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   write color), `passes` / `submits` / `drains` (render passes, queue submissions, waits for the
   whole GPU), `occlusion ends` / `host` / `zero` / `samples`, and `pipeline_setup` (time the GPU
   command thread spent translating shaders and building pipelines, the slowest call, and how many
-  calls took 1 ms or more).
+  calls took 1 ms or more). Added on October 15: `no_vertices`, `ucp` / `vertex_kill` (draws with
+  user clip planes or a vertex kill flag), `pass_ends barrier` / `forced` / `switch` (why render
+  passes ended), `uploads` / `upload_kb` and `upload_kb_by index` / `texture` / `vertex` /
+  `memexport` (guest memory copied to the GPU, by the draw step that needed it),
+  `cpu_invalidations` / `cpu_invalidated_kb` / `newly_invalid_pages` (CPU writes caught by the
+  memory watches), and `texture_loads` / `zero_bc_base` / `zero_bc_mips` / `zero_other` /
+  `reloaded_after_zero` / `invalidated` (texture loads, those whose guest data was all zero, with
+  `TEXZERO` / `TEXRELOAD` lines for block-compressed ones). `missing_textures` counts only the
+  signed or unsigned view a texture actually uses (every fetch declares both).
 - **`TEXFMT`** lines (with `vulkan_android_stats_log`): each texture format the first time it is
   loaded, with its host format and load shader. **`TEXFAIL`** lines (always): a texture whose data
   could not be loaded, once per format; that used to fail without a word.
@@ -39,6 +100,9 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   | `vulkan_occlusion_query_precise` | false | Occlusion queries ask for exact sample counts (`VK_QUERY_CONTROL_PRECISE_BIT`) |
   | `vulkan_async_pipeline_placeholders` | true | false: new pipelines are queued without first building a placeholder on the GPU command thread, and pipelines without a pixel shader are built in the background too |
   | `gow2_system_settings` | "" | `Key=Value` pairs separated by `;` for the game's own `[SystemSettings]` (`Xe-GearEngine.ini`), for example `DynamicShadows=False` (restart) |
+  | `clear_memory_page_state` | false on Android | true re-uploads every CPU-written page at each frame end (the SDK's default elsewhere); halves the frame rate here |
+  | `vulkan_android_depth_experiment` | 0 | Diagnostic bits, each drawing the scene wrongly: 1 color draws without depth writes pass the depth test, 2 skip the depth prepass, 4 stencil off for color draws, 8 whole-target scissor, 16 scene draws painted magenta, 32 face culling off, 64 no user clip planes or vertex kill (restart) |
+  | `vulkan_android_trace_frame_after_seconds` | 0 | Logs every draw of one frame (`FRAMETRACE`: shaders, vertex formats, the first vertex words) this many seconds after the first swap (restart) |
 
 - **Tools.** `tools\android_log_summary.py <log> [--clocks <file>]` prints one row per `FRAMES`
   window (fps, pipelines built in it, clock, GPU megacycles per game frame, `GPUSTATS` fields) and
@@ -75,16 +139,32 @@ function Start-Game {
     adb -s $s shell am force-stop $pkg
     adb -s $s shell am start -W -n "$pkg/.Gow2Activity" --ez "$pkg.extra.SHOW_WHEN_LOCKED" true
 }
+# A plain keyevent is down and up within a few ms; the game polls once per frame and misses it.
 function Send-Key([string]$key, [int]$seconds) {
-    adb -s $s shell input keyevent $key
+    adb -s $s shell input keyevent --longpress $key
     Start-Sleep -Seconds $seconds
 }
-# Title, Start, Solo Campaign, save slot 1 (Tip of the Spear), Launch: the path of fix-08..fix-11.
+function Get-LogCount([string]$pattern) {
+    $name = (adb -s $s shell ls -t "$files/logs" | Select-Object -First 1).Trim()
+    [int]((adb -s $s shell "grep -c '$pattern' $files/logs/$name").Trim())
+}
+# Presses a key until the log shows the step happened (the title can take longer on a hot phone).
+function Send-KeyUntil([string]$key, [string]$marker, [int]$want) {
+    for ($try = 0; $try -lt 4; $try++) {
+        Send-Key $key 0
+        for ($waited = 0; $waited -lt 12; $waited += 2) {
+            Start-Sleep -Seconds 2
+            if ((Get-LogCount $marker) -ge $want) { return }
+        }
+    }
+}
+# Title (Start), Solo Campaign, save slot 1 (Tip of the Spear), Launch: the game probes the
+# checkpoint saves when the main menu and the slot screen open and binds its socket at Launch.
 function Open-Checkpoint {
-    Start-Sleep -Seconds 30
-    Send-Key KEYCODE_ENTER 8
-    Send-Key KEYCODE_SPACE 8
-    Send-Key KEYCODE_SPACE 0
+    Start-Sleep -Seconds 45
+    Send-KeyUntil KEYCODE_ENTER 'Gears2Checkpoint1.sav' 1
+    Send-KeyUntil KEYCODE_SPACE 'Gears2Checkpoint1.sav' 2
+    Send-KeyUntil KEYCODE_SPACE 'XSocket: guest port' 1
 }
 function Save-Shot([string]$name) {
     adb -s $s shell screencap -p /data/local/tmp/gow2-shot.png
@@ -95,7 +175,7 @@ function Save-Log([string]$name) {
     adb -s $s pull "$files/logs/$newest" (Join-Path $exp "$name-$newest")
 }
 function Measure-Black([string]$name) {
-    Start-Game; Open-Checkpoint; Start-Sleep -Seconds 40
+    Start-Game; Open-Checkpoint; Start-Sleep -Seconds 75
     Save-Shot $name; Save-Log $name
     python tools\black_fraction.py (Join-Path $exp "$name.png")
 }

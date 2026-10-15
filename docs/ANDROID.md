@@ -4,12 +4,13 @@ Status (October 2026): `scripts/build-android.ps1` builds an APK with the game's
 (SDK, GPU plugin and the recompiled game for arm64) from a clean clone of this repository, the SDK
 included. On the phone the game plays the start of Act 1 with on-screen touch controls (also
 controllers, and a keyboard and mouse attached at launch): menus, the campaign intro, the opening
-cutscene and gameplay, where Marcus moves, turns the camera and fires. It runs at about 3 to 5 game frames
-per second while the phone's thermal limit holds the GPU at its lowest clocks, and parts of the
-scene render black. Target device for bring-up: Samsung Galaxy S25 Ultra (Snapdragon 8 Elite,
-Adreno 830, Vulkan 1.3). Controls: [`android/README.md`](../android/README.md#controls). The next
-session on the phone follows [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md): a cool-phone
-baseline, then one switch per candidate cause of the black scene and of the frame rate.
+cutscene and gameplay, where Marcus moves, turns the camera and fires. Since October 15 it runs at
+about 9.4 game frames per second where it ran at 4.6, with the phone's thermal limit holding the
+GPU at 222 MHz (the SDK re-uploaded every CPU-written page each frame; see step 5), and parts of the
+scene still render black (step 4). Target device for bring-up: Samsung Galaxy S25 Ultra
+(Snapdragon 8 Elite, Adreno 830, Vulkan 1.3). Controls:
+[`android/README.md`](../android/README.md#controls). [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md)
+has the experiments, their results and what comes next.
 
 ## Building the APK
 
@@ -143,22 +144,35 @@ copy of the generated code.
    record `vulkaninfo` for the device. Started in October 2026: with the stock driver the game
    reaches gameplay in Act 1 once the app may open sockets (`INTERNET`) and patch 0007 maps the
    guest's privileged port and Winsock socket options and ioctls. Large parts of the scene render
-   black: about a third of the picture at the start of the first checkpoint, in regions with
-   straight edges that cut jaggedly into the buildings, like boxes drawn with the depth test. The
-   runtime logs no GPU error. Patch 0007 has switches that each test one candidate (draws without
-   a pixel shader while color targets are bound, occlusion query counts, position invariance,
-   sparse binding, dynamic rendering) and `gow2_system_settings` switches the game's own effects
-   (shadows first); [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md) runs them in order.
+   black: about a third of the picture at the start of the first checkpoint (buildings and sky
+   behind the first facade). The runtime logs no GPU error. On October 15 every GPU-side candidate
+   was switched off in turn on the phone (fragment-less pipelines, the game's shadows and other
+   effects, position invariance, sparse binding, render passes, float24 depth in the shader,
+   geometry shaders, depth test, depth prepass, stencil, scissor, culling, texture limits, invalid
+   fetch constants) and the black shape stayed the same; pipelines built late and missing or
+   all-zero textures are ruled out too. With every scene draw painted a constant color, the region
+   stays black: no scene draw reaches it, so those objects are either never drawn or drawn
+   off-screen. A frame capture and a comparison with the PC at the same checkpoint come next
+   ([`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md#results-of-the-october-15-session)).
 5. **Measure.** If the generic Xenos path cannot hold 30 fps in Act 1, the proven alternative is a
    renderer written for Unreal Engine 3's draw calls, which is a large project of its own. First
    numbers (`gow2_frame_log`): 3 to 5 game frames per second in the first gameplay area with the
    GPU 99% busy but thermally capped at 160-222 MHz of 1.2 GHz, and 13.6 to 16.8 for the first
-   seconds after the phone had cooled a little (GPU up to 734 MHz). A sustained measurement on a
-   cool phone is next. Part of the slowest windows was not the clock but pipelines built during
-   play: Bionic starts reading an `"a+"` stream at its end, so the Vulkan shader storage found no
-   header and truncated itself at every launch. Patch 0007 now rewinds those streams (not yet run
-   on the phone). `FRAMES` lines carry the GPU clock and thermal state, and `GPUSTATS` lines the
-   command processor's work, so the next numbers can be read per clock.
+   seconds after the phone had cooled a little (GPU up to 734 MHz). Part of the slowest windows was
+   not the clock but pipelines built during play: Bionic starts reading an `"a+"` stream at its
+   end, so the Vulkan shader storage found no header and truncated itself at every launch. Patch
+   0007 rewinds those streams; on the phone the storage now loads at boot (`Created 295 graphics
+   pipelines from Vulkan storage` after the first gameplay). The larger cost was the SDK's
+   `clear_memory_page_state`: at every frame end it marks every page the CPU uploaded as stale, so
+   the whole working set (about 6,000 pages, 21 MB) was copied to the GPU again each frame in about
+   1,850 uploads, each a transfer that ends the Vulkan render pass (about 1,600 render passes a
+   frame for 3,000 draws). Patch 0007 turns it off on Android (the memory watches still catch CPU
+   writes): at the same 222 MHz cap the game went from 4.6 to 9.4 fps (47.8 to 23.4 GPU
+   megacycles per game frame), with 155 render passes and about 46 uploads a frame. From a cool
+   start (thermal status 0) the first 40 s of gameplay now run at 26-29 fps with the GPU at
+   734 MHz, close to the game's own 30 fps cap, and the rate follows the thermal cap down to
+   9-13 fps at 222 MHz after about four minutes. `FRAMES` lines carry the GPU clock and thermal
+   state, and `GPUSTATS` lines the command processor's work, so numbers can be read per clock.
 6. **More players and online** last, through hooks into the engine's session code (shared with
    the PC System Link work).
 

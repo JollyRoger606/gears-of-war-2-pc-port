@@ -130,7 +130,11 @@ skin 42 to 45 C, after hours of testing while charging; `thermal_pwrlevel` 13 to
 `/sys/class/kgsl/kgsl-3d0`). The GPU is 99% busy, so these numbers say little about a cool phone:
 after a few minutes' rest (thermal status 2, GPU allowed up to 734 MHz) the same place ran at 13.6
 to 16.8 fps for about ten seconds, then fell back to 3 to 6 fps as the cap returned. The menus run
-at 30 to 50 fps.
+at 30 to 50 fps. On October 15, at the same 222 MHz cap, the same place ran at 4.6 fps with the
+SDK's per-frame page invalidation and at 9.4 fps without it (`clear_memory_page_state`, now off on
+Android; see [GPU diagnostics and switches](#gpu-diagnostics-and-switches)). From a cool start it
+now runs at 26-29 fps with the GPU at 734 MHz for the first 40 s, then follows the thermal cap
+down to 9-13 fps at 222 MHz after about four minutes.
 Large parts of the scene render black.
 
 ## Game build
@@ -264,9 +268,10 @@ platforms). 8 threads calling `InputSystem`'s `GetState`, `GetCapabilities`, `Se
 same driver called without `InputSystem` does see overlapping threads (so the check can detect the
 race). The guest `XamInputGetState`, `XamInputGetCapabilities(Ex)`, `XamInputSetState` and
 `XamInputGetKeystroke(Ex)` call exactly those four methods. On the S25 Ultra it printed
-`runtime_selftest: 18 checks, 0 failed`. A 19th check (October 15, not yet run on the phone) sets
-d8-d15 to known values, switches to a fiber that overwrites them and back, and expects them
-unchanged: AAPCS64 makes them callee-saved, and patch 0007's fiber switch did not keep them before.
+`runtime_selftest: 18 checks, 0 failed`. A 19th check (October 15) sets d8-d15 to known values,
+switches to a fiber that overwrites them and back, and expects them unchanged: AAPCS64 makes them
+callee-saved, and patch 0007's fiber switch did not keep them before. On the phone:
+`runtime_selftest: 19 checks, 0 failed`.
 The script then runs `gow2_touch_model_test`
 (`gamelibs/tests/touch_model_test.cpp`, pure C++): the touch layout, finger ownership, the stick,
 taps held until each reader has seen them (also while a second reader polls every 16 ms), look
@@ -375,7 +380,8 @@ a phone: Android lowers the display's refresh rate, and runtime overlays repaint
 frames. Each line ends with the GPU clock and its current ceiling, busy percentage and
 `thermal_pwrlevel` from `/sys/class/kgsl/kgsl-3d0`, and the thermal status and headroom Android
 reports (`n/a` for whatever the app may not read), so a rate can be read against the clock it ran
-at. `tools/android_log_summary.py` turns a log into one row per window with GPU megacycles per
+at. Android 16 on the S25 Ultra hides `gpuclk` from apps and from `adb shell`; the clock comes from
+`devfreq/cur_freq` (or `clock_mhz`) instead, as in `scripts/android-gpu-clocks.sh`. `tools/android_log_summary.py` turns a log into one row per window with GPU megacycles per
 game frame.
 
 ### GPU diagnostics and switches
@@ -385,16 +391,28 @@ frame rate; none changes what the game does unless it is set in `gow2.toml`.
 [`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md) lists them and the order to try
 them in. `vulkan_android_stats_log=true` adds a `GPUSTATS` line every five seconds (draws by kind,
 render passes, submissions, waits for the whole GPU, occlusion queries, time the GPU command thread
-spends building pipelines) and a `TEXFMT` line per texture format; a texture whose data cannot be
-loaded logs `TEXFAIL` once per format. `gow2_system_settings` sets keys of the game's own
-`[SystemSettings]` (for example `DynamicShadows=False;AmbientOcclusion=False`) in the cached
-Coalesced copy, so the game's own effects can be switched off without a rebuild.
+spends building pipelines, why render passes ended, guest memory uploads by the draw step that
+needed them, CPU writes caught by the memory watches, texture loads and all-zero texture data) and
+a `TEXFMT` line per texture format; a texture whose data cannot be loaded logs `TEXFAIL` once per
+format. `gow2_system_settings` sets keys of the game's own `[SystemSettings]` (for example
+`DynamicShadows=False;AmbientOcclusion=False`) in the cached Coalesced copy, so the game's own
+effects can be switched off without a rebuild. `vulkan_android_depth_experiment` (diagnostic bits:
+depth test forced to pass, depth prepass skipped, stencil off, whole-target scissor, scene draws
+painted magenta, culling off, no clip planes) and `vulkan_android_trace_frame_after_seconds` (every
+draw of one frame logged as `FRAMETRACE`) are for the black scene.
 
-The Vulkan shader and pipeline storage now survives a relaunch: Bionic starts reading an `"a+"`
+`clear_memory_page_state` is off on Android (patch 0007; the SDK's default, on, stays elsewhere).
+On, it marks every page the CPU uploaded as stale at each frame end, so the whole working set was
+copied to the GPU again every frame: about 1,850 uploads and 21 MB a frame in Act 1, each upload a
+transfer that ends the Vulkan render pass (about 1,600 render passes a frame). Off, the memory
+watches still invalidate the pages the CPU writes; the frame rate doubled at the same GPU clock.
+
+The Vulkan shader and pipeline storage survives a relaunch: Bionic starts reading an `"a+"`
 stream at the end of the file, so the storage found no header and truncated itself at every
 launch, and every pipeline was built again during play. Each new pipeline held the GPU command
 thread for 40-48 ms, and those bursts made the slowest windows of the October 14-15 runs. Patch
-0007 rewinds such streams. Not yet run on the phone.
+0007 rewinds such streams; on the phone the storage now loads its pipelines at boot (`Created 295
+graphics pipelines from Vulkan storage` once the first gameplay has filled it).
 
 ## Menu prompts
 
@@ -406,11 +424,12 @@ unchanged: keyboard labels unless an XInput controller is connected at launch.
 
 ## Not done yet
 
-- Speed: 3 to 5 game frames per second on a thermally capped GPU (see above); a measurement on a cool
-  phone, and the Xenos path's cost on the Adreno 830, are next
+- Speed: about 9 game frames per second on a GPU thermally capped at 222 MHz (see above); the Xenos
+  path's remaining cost on the Adreno 830 is next
   ([`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md), steps 1 and P1-P6).
 - Rendering: large parts of the scene are black in gameplay (34% of the picture at the start of the
-  first checkpoint, `tools/black_fraction.py`); experiments 2-11 of the same document.
+  first checkpoint, `tools/black_fraction.py`). No scene draw reaches those pixels and every GPU
+  state switch was ruled out; a frame capture comes next (same document, results section).
 - A checkpoint written by an older build (before the network fixes) crashes on load: the main
   thread's guest stack overflows in `sub_8255E4A8`, which calls itself through an object listed as
   its own child (`Unhandled guest access violation: write of guest 0x7014FFD0`). New campaigns and
