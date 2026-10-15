@@ -404,11 +404,13 @@ Work:
    Decisions taken while implementing:
 
    - System Link is opt-in. With the defaults a solo game behaves as before 0010: the link reports
-     down, so the game creates no LAN session and should bind only UDP 0.0.0.0:1000 as before [I;
-     Stage 1 test run 3 checks it]; it sees the offline XUID, and nothing is written to the user
-     data folder. What still differs without the link are fixes that do not depend on it: socket
-     addresses in network order, a random `XNetRandom` and a per-instance MAC in
-     `XNetGetTitleXnAddr` instead of CC:CC:CC:CC:CC:CC.
+     down, so the game creates no LAN session; it sees the offline XUID, and nothing is written to
+     the user data folder. Its one game socket binds UDP 0.0.0.0:1000 with 0010 alone (Stage 1 test
+     run 3) and 0.0.0.0:41000 with 0011 on top, because 0011's port remap does not depend on the
+     link (Android cannot bind port 1000 even in a solo game). What still differs without the link
+     are fixes that do not depend on it: socket addresses in network order, a random `XNetRandom`,
+     a per-instance MAC in `XNetGetTitleXnAddr` instead of CC:CC:CC:CC:CC:CC, and 0011's port
+     remap and POSIX socket fixes.
      `gow2_coop_players` 3 or more turns the link on in `OnPreSetup`, before the kernel reads it, and
      logs `SCRIPTPATCH coop: gow2_coop_players=4 turns System Link on (net_link_active=true)`; an
      explicit `net_link_active` in `gow2.toml` or on the command line wins. Two-player System Link
@@ -486,7 +488,8 @@ settings) must look like a run before 0010: the log shows `[netlink] link report
 'User'`, an existing save loads, no `system_link_xuid.txt` appears in the user data folder, no
 Windows Firewall prompt appears beyond any the port already raised for UDP 1000, and with
 `--system_link_trace=true` the trace shows `XNetGetEthernetLinkStatus ... ret=0x0`, a single bind
-(`0.0.0.0:1000`) and no `XGISessionCreate`.
+(`0.0.0.0:1000`; with patch 0011, `bind port 1000 -> 41000 (net_port_offset)`) and no
+`XGISessionCreate`.
 
 Run 4 (`--gow2_coop_players=4`) also logs `SCRIPTPATCH coop: gow2_coop_players=4 turns System Link
 on (net_link_active=true)`, `[netlink] link active: local <ip> (<where from>)` and a `Signed-in

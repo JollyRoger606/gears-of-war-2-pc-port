@@ -39,7 +39,7 @@ restart.
 | Setting | Default | Effect |
 |---|---|---|
 | `net_link_active` | false | true turns System Link on (the game sees an active Ethernet link). |
-| `net_port_offset` | 40000 | Guest ports below 1024 move up by this offset on the host. The game's UDP 1000 becomes 41000. The beacon port 14001 stays as it is. |
+| `net_port_offset` | 40000 | Guest ports below 1024 move up by this offset on the host, with System Link on or off (a solo game binds 41000 too). The game's UDP 1000 becomes 41000. The beacon port 14001 stays as it is. |
 | `net_local_ip` | empty | This machine's LAN address, as a.b.c.d or a.b.c.d/prefix (prefix 24 by default). Empty means the app's detected address, then `net_bind_ip`, then the default-route address, then 127.0.0.1. |
 | `net_peers` | empty | Comma-separated host[:port] list (IPv4 or DNS names). Every broadcast the game sends also goes to each peer as a unicast copy. |
 | `net_public_address` | empty | host[:port] (IPv4 or DNS name) advertised to other players. Set `net_allow_peers` with it. |
