@@ -406,8 +406,14 @@ format. `gow2_system_settings` sets keys of the game's own `[SystemSettings]` (f
 `DynamicShadows=False;AmbientOcclusion=False`) in the cached Coalesced copy, so the game's own
 effects can be switched off without a rebuild. `vulkan_android_depth_experiment` (diagnostic bits:
 depth test forced to pass, depth prepass skipped, stencil off, whole-target scissor, scene draws
-painted magenta, culling off, no clip planes) and `vulkan_android_trace_frame_after_seconds` (every
-draw of one frame logged as `FRAMETRACE`) are for the black scene.
+painted magenta, culling off, no clip planes, prepass meshes skipped without their depth clears,
+every float24 color draw passing its depth test, mid-frame depth clears skipped, prepass painted),
+`vulkan_android_color_depth_bias`, the shader hash lists `vulkan_android_skip_shader_hashes` and
+`vulkan_android_paint_shader_hashes`, `vulkan_android_skip_draw_range` and
+`vulkan_android_trace_frame_after_seconds` (every draw of one frame logged as `FRAMETRACE` with its
+render targets, viewport, scissor and polygon offset, plus the frame's render target transfers,
+resolves and resolve clears as `FRAMETRACE-RT`) are for the black scene; `docs/ANDROID_EXPERIMENTS.md`
+lists them.
 
 `clear_memory_page_state` is off on Android (patch 0007; the SDK's default, on, stays elsewhere).
 On, it marks every page the CPU uploaded as stale at each frame end, so the whole working set was

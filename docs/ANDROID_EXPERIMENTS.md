@@ -91,7 +91,8 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   data was all zero, with `TEXZERO` / `TEXRELOAD` lines for block-compressed ones; the earlier
   October 15 builds counted GPU-written loads in `zero_other` too, whatever the GPU had written).
   `missing_textures` counts only the signed or unsigned view a texture actually uses (every fetch
-  declares both).
+  declares both). `no_ps_d24fs8_no_rt0` counts depth-only draws on the float24 depth with no color
+  target 0 bound: the ones bit 1024 cannot paint.
 - **`TEXFMT`** lines (with `vulkan_android_stats_log`): each texture format the first time it is
   loaded, with its host format and load shader. **`TEXFAIL`** lines (always): a texture whose data
   could not be loaded, once per format; that used to fail without a word.
@@ -105,8 +106,21 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   | `vulkan_async_pipeline_placeholders` | true | false: new pipelines are queued without first building a placeholder on the GPU command thread, and pipelines without a pixel shader are built in the background too |
   | `gow2_system_settings` | "" | `Key=Value` pairs separated by `;` for the game's own `[SystemSettings]` (`Xe-GearEngine.ini`), for example `DynamicShadows=False` (restart) |
   | `clear_memory_page_state` | false on Android | true re-uploads every CPU-written page at each frame end (the SDK's default elsewhere); halves the frame rate here |
-  | `vulkan_android_depth_experiment` | 0 | Diagnostic bits, each drawing the scene wrongly: 1 color draws without depth writes pass the depth test, 2 skip the depth prepass, 4 stencil off for color draws, 8 whole-target scissor, 16 scene draws painted magenta, 32 face culling off, 64 no user clip planes or vertex kill (restart) |
-  | `vulkan_android_trace_frame_after_seconds` | 0 | Logs every draw of one frame (`FRAMETRACE`: shaders, vertex formats, the first vertex words) this many seconds after the first swap (restart) |
+  | `vulkan_android_depth_experiment` | 0 | Diagnostic bits, each drawing the scene wrongly: 1 color draws without depth writes pass the depth test, 2 skip every depth-only draw on the float24 depth (the prepass and its depth clears), 4 stencil off for color draws, 8 whole-target scissor, 16 scene draws that pass the depth test painted magenta, 32 face culling off, 64 no user clip planes or vertex kill, 128 skip the prepass meshes but keep the depth clears (rectangle lists), 256 every color draw with a pixel shader on the float24 depth passes the depth test (depth writers too), 512 skip the depth clear rectangles drawn after the frame's first prepass mesh (#575-class; #0 stays), 1024 depth-only draws on the float24 depth with color target 0 bound write magenta (restart) |
+  | `vulkan_android_color_depth_bias` | 0 | Added to the depth bias constant factor of color draws with a pixel shader on the float24 depth that test GREATER or GEQUAL (host D32F: 1 unit is about 6e-8 at depth 0.5, 16 units about one float24 step) (restart) |
+  | `vulkan_android_skip_shader_hashes` | "" | Comma-separated 16-hex ucode hashes (vertex or pixel shader, as `FRAMETRACE` prints them): their draws are skipped (restart) |
+  | `vulkan_android_paint_shader_hashes` | "" | The same list format: their draws write magenta (a depth-only draw only where color target 0 is bound) (restart) |
+  | `vulkan_android_skip_draw_range` | "" | `first-last` or one number: those draws of every frame are skipped, numbered as `FRAMETRACE` numbers them (restart) |
+  | `vulkan_android_trace_frame_after_seconds` | 0 | Logs every draw of one frame this many seconds after the first swap (restart): `FRAMETRACE` (shaders, vertex formats, the first vertex words), `FRAMETRACE-STATE` (render pass key, surface pitch and MSAA, depth and written color targets as base/format, viewport, window scissor and offset, polygon offset, the color depth bias applied and why a switch skipped the draw), `FRAMETRACE-VERTS` (the first three vertices of rectangle lists) and `FRAMETRACE-RT @<next draw>` (render target ownership transfers with their source and tiles, resolves with RB_COPY_* and clear values, resolve clears) |
+
+  Draws are numbered from 0 after every swap, as they reach the pipeline (a draw skipped while its
+  pipeline is still being built gets no number); a skipped draw keeps its number and its
+  `FRAMETRACE` lines, so a trace of a run with a skip switch still lines up with the plain one.
+  Switches that change a pipeline's description (bits 1, 4, 32, 64, 256 and 1024, and the paint
+  list for draws without a pixel shader) add those pipelines to the shader storage, and a later
+  plain launch builds them at boot too: delete the storage (experiment 6's `rm`) before measuring
+  boot time or frame rate after such runs. Bit 16 and the paint list for draws with a pixel shader
+  only swap the fragment shader when a pipeline is built.
 
 - **Tools.** `tools\android_log_summary.py <log> [--clocks <file>]` prints one row per `FRAMES`
   window (fps, pipelines built in it, clock, GPU megacycles per game frame, `GPUSTATS` fields) and
