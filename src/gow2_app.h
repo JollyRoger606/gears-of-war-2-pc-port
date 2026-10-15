@@ -254,13 +254,26 @@ class Gow2App : public rex::ReXApp {
   void OnPostLoadXexImage() override { rex::glue::PatchHashSec(coalesced_hashes_); }
 
 #if defined(__ANDROID__)
+  // A device found at launch becomes this launch's default value, so the settings overlay's
+  // "Save to config" does not write it to gow2.toml for a later launch without that device.
+  static void SetLaunchDefault(const char* name, const std::string& value) {
+    if (rex::cvar::GetFlagSource(name) != rex::cvar::Source::kDefault) return;
+    if (!rex::cvar::SetFlagByName(name, value)) return;
+    for (rex::cvar::FlagEntry& entry : rex::cvar::GetRegistry()) {
+      if (entry.name != name) continue;
+      entry.default_value = entry.getter();
+      entry.source = rex::cvar::Source::kDefault;
+      return;
+    }
+  }
+
   // On a phone the keyboard/mouse driver runs only when a keyboard or mouse is attached at launch;
   // a mouse also turns the camera (through the native mouse path when gow2_mouse_aim allows it).
   static void UseAttachedKeyboardAndMouse() {
     const bool keyboard = rex::glue::PhysicalKeyboardConnected();
     const bool mouse = rex::glue::ExternalMouseConnected();
-    if (keyboard || mouse) SetIfUnset("mnk_mode", "true");
-    if (mouse) SetIfUnset("mnk_mouse", "true");
+    if (keyboard || mouse) SetLaunchDefault("mnk_mode", "true");
+    if (mouse) SetLaunchDefault("mnk_mouse", "true");
     REXLOG_INFO("INPUTDEV keyboard {}, mouse {} -> mnk_mode {}, mnk_mouse {}",
                 keyboard ? "connected" : "not connected", mouse ? "connected" : "not connected",
                 rex::cvar::Query<bool>("mnk_mode") ? "on" : "off",

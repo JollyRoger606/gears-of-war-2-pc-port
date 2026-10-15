@@ -55,6 +55,16 @@ cmake_path(GET _gen_parent PARENT_PATH GOW2_GENERATED_INCLUDE_ROOT)
 string(APPEND CMAKE_C_FLAGS " -march=armv8.2-a -fno-emulated-tls")
 string(APPEND CMAKE_CXX_FLAGS " -march=armv8.2-a -fno-emulated-tls")
 string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-z,max-page-size=16384")
+# __FILE__ and the debug info name sources relative to these roots, so the libraries do not depend on
+# where the checkout, the SDK tree or the NDK live and do not carry the builder's folders. For debug
+# info Clang applies the last matching map, so the SDK tree, which usually sits in out\ of the
+# repository, comes last and is named rexglue-sdk wherever it is.
+file(TO_CMAKE_PATH "${GOW2_REXSDK_DIR}" _sdk_prefix)
+file(TO_CMAKE_PATH "${ANDROID_NDK}" _ndk_prefix)
+add_compile_options(
+    "-ffile-prefix-map=${GOW2_ROOT}=gow2-recomp"
+    "-ffile-prefix-map=${_ndk_prefix}=android-ndk"
+    "-ffile-prefix-map=${_sdk_prefix}=rexglue-sdk")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

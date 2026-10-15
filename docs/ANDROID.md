@@ -24,8 +24,11 @@ the generated code in `out\android\generated\default` with the ARM memory barrie
 the game from [`android/gamelibs`](../android/gamelibs/CMakeLists.txt) in `out\android\build`, the
 staged libraries in `out\android\jniLibs\arm64-v8a`, `tools/check_android_libs.py`, and Gradle with
 `-Pgow2.gameLibraries=true`. Details and requirements: [`android/README.md`](../android/README.md#game-build).
-`-SdkSource <tree>` builds your own SDK tree instead (the worktree the port is changed in); the
-script first checks that the tree has the current patches and names what is missing.
+`-SdkSource <tree>` builds your own SDK tree instead (the worktree the port is changed in). Either
+tree is first compared with `923c1a5` plus every patch: changes beyond the series are listed, and a
+tree that lacks part of the series, or changes lines it adds, stops the build with the paths that
+differ. The libraries are compiled with `-ffile-prefix-map`, so they hold no absolute paths of the
+checkout, the SDK tree or the NDK, and the check fails when one appears.
 
 The APK's `lib/arm64-v8a` holds `libSDL3.so`, `librexruntime.so`, `librexgpu-xenos.so`,
 `libgow2.so` and `libc++_shared.so`. SDLActivity loads them in that order and runs `SDL_main` from
@@ -37,8 +40,8 @@ in the APK is 16 KB aligned.
 
 `libgow2.so` exports only `SDL_main`, which `SDLActivity` finds with `dlsym`; the version script
 `android/gamelibs/libgow2.map` keeps the recompiled code's ~98,000 symbols local. That shrank
-`libgow2.so` in the APK from 62.2 MB to 52.0 MB (APK 79.2 MB to 71.6 MB) and its load time from 10-15
-ms to 2-7 ms. The check fails if it exports anything besides `SDL_main` (`--main-exports` lists the
+`libgow2.so` in the APK from 62.2 MB to 52.0 MB (the whole APK, packed from scratch, is 67.6 MB)
+and its load time from 10-15 ms to 2-7 ms. The check fails if it exports anything besides `SDL_main` (`--main-exports` lists the
 allowed names).
 
 The SDK side of the port is [`sdk/patches/0007-android-arm64-port.patch`](../sdk/patches/README.md),

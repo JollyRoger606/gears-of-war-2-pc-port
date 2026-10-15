@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace rex::glue::touch {
@@ -43,6 +44,7 @@ struct PadState {
   bool operator==(const PadState&) const = default;
 };
 
+// The layout lists the controls in this order.
 enum class ControlId : uint8_t {
   kFire,
   kAim,
@@ -58,8 +60,14 @@ enum class ControlId : uint8_t {
   kDpadRight,
   kStart,
   kBack,
+  kRightThumb,
+  kSettings,
 };
-constexpr size_t kButtonControlCount = 14;
+constexpr size_t kControlCount = 16;
+
+// Who reads the pad: every guest thread that calls XamInputGetState, and the key-event reader, has
+// to see every press itself (the game thread reads every slow frame, another thread every 16 ms).
+using ConsumerId = uint64_t;
 
 struct ControlSpec {
   ControlId id;
@@ -69,7 +77,10 @@ struct ControlSpec {
   const char* label;
 };
 
-const std::array<ControlSpec, kButtonControlCount>& DefaultLayout();
+const std::array<ControlSpec, kControlCount>& DefaultLayout();
+
+// Turns a look speed (viewport heights per second, y up) into right-stick deflection.
+void ShapeLook(float raw_x, float raw_y, float* out_x, float* out_y);
 
 struct Settings {
   float scale = 1.0f;
@@ -101,16 +112,23 @@ class TouchModel {
   void SetSettings(const Settings& settings);
 
   void PointerDown(uint32_t pointer, float x, float y, int64_t now_ms);
+  void IgnorePointer(uint32_t pointer, int64_t now_ms);
   void PointerMove(uint32_t pointer, float x, float y, int64_t now_ms);
   void PointerUp(uint32_t pointer, int64_t now_ms);
   void ReleaseAll();
+  void DropPendingInput();
 
-  PadState Sample(int64_t now_ms) const;
+  PadState Sample(ConsumerId consumer, int64_t now_ms) const;
+  void Acknowledge(ConsumerId consumer, const PadState& reported, int64_t now_ms);
+  bool TakeSettingsRequest();
+
   std::vector<ControlView> Controls(int64_t now_ms) const;
   StickView Stick() const;
   bool HasPointers() const;
 
  private:
+  static constexpr int64_t kNeverMs = std::numeric_limits<int64_t>::min() / 4;
+
   enum class PointerTarget : uint8_t {
     kNone,
     kButton,
@@ -125,38 +143,72 @@ class TouchModel {
     float down_x = 0;
     float down_y = 0;
     int64_t down_ms = 0;
+    float last_x = 0;
+    float last_y = 0;
+    bool dragging = false;
   };
 
   struct LookTravel {
+    uint64_t seq = 0;
     int64_t ms = 0;
     float dx = 0;
     float dy = 0;
   };
 
-  bool IsButtonPressed(size_t index, ControlId id, int64_t now_ms) const;
-  void ForgetOldLookTravel(int64_t now_ms);
-  void LookStick(int64_t now_ms, int16_t* rx, int16_t* ry) const;
+  struct ConsumerState {
+    ConsumerId id = 0;
+    uint32_t pending = 0;
+    uint32_t rearm = 0;
+    uint32_t last_reported = 0;
+    int64_t last_poll_ms = kNeverMs;
+    uint64_t look_seq = 0;
+    int64_t last_look_poll_ms = kNeverMs;
+    int16_t last_look_rx = 0;
+    int16_t last_look_ry = 0;
+  };
+
+  TrackedPointer* FindPointer(uint32_t pointer);
+  void TrackPointer(uint32_t pointer, PointerTarget target, ControlId button_id, float x, float y,
+                    int64_t now_ms);
+  void PressControl(uint32_t pointer, ControlId id, float x, float y, int64_t now_ms);
+  void RegisterPress(ControlId id, int64_t now_ms);
+  PointerTarget ClaimStickOrLook(float x, float y);
+  void MoveDraggableButton(TrackedPointer& ptr, float x, float y, int64_t now_ms);
+  void AddLookTravel(float dx, float dy, int64_t now_ms);
+
+  const ConsumerState* FindConsumer(ConsumerId id) const;
+  ConsumerState& ConsumerFor(ConsumerId id);
+  void ForgetIdleConsumers(int64_t now_ms);
+  bool IsHeld(ControlId id) const;
+  bool IsPending(const ConsumerState& consumer, ControlId id, int64_t now_ms) const;
+  bool IsPendingForAnyone(ControlId id, int64_t now_ms) const;
+  bool IsPressedFor(const ConsumerState& consumer, ControlId id, int64_t now_ms) const;
+  void AddControl(PadState& state, ControlId id, bool pressed) const;
+  void LeftStick(PadState& state) const;
+  void LookStick(const ConsumerState& consumer, int64_t now_ms, int16_t* rx, int16_t* ry) const;
+  uint32_t ReportedBits(const PadState& reported) const;
+  void ClearAcknowledgedPresses(ConsumerState& consumer, uint32_t reported_bits, int64_t now_ms);
+  void MarkLookRead(ConsumerState& consumer, const PadState& reported, int64_t now_ms);
 
   float width_ = 0;
   float height_ = 0;
   Settings settings_;
 
   std::vector<TrackedPointer> pointers_;
-  std::array<int64_t, kButtonControlCount> button_latch_until_{};
+  std::array<int64_t, kControlCount> press_ms_{};
+  std::vector<ConsumerState> consumers_;
   bool aim_toggle_flag_ = false;
+  bool settings_requested_ = false;
 
   bool stick_active_ = false;
-  uint32_t stick_pointer_id_ = 0;
   float stick_base_x_ = 0;
   float stick_base_y_ = 0;
   float stick_curr_x_ = 0;
   float stick_curr_y_ = 0;
 
   bool look_active_ = false;
-  uint32_t look_pointer_id_ = 0;
-  float look_last_x_ = 0;
-  float look_last_y_ = 0;
   std::vector<LookTravel> look_travel_;
+  uint64_t last_look_seq_ = 0;
 };
 
 }  // namespace rex::glue::touch

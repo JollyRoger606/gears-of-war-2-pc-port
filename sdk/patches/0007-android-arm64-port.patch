@@ -195,6 +195,33 @@ index a7ab6b3..5620e12 100644
   protected:
    ImGuiDialog(ImGuiDrawer* imgui_drawer);
  
+diff --git a/include/rex/ui/imgui_drawer.h b/include/rex/ui/imgui_drawer.h
+index a570fa0..f0fabd8 100644
+--- a/include/rex/ui/imgui_drawer.h
++++ b/include/rex/ui/imgui_drawer.h
+@@ -84,6 +84,9 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
+   void ClearInput();
+   void OnKey(KeyEvent& e, bool is_down);
+   void UpdateMousePosition(float x, float y);
++#if REX_PLATFORM_ANDROID
++  void ReleaseDeferredTouch(ImGuiIO& io);
++#endif
+   void SwitchToPhysicalMouseAndUpdateMousePosition(const MouseEvent& e);
+ 
+   bool IsDrawingDialogs() const { return dialog_loop_next_index_ != SIZE_MAX; }
+@@ -123,6 +126,12 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
+   // reset (for instance, after releasing a touch), so it's not hovering over
+   // anything.
+   bool reset_mouse_position_after_next_frame_ = false;
++#if REX_PLATFORM_ANDROID
++  // A tap whose lift arrives before any frame saw the press is released after the next frame, so
++  // ImGui sees a click instead of nothing (the UI thread can hand over both in one go).
++  bool touch_press_unseen_ = false;
++  bool touch_release_deferred_ = false;
++#endif
+ 
+   double frame_time_tick_frequency_;
+   uint64_t last_frame_time_ticks_;
 diff --git a/include/rex/ui/surface_android.h b/include/rex/ui/surface_android.h
 new file mode 100644
 index 0000000..120ace9
@@ -1249,7 +1276,7 @@ index 5bd3dc5..64b7f6a 100644
      pkg_check_modules(X11_XCB REQUIRED x11-xcb)
      # Required, not optional: vulkan/api.h pulls in <wayland-client.h> on every
 diff --git a/src/ui/imgui_drawer.cpp b/src/ui/imgui_drawer.cpp
-index f270f3c..a859990 100644
+index f270f3c..2277b79 100644
 --- a/src/ui/imgui_drawer.cpp
 +++ b/src/ui/imgui_drawer.cpp
 @@ -86,6 +86,13 @@ void ApplyDefaultStyle(ImGuiStyle& style) {
@@ -1266,7 +1293,17 @@ index f270f3c..a859990 100644
  }  // namespace
  
  ImGuiDrawer::ImGuiDrawer(rex::ui::Window* window, size_t z_order, FontSetupCallback font_setup,
-@@ -439,7 +446,11 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
+@@ -431,6 +438,9 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
+     reset_mouse_position_after_next_frame_ = false;
+     io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
+   }
++#if REX_PLATFORM_ANDROID
++  ReleaseDeferredTouch(io);
++#endif
+ 
+   // Detaching is deferred if the last dialog is removed during drawing, perform
+   // it now if needed.
+@@ -439,7 +449,11 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
    if (!dialogs_.empty()) {
      // Repaint (and handle input) continuously if still active. In detached mode
      // there is no presenter; the app drives repaint via its own present loop.
@@ -1278,6 +1315,47 @@ index f270f3c..a859990 100644
        presenter_->RequestUIPaintFromUIThread();
      }
    }
+@@ -591,6 +605,15 @@ void ImGuiDrawer::OnTouchEvent(TouchEvent& e) {
+     }
+   }
+   UpdateMousePosition(e.x(), e.y());
++#if REX_PLATFORM_ANDROID
++  if (action == TouchEvent::Action::kDown) {
++    touch_press_unseen_ = true;
++    touch_release_deferred_ = false;
++  } else if (action != TouchEvent::Action::kMove && touch_press_unseen_) {
++    touch_release_deferred_ = true;
++    return;
++  }
++#endif
+   if (action == TouchEvent::Action::kUp || action == TouchEvent::Action::kCancel) {
+     io.MouseDown[0] = false;
+     touch_pointer_id_ = TouchEvent::kPointerIDNone;
+@@ -613,7 +636,24 @@ void ImGuiDrawer::ClearInput() {
+   io.ClearInputKeys();
+   touch_pointer_id_ = TouchEvent::kPointerIDNone;
+   reset_mouse_position_after_next_frame_ = false;
++#if REX_PLATFORM_ANDROID
++  touch_press_unseen_ = false;
++  touch_release_deferred_ = false;
++#endif
++}
++
++#if REX_PLATFORM_ANDROID
++void ImGuiDrawer::ReleaseDeferredTouch(ImGuiIO& io) {
++  touch_press_unseen_ = false;
++  if (!touch_release_deferred_) {
++    return;
++  }
++  touch_release_deferred_ = false;
++  io.MouseDown[0] = false;
++  touch_pointer_id_ = TouchEvent::kPointerIDNone;
++  reset_mouse_position_after_next_frame_ = true;
+ }
++#endif
+ 
+ void ImGuiDrawer::OnKey(KeyEvent& e, bool is_down) {
+   auto& io = GetIO();
 diff --git a/src/ui/surface_android.cpp b/src/ui/surface_android.cpp
 new file mode 100644
 index 0000000..5cfd233

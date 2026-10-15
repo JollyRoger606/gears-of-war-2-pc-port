@@ -365,3 +365,41 @@ def test_parse_options_main_exports_default():
     assert cal.parse_options(["x"]).main_exports == {"SDL_main"}
     options = cal.parse_options(["x", "--main-exports", "SDL_main", "JNI_OnLoad"])
     assert options.main_exports == {"SDL_main", "JNI_OnLoad"}
+
+
+def test_count_path_occurrences_matches_both_slashes_and_any_case():
+    data = rb"x C:/Build/Root/a.cpp y c:\build\root\b.cpp z"
+    spellings = cal.path_spellings("C:/Build/Root")
+    assert cal.count_path_occurrences(data, spellings) == 2
+
+
+def test_count_path_occurrences_absent():
+    assert cal.count_path_occurrences(b"gow2-recomp/src/a.cpp", cal.path_spellings("C:/Build/Root")) == 0
+
+
+def test_check_build_paths_reports_the_library_and_count(tmp_path):
+    root = tmp_path / "Root"
+    lib = tmp_path / "libx.so"
+    lib.write_bytes(b"\0" + str(root / "src" / "x.cpp").encode("utf-8") + b"\0")
+    expected = (f"libx.so: contains the build path {root} 1 time(s); "
+                "build with -ffile-prefix-map (android/gamelibs/CMakeLists.txt)")
+    assert cal.check_build_paths([lib], [str(root)]) == [expected]
+
+
+def test_check_build_paths_clean_library(tmp_path):
+    lib = tmp_path / "libx.so"
+    lib.write_bytes(b"\0gow2-recomp/src/x.cpp\0")
+    assert cal.check_build_paths([lib], [str(tmp_path / "Root")]) == []
+
+
+def test_forbidden_build_paths_include_repo_root_ndk_and_extras_once(tmp_path):
+    ndk = str(tmp_path / "ndk")
+    paths = cal.forbidden_build_paths([ndk.upper(), str(tmp_path / "sdk")], ndk)
+    assert paths == [str(cal._REPO_ROOT), ndk, str(tmp_path / "sdk")]
+
+
+def test_parse_options_forbid_path_repeats_and_allow_flag():
+    options = cal.parse_options(["libs", "--forbid-path", "C:/a", "--forbid-path", "C:/b", "--allow-build-paths"])
+    assert options.forbid_path == ["C:/a", "C:/b"]
+    assert options.allow_build_paths
+    assert "C:/a" in options.forbidden and "C:/b" in options.forbidden

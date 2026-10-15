@@ -2,7 +2,9 @@
 
 This file lists third-party projects from which this repository derives code
 or on which it depends at build time.
-The section Android APK lists what the Android APK contains.
+The sections Android APK and Windows release zip list what each package contains,
+Component licenses gives the license of every component they list, and Getting the
+source and relinking (LGPL) explains how to rebuild the libraries that contain LGPL code.
 
 ## gears-judgement-recomp
 
@@ -162,7 +164,7 @@ TinySHA1, the SDL3 Android project template) apply to the APK as well.
 ### librexruntime.so
 
 - The ReXGlue SDK runtime with the patches in `sdk/patches/`.
-- Dear ImGui.
+- Dear ImGui, with the ProggyClean and ProggyTiny fonts.
 - {fmt}.
 - spdlog.
 - toml++.
@@ -208,9 +210,65 @@ TinySHA1, the SDL3 Android project template) apply to the APK as well.
 
 - LLVM libc++ and libc++abi from the Android NDK r30-beta1 (30.0.14904198), unmodified.
 
-### Component licenses
+## Windows release zip
 
-#### aes_128
+`scripts/package.ps1` builds the zip from `gow2.exe` (built by `scripts/build.ps1`) and the
+`rexruntime.dll` and `rexgpu-xenos.dll` that `scripts/build-sdk.ps1` builds from ReXGlue `923c1a5`
+with the patches in `sdk/patches/`. It also holds the AMD FidelityFX DLLs, the Microsoft Visual
+C++ runtime and `config/gamecontrollerdb.txt` (all described above), `LICENSE`, this file,
+`README.md`, `gow2.toml` and `tools/texpack.py`. It holds no game files.
+
+### gow2.exe
+
+- gow2-recomp's own code (BSD 3-Clause, `LICENSE`) and the C++ code `rexglue codegen` generated
+  from the game's executable.
+- Parts adapted from gears-judgement-recomp.
+- TinySHA1.
+- SDL 3.4.14, linked statically.
+- {fmt}.
+- spdlog.
+- SIMDe.
+
+### rexruntime.dll
+
+- The ReXGlue SDK runtime with the patches in `sdk/patches/`.
+- Dear ImGui, with the ProggyClean and ProggyTiny fonts.
+- SDL 3.4.14, linked statically, with the code it bundles (HIDAPI, yuv2rgb, stb_image, miniz,
+  the uClibc-derived math library, SDL_qsort).
+- {fmt}.
+- spdlog.
+- toml++.
+- CLI11.
+- UTF8-CPP.
+- stb_image.
+- disruptorplus.
+- aes_128.
+- o1heap.
+- xxHash.
+- The RenderDoc in-application API header.
+- SIMDe.
+- The crypto sources of the SDK: TinySHA1, DES, SHA-256 and the Rijndael reference code.
+- FFmpeg (libavcodec, libavutil), linked statically.
+- libmspack, linked statically.
+
+It calls `amd_fidelityfx_dx12.dll` through that DLL's import library and contains none of its code.
+
+### rexgpu-xenos.dll
+
+- The ReXGlue SDK GPU plugin (Direct3D 12) with the patches in `sdk/patches/`.
+- DXBCChecksum.
+- SDL 3.4.14, linked statically.
+- {fmt}.
+- spdlog.
+- xxHash.
+- SIMDe.
+- The NVIDIA NGX SDK static library `nvsdk_ngx_d.lib` (see NVIDIA NGX SDK below).
+
+## Component licenses
+
+Licenses of the components listed under Android APK and Windows release zip.
+
+### aes_128
 
 - Project: [openluopworld/aes_128](https://github.com/openluopworld/aes_128)
 - Description: AES-128 used by the kernel crypt routines (librexruntime.so).
@@ -241,7 +299,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-#### CLI11
+### CLI11
 
 - Project: [CLIUtils/CLI11](https://github.com/CLIUtils/CLI11)
 - Description: command-line parsing (librexruntime.so).
@@ -277,7 +335,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-#### Dear ImGui
+### Dear ImGui
 
 - Project: [ocornut/imgui](https://github.com/ocornut/imgui)
 - Description: overlay UI (librexruntime.so).
@@ -308,7 +366,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-#### DES
+### DES
 
 - Project: the DES implementation in the SDK's `thirdparty/crypto/des` (author Faraz Fallahi).
 - Description: XeCrypt DES routines (librexruntime.so).
@@ -340,14 +398,45 @@ SOFTWARE.
 
 ```
 
-#### disruptorplus
+### disruptorplus
 
 - Project: [lewissbaker/disruptorplus](https://github.com/lewissbaker/disruptorplus)
 - Description: lock-free ring buffer headers (librexruntime.so).
 - Copyright: Lewis Baker (see the upstream repository's LICENSE.txt; the SDK copy has none).
 - License: MIT (the upstream repository's LICENSE.txt).
 
-#### FFmpeg
+### DXBCChecksum
+
+- Project: AMD's DXBC checksum code, `thirdparty/dxbc/DXBCChecksum.cpp` of the ReXGlue SDK, derived
+  from the RSA Data Security, Inc. MD5 Message-Digest Algorithm.
+- Description: shader container checksum (rexgpu-xenos.dll).
+- Copyright: Copyright 2008-2016 (c), Advanced Micro Devices, Inc.; Copyright (C) 1990, RSA Data
+  Security, Inc.
+- License: the RSA Data Security MD5 license (full text below, from that file).
+
+```
+ ** Copyright (C) 1990, RSA Data Security, Inc. All rights reserved. **
+ **                                                                  **
+ ** License to copy and use this software is granted provided that   **
+ ** it is identified as the "RSA Data Security, Inc. MD5 Message     **
+ ** Digest Algorithm" in all material mentioning or referencing this **
+ ** software or this function.                                       **
+ **                                                                  **
+ ** License is also granted to make and use derivative works         **
+ ** provided that such works are identified as "derived from the RSA **
+ ** Data Security, Inc. MD5 Message Digest Algorithm" in all         **
+ ** material mentioning or referencing the derived work.             **
+ **                                                                  **
+ ** RSA Data Security, Inc. makes no representations concerning      **
+ ** either the merchantability of this software or the suitability   **
+ ** of this software for any particular purpose.  It is provided "as **
+ ** is" without express or implied warranty of any kind.             **
+ **                                                                  **
+ ** These notices must be retained in any copies of any part of this **
+ ** documentation and/or software.                                   **
+```
+
+### FFmpeg
 
 - Project: [wmarti/FFmpeg](https://github.com/wmarti/FFmpeg) (a fork of FFmpeg 4.4,
   commit `0604b46`, the `thirdparty/FFmpeg` submodule of ReXGlue `923c1a5`).
@@ -359,7 +448,7 @@ SOFTWARE.
   sets CONFIG_GPL, CONFIG_VERSION3 and CONFIG_NONFREE to 0, so no GPL or non-free parts
   are built. Full text below (LGPL 2.1).
 
-#### glslang
+### glslang
 
 - Project: [KhronosGroup/glslang](https://github.com/KhronosGroup/glslang)
 - Description: GLSL to SPIR-V compiler used by the GPU plugin (librexgpu-xenos.so).
@@ -756,7 +845,7 @@ NVIDIA HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 \****************************************************************************/
 ```
 
-#### HIDAPI
+### HIDAPI
 
 - Project: [libusb/hidapi](https://github.com/libusb/hidapi), the copy in SDL's `src/hidapi`.
 - Description: game controller access in libSDL3.so (SDL's Android backend
@@ -794,7 +883,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
 
-#### libc++ and libc++abi
+### libc++ and libc++abi
 
 - Project: [llvm/llvm-project](https://github.com/llvm/llvm-project)
 - Description: the C++ standard library shared by all native libraries (libc++_shared.so,
@@ -804,7 +893,7 @@ POSSIBILITY OF SUCH DAMAGE.
   under the legacy University of Illinois/NCSA license (the NDK's
   `toolchains/llvm/prebuilt/<host>/NOTICE` has both). Full text below.
 
-#### libmspack
+### libmspack
 
 - Project: [kyz/libmspack](https://github.com/kyz/libmspack) (commit `3059077`, the
   `thirdparty/libmspack` submodule of ReXGlue `923c1a5`).
@@ -812,14 +901,23 @@ POSSIBILITY OF SUCH DAMAGE.
 - Copyright: (C) 2003-2019 Stuart Caie <kyzer@cabextract.org.uk>
 - License: GNU LGPL version 2.1. Full text below (LGPL 2.1).
 
-#### miniz
+### miniz
 
 - Project: Rich Geldreich's miniz, the copy in SDL's `src/video/miniz.h`.
 - Description: zlib decompression for stb_image in libSDL3.so.
 - Copyright: Rich Geldreich (released into the public domain).
 - License: public domain (The Unlicense; see the end of that file).
 
-#### o1heap
+### NVIDIA NGX SDK
+
+- Project: the NGX static library `nvsdk_ngx_d.lib` of NVIDIA's DLSS SDK
+  ([NVIDIA/DLSS](https://github.com/NVIDIA/DLSS)), which `scripts/build-sdk.ps1` downloads and links
+  into `rexgpu-xenos.dll` so the DLSS path can load `nvngx_dlss.dll` when a player supplies it.
+- Copyright: NVIDIA Corporation.
+- License: the NVIDIA RTX SDKs license (`LICENSE.txt` of the DLSS SDK). It is not an open-source
+  license; the library is NVIDIA's code, not this project's.
+
+### o1heap
 
 - Project: [pavel-kirienko/o1heap](https://github.com/pavel-kirienko/o1heap)
 - Description: constant-time allocator (librexruntime.so).
@@ -850,7 +948,41 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-#### RenderDoc in-application API header
+### ProggyClean and ProggyTiny fonts
+
+- Project: the Proggy fonts by Tristan Grimmer (proggyfonts.net). ProggyClean.ttf is Dear ImGui's
+  built-in default font (embedded in `imgui_draw.cpp`); ProggyTiny.ttf is embedded by the ReXGlue
+  SDK's `src/ui/imgui_drawer.cpp`.
+- Description: the fonts of the runtime's overlays and of the on-screen touch controls' labels
+  (librexruntime.so, rexruntime.dll).
+- Copyright: Copyright (c) 2004, 2005 Tristan Grimmer
+- License: MIT (full text below).
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2004, 2005 Tristan Grimmer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### RenderDoc in-application API header
 
 - Project: [baldurk/renderdoc](https://github.com/baldurk/renderdoc), `renderdoc_app.h`.
 - Description: in-application capture API header (librexruntime.so).
@@ -883,7 +1015,7 @@ SOFTWARE.
  ******************************************************************************/
 ```
 
-#### Rijndael reference code
+### Rijndael reference code
 
 - Project: `rijndael-alg-fst.c` by Vincent Rijmen, Antoon Bosselaers and Paulo Barreto,
   the copy in the SDK's `thirdparty/crypto`.
@@ -891,21 +1023,49 @@ SOFTWARE.
 - Copyright: Vincent Rijmen, Antoon Bosselaers and Paulo Barreto.
 - License: public domain.
 
-#### SDL_qsort
+### SDL 3
+
+- Project: [libsdl-org/SDL](https://github.com/libsdl-org/SDL) 3.4.14.
+- Description: windowing, input, audio and the Android activity glue (libSDL3.so; linked statically
+  into gow2.exe, rexruntime.dll and rexgpu-xenos.dll).
+- Copyright: Copyright (C) 1997-2026 Sam Lantinga
+- License: zlib (full text below, the same as `android/LICENSE.SDL3.txt`).
+
+```
+Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+  
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+  
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required. 
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+```
+
+### SDL_qsort
 
 - Project: the quicksort in SDL's `src/stdlib/SDL_qsort.c` by Gareth McCaughan.
 - Description: sort routine in libSDL3.so.
 - Copyright: Copyright (c) 1998-2021 Gareth McCaughan
 - License: zlib (as stated in that file).
 
-#### SHA-256
+### SHA-256
 
 - Project: `thirdparty/crypto/sha256.cpp` of the SDK.
 - Description: XeCrypt SHA-256 (librexruntime.so).
 - Copyright: Copyright (c) 2014,2015 Stephan Brumme
 - License: zlib (as stated in that file: "Licensed under zlib license when acquired").
 
-#### SIMDe
+### SIMDe
 
 - Project: [simd-everywhere/simde](https://github.com/simd-everywhere/simde)
 - Description: maps the x86 SSE intrinsics of the recompiled code and the runtime to ARM
@@ -936,7 +1096,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-#### SPIRV-Headers
+### SPIRV-Headers
 
 - Project: [KhronosGroup/SPIRV-Headers](https://github.com/KhronosGroup/SPIRV-Headers)
 - Description: SPIR-V definitions (librexgpu-xenos.so).
@@ -1448,7 +1608,7 @@ Creative Commons may be contacted at creativecommons.org.
 
 ```
 
-#### spdlog
+### spdlog
 
 - Project: [gabime/spdlog](https://github.com/gabime/spdlog)
 - Description: logging (all three ReXGlue/gow2 libraries).
@@ -1483,7 +1643,7 @@ This software depends on the fmt lib (MIT License),
 and users must comply to its license: https://raw.githubusercontent.com/fmtlib/fmt/master/LICENSE
 ```
 
-#### stb_image
+### stb_image
 
 - Project: [nothings/stb](https://github.com/nothings/stb)
 - Description: image decoding (librexruntime.so, from the SDK's `thirdparty/stb/stb_image.h`;
@@ -1512,7 +1672,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-#### toml++
+### toml++
 
 - Project: [marzer/tomlplusplus](https://github.com/marzer/tomlplusplus)
 - Description: configuration files (librexruntime.so).
@@ -1538,7 +1698,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER I
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-#### uClibc / Sun math library
+### uClibc / Sun math library
 
 - Project: the `src/libm` of SDL (from uClibc, originally Sun Microsystems' fdlibm).
 - Description: math library in libSDL3.so.
@@ -1554,7 +1714,7 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * is preserved.
 ```
 
-#### UTF8-CPP
+### UTF8-CPP
 
 - Project: [nemtrif/utfcpp](https://github.com/nemtrif/utfcpp)
 - Description: UTF-8 handling (librexruntime.so).
@@ -1586,7 +1746,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-#### Vulkan-Headers
+### Vulkan-Headers
 
 - Project: [KhronosGroup/Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers)
 - Description: Vulkan API headers (librexruntime.so, librexgpu-xenos.so).
@@ -1606,7 +1766,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-#### Vulkan Memory Allocator
+### Vulkan Memory Allocator
 
 - Project: [GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - Description: GPU memory allocation (librexruntime.so, librexgpu-xenos.so).
@@ -1635,7 +1795,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-#### xxHash
+### xxHash
 
 - Project: [Cyan4973/xxHash](https://github.com/Cyan4973/xxHash)
 - Description: hashing (librexruntime.so, librexgpu-xenos.so).
@@ -1671,7 +1831,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-#### yuv2rgb
+### yuv2rgb
 
 - Project: [descampsa/yuv2rgb](https://github.com/descampsa/yuv2rgb), the copy in SDL's
   `src/video/yuv2rgb`.
@@ -1709,7 +1869,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-#### {fmt}
+### {fmt}
 
 - Project: [fmtlib/fmt](https://github.com/fmtlib/fmt)
 - Description: string formatting (all three ReXGlue/gow2 libraries).
@@ -1746,21 +1906,21 @@ source code, you may redistribute such embedded portions in such object form
 without including the above copyright and permission notices.
 ```
 
-### Getting the source and relinking (LGPL)
+## Getting the source and relinking (LGPL)
 
-librexruntime.so links FFmpeg (libavcodec, libavutil) and libmspack statically; both are
-under the GNU LGPL version 2.1 (FFmpeg: or later). Everything else linked with them (the
-ReXGlue SDK, gow2-recomp and the permissively licensed components listed here) is open
-source, so the whole library can be rebuilt from source.
+`librexruntime.so` (Android) and `rexruntime.dll` (Windows) link FFmpeg (libavcodec, libavutil)
+and libmspack statically; both are under the GNU LGPL version 2.1 (FFmpeg: or later). Everything
+else linked with them (the ReXGlue SDK, gow2-recomp and the permissively licensed components
+listed here) is open source, so the whole library can be rebuilt from source.
 
-The corresponding source of an APK is this repository at the commit the APK was built from,
-which pins ReXGlue `923c1a5` (`scripts/sdk-source.ps1`) and its patches (`sdk/patches/`,
+The corresponding source of an APK or a Windows zip is this repository at the commit it was built
+from, which pins ReXGlue `923c1a5` (`scripts/sdk-source.ps1`) and its patches (`sdk/patches/`,
 including the FFmpeg configuration `thirdparty/ffmpeg-android/config.h` added by
 `0007-android-arm64-port.patch`); the SDK's submodules pin FFmpeg (github.com/wmarti/FFmpeg,
 commit `0604b46`) and libmspack (github.com/kyz/libmspack, commit `3059077`). The source is
-offered from the same place as the APK.
+offered from the same place as the APK and the zip.
 
-To run the game with a modified FFmpeg or libmspack: change
+On Android, to run the game with a modified FFmpeg or libmspack: change
 `out\sdk-android-src\thirdparty\FFmpeg` or `out\sdk-android-src\thirdparty\libmspack` after
 `scripts\build-android.ps1` has prepared that clone (or build your own SDK tree with
 `-SdkSource <folder>`), run `scripts\build-android.ps1` again: it rebuilds and relinks
@@ -1768,6 +1928,13 @@ To run the game with a modified FFmpeg or libmspack: change
 place of the old one. A modified `librexruntime.so` can also replace the one in
 `lib/arm64-v8a` of an existing APK after re-signing it (apksigner), as long as it keeps the
 exported interface the other libraries use.
+
+On Windows: change `out\sdk-build\rexglue-sdk\thirdparty\FFmpeg` or
+`out\sdk-build\rexglue-sdk\thirdparty\libmspack` after `scripts\build-sdk.ps1` has prepared that
+clone (it prepares the clone again only when the pinned commit or a patch in `sdk\patches`
+changes), and run `scripts\build-sdk.ps1` again: it rebuilds and relinks `rexruntime.dll` and
+copies it to `out\sdk\`. Put that `rexruntime.dll` next to `gow2.exe` in place of the one from the
+zip; it has to keep the exported interface `gow2.exe` and `rexgpu-xenos.dll` use.
 
 ## BSD 3-Clause License text
 
