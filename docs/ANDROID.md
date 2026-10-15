@@ -142,8 +142,9 @@ copy of the generated code.
 5. **Measure.** If the generic Xenos path cannot hold 30 fps in Act 1, the proven alternative is a
    renderer written for Unreal Engine 3's draw calls, which is a large project of its own. First
    numbers (`gow2_frame_log`): 3 to 5 game frames per second in the first gameplay area with the
-   GPU 99% busy but thermally capped at 160-222 MHz of 1.2 GHz; a measurement on a cool phone is
-   next.
+   GPU 99% busy but thermally capped at 160-222 MHz of 1.2 GHz, and 13.6 to 16.8 for the first
+   seconds after the phone had cooled a little (GPU up to 734 MHz). A sustained measurement on a
+   cool phone is next.
 6. **More players and online** last, through hooks into the engine's session code (shared with
    the PC System Link work).
 

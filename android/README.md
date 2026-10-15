@@ -119,7 +119,10 @@ ammo count drops). Checkpoints saved there load again from the save slot screen.
 Frame rate in that first gameplay area: 2.6 to 5.2 game frames per second (`gow2_frame_log`), with
 the GPU held at 160 to 222 MHz of its 1.2 GHz by the phone's thermal limit (thermal status 2 to 3,
 skin 42 to 45 C, after hours of testing while charging; `thermal_pwrlevel` 13 to 14 in
-`/sys/class/kgsl/kgsl-3d0`). The GPU is 99% busy, so these numbers say little about a cool phone.
+`/sys/class/kgsl/kgsl-3d0`). The GPU is 99% busy, so these numbers say little about a cool phone:
+after a few minutes' rest (thermal status 2, GPU allowed up to 734 MHz) the same place ran at 13.6
+to 16.8 fps for about ten seconds, then fell back to 3 to 6 fps as the cap returned. The menus run
+at 30 to 50 fps.
 Large parts of the scene render black.
 
 ## Game build
