@@ -1,3 +1,5 @@
 # git apply and bash need LF; a Windows checkout with core.autocrlf would turn these into CRLF.
 *.patch text eol=lf
 *.sh text eol=lf
+# rexglue codegen rewrites gow2_manifest.toml with LF; a CRLF checkout would show it as modified.
+*.toml text eol=lf
