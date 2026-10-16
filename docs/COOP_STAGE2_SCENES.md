@@ -159,7 +159,14 @@ Expected in-game log lines, after the Stage 1 lines:
 - `SCRIPTPATCH coop-scenes SC-4 GearGame.GearPawn.OnTeleport: script grown to 607 bytes`
 - `SCRIPTPATCH coop-scenes SC-5 GearGame.GearPC.SetSquadName: script grown to 371 bytes`
 - `SCRIPTPATCH coop-scenes SC-6 GearGame.GearGameSP_Base.PostLogin: 1 write(s)`
-- `SCRIPTPATCH coop-scenes: 6 rows applied for 4 players, set hash <16 hex>`
+- `SCRIPTPATCH coop-scenes: 6 rows applied for 4 players, set hash cddd0eadc988a154`
+
+The hash depends only on the rows and the player count, so it must be the same on every
+instance and run with 4 players. It was computed by the real C++ patcher applying the generated
+rows to a fake guest (the Stage 1 core test's `FakeGuest`, in a local harness that is not part
+of the build): 49 checks passed, covering the six log lines, each grown buffer byte by byte,
+SC-3's prefix edit, SC-6's operand, a second apply that reports `already applied` without
+allocating, and a flipped check byte that skips the whole group.
 
 With `--gow2_coop_scenes=false`: `SCRIPTPATCH coop-scenes: off (gow2_coop_scenes=false)`.
 With `gow2_coop_players=2`: only `SCRIPTPATCH coop: off (gow2_coop_players=2)`, no
