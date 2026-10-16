@@ -266,6 +266,13 @@ void ApplyCoopFollowUps(uint8_t* base, bool coop_applied, int players,
   ApplyAndLogGroup(base, script_patch::CoopRideGroup(), players, alloc, kRideFallback, stack);
 }
 
+// The game links the prebuilt SDK and swaps in the patched runtime, so the cvar is the only way in.
+void PublishCoopHashToSystemLink(uint64_t combined) {
+  if (rex::cvar::SetFlagByName("net_coop_hash", std::to_string(combined))) return;
+  REXLOG_WARN("SCRIPTPATCH stack: this runtime has no net_coop_hash (SDK patch 0012), so System "
+              "Link does not compare co-op hashes");
+}
+
 void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   REXLOG_INFO("SCRIPTPATCH startup script packages loaded");
   StartCoopCensus(base);
@@ -289,6 +296,7 @@ void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   REXLOG_INFO("SCRIPTPATCH stack: {}", script_patch::StackLine(players, stack));
   g_coop_stage1_applied = coop_applied;
   g_coop_stack_hash = script_patch::StackHash(script_patch::StackText(players, stack));
+  PublishCoopHashToSystemLink(g_coop_stack_hash);
 }
 
 }  // namespace
