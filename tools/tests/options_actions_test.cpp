@@ -40,7 +40,7 @@ void TestExample() {
   Expect(parsed->stop_scheduled_at == "2026-10-16T22:41:00", "example stop_scheduled_at");
   Expect(parsed->routers.size() == 1u, "example routers size");
   if (parsed->routers.size() == 1u) {
-    Expect(parsed->routers[0].address == "192.168.10.1", "example router address");
+    Expect(parsed->routers[0].address == "192.168.0.1", "example router address");
     Expect(parsed->routers[0].closing == "the lease ends at 2026-10-16 22:40",
            "example router closing");
   }
