@@ -1110,7 +1110,8 @@ Run on 2026-10-16 with the review fixes (commits 09fd5d7..9b8507e): `scripts/bui
 5 steps passed: leash 109 checks, SDK System Link and session tests "All tests passed (2177
 assertions in 86 test cases)", 247 Python tests), and `python -I tools/script_patch.py --check`
 on the player's packages (exit 0; CB-4 decodes to its end at 0x292, CR-3 at 0x214, S2A-3 at
-0x4FB). [V] Three game sessions on one PC, four instances on 127.0.0.1-.4 unless noted, seeded
+0x4FB). `scripts/build-android.ps1` built the APK with the series 0002-0012 and every
+Stage 2 source (library and APK checks passed; not run on a phone). [V] Three game sessions on one PC, four instances on 127.0.0.1-.4 unless noted, seeded
 from a copy of an Act 1 chapter 2 save; the folders are `out/review-test/r1`, `r1c`, `r3-*`
 (gitignored: logs and screenshots from the player's own game). [V]
 
