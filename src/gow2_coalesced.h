@@ -10,6 +10,8 @@
 //   mouse-look   right-stick dead zone off for the mouse-fed look axes (cvar mnk_mouse)
 //   mouse-aim    PC mouse axes with no smoothing for native mouse look (cvars mnk_mouse, gow2_mouse_aim)
 //   key-prompts  menu prompts show keyboard labels ([Space], [LMB]...) (cvar gow2_prompts)
+//   pc-options-entry  Options > Storage Location becomes the PC Options entry
+//                     (cvar gow2_pc_options_entry, needs SDK patch 0013)
 //   system-settings  the game's own [SystemSettings] values (cvar gow2_system_settings, Android)
 #pragma once
 
@@ -25,6 +27,7 @@ namespace rex::glue {
 struct CoalescedOptions {
   bool mouse_look = false;
   bool native_mouse = false;
+  bool pc_options_entry = false;
   // Key = a name in [ControllerFont] of GearGameUI ("Controller_A"), value = the label shown
   // ("[Space]"). Empty means "leave the pad glyphs alone".
   std::vector<std::pair<std::string, std::string>> prompt_labels;
@@ -47,7 +50,9 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
                                           const std::filesystem::path& cache_dir,
                                           const CoalescedOptions& options);
 
-// Reads mnk_mouse, gow2_prompts and the keybind_* labels from the live cvars.
+// Reads mnk_mouse, gow2_prompts, gow2_pc_options_entry and the keybind_* labels.
 CoalescedOptions CoalescedOptionsFromCvars();
+// True when the runtime routes the device selector to the PC Options menu (patch 0013).
+bool HostUiHooksAvailable();
 
 }  // namespace rex::glue

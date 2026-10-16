@@ -2,6 +2,7 @@
 // GoW2's Coalesced tweak layer, see gow2_coalesced.h.
 
 #include "gow2_coalesced.h"
+#include "gow2_coalesced_text.h"
 
 #include "gow2_mouse_aim.h"
 
@@ -52,11 +53,15 @@ REXCVAR_DEFINE_STRING(gow2_system_settings, "LightEnvironmentShadows=0", "debug"
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 #endif
 
+REXCVAR_DEFINE_BOOL(gow2_pc_options_entry, true, "UI",
+                    "The game's Options > Storage Location button opens the port's PC Options "
+                    "menu (renamed PC Options). Takes effect on the next start.");
+
 namespace rex::glue {
 
 namespace {
 
-constexpr int kVersion = 5;  // bump when the edit definitions change (invalidates cached copies)
+constexpr int kVersion = 6;  // bump when the edit definitions change (invalidates cached copies)
 
 // Bundle layout: BE u32 file count; per file a name, BE u32 section count; per section a name and
 // BE u32 key count; per key a key and a value. Strings are a BE int32 length, negative = UTF-16LE
@@ -209,7 +214,7 @@ bool PadToSize(std::vector<uint8_t>* bytes, uint64_t size) {
 
 std::u16string W(const std::string& s) {
   std::u16string r;
-  for (unsigned char c : s) r.push_back(char16_t(c));
+  r = Utf8ToUtf16(s);  // UTF-8 decoded; ASCII converts byte for byte as before.
   return r;
 }
 bool EndsWith(const std::u16string& s, const std::u16string& suffix) {
@@ -264,9 +269,29 @@ struct Edit {
   std::string key;      // kSet: the key; kReplaceSub: a key prefix
   std::string value;    // kSet: the new value; kReplaceSub: "from|to"
   std::string match;    // kReplaceSub only: only values containing this text (empty = all)
+  std::string locale;   // only bundles with this locale apply the edit (empty = every locale)
 };
 
 const char* const kUI = "GearGameUI.int";
+
+void AddPcOptionsEntry(std::vector<Edit>* e) {
+  static const char* const kLocales[] = {"int", "esn", "esm", "deu", "fra", "ita",
+                                         "pol", "cze", "hun", "rus", "kor", "cht"};
+  // The fallback pair (English text, no filter) comes first so each bundle ends with exactly one
+  // value: it writes everywhere, then at most one locale pair overwrites it.
+  const LocalizedPair fallback = PcOptionsEntryText("int");
+  e->push_back({Edit::kSet, "GearGame.int", "OptionsMenu", "StorageLocation",
+                std::string(fallback.label)});
+  e->push_back({Edit::kSet, "GearGame.int", "OptionsMenu", "StorageLocation_Desc",
+                std::string(fallback.description)});
+  for (const char* loc : kLocales) {
+    const LocalizedPair t = PcOptionsEntryText(loc);
+    e->push_back({Edit::kSet, "GearGame.int", "OptionsMenu", "StorageLocation",
+                  std::string(t.label), "", loc});
+    e->push_back({Edit::kSet, "GearGame.int", "OptionsMenu", "StorageLocation_Desc",
+                  std::string(t.description), "", loc});
+  }
+}
 
 void AddMouseLook(std::vector<Edit>* e) {
   for (const char* look : {"GBA_LookX", "GBA_LookY", "GBA_LookY_Flip"})
@@ -302,6 +327,7 @@ uint64_t Fnv(const std::string& s, uint64_t h = 1469598103934665603ull) {
 int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std::u16string& locale) {
   int changed = 0;
   for (const Edit& ed : edits) {
+    if (!ed.locale.empty() && !EqFold(locale, ed.locale)) continue;
     for (IniFile& f : *files) {
       if (!FileMatches(f.name, ed.file, locale)) continue;
       for (Section& s : f.sections) {
@@ -361,6 +387,10 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     AddPrompts(&edits, options);
     groups += "key-prompts ";
   }
+  if (options.pc_options_entry) {
+    AddPcOptionsEntry(&edits);
+    groups += "pc-options-entry ";
+  }
 #if defined(__ANDROID__)
   if (!options.system_settings.empty()) {
     AddSystemSettings(&edits, options);
@@ -372,6 +402,7 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   uint64_t h = Fnv("v" + std::to_string(kVersion));
   for (const Edit& e : edits)
     h = Fnv(e.file + "|" + e.section + "|" + e.key + "|" + e.value + "|" + e.match + "|" +
+                e.locale + "|" +
                 char('0' + e.kind),
             h);
 
@@ -449,7 +480,9 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     // The mouse is fed to the game as the right stick; physical pads keep the 30% dead zone the
     // bundle no longer applies, through the runtime. Only when the bundle edit is really in use,
     // or pads would get it twice.
-    (void)rex::cvar::SetFlagByName("pad_right_stick_deadzone", "0.3");
+    // A value the player already set (for example saved by the menu) wins over this default.
+    if (rex::cvar::GetFlagSource("pad_right_stick_deadzone") == rex::cvar::Source::kDefault)
+      (void)rex::cvar::SetFlagByName("pad_right_stick_deadzone", "0.3");
   }
   if (files_done == 0) {
     res.summary = "COALESCED: no bundle could be prepared (" + std::to_string(unreadable) +
@@ -570,10 +603,15 @@ std::vector<std::pair<std::string, std::string>> ParseSettingList(const std::str
 
 }  // namespace
 
+bool HostUiHooksAvailable() {
+  return rex::cvar::GetFlagInfo("xam_device_selector_ui_command") != nullptr;
+}
+
 CoalescedOptions CoalescedOptionsFromCvars() {
   CoalescedOptions o;
   o.mouse_look = rex::cvar::Query<bool>("mnk_mouse");
   o.native_mouse = NativeMouseAimWanted();
+  o.pc_options_entry = REXCVAR_GET(gow2_pc_options_entry) && HostUiHooksAvailable();
 #if defined(__ANDROID__)
   o.system_settings = ParseSettingList(REXCVAR_GET(gow2_system_settings));
 #endif
