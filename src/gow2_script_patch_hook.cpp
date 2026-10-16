@@ -4,6 +4,7 @@
 // native script packages, by replacing the recompiled FStartupPackages::LoadAll.
 
 #include "gow2_script_patches.h"
+#include "gow2_script_patch_groups.h"
 #include "gow2_coop_census.h"
 #include "gow2_coop_network.h"
 
@@ -12,6 +13,8 @@
 #endif
 
 #include <cstdint>
+#include <optional>
+#include <string_view>
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
@@ -110,15 +113,37 @@ bool GuardedApply(ApplyCall* call) {
 #endif
 }
 
-void LogResult(const GroupResult& result, int players) {
+void LogResult(const GroupResult& result, std::string_view group_name, int players) {
   if (!result.applied) {
-    REXLOG_WARN("SCRIPTPATCH coop: skipped ({}: {}); the game stays retail", result.failed_row,
-                result.reason);
+    REXLOG_WARN("SCRIPTPATCH {}: skipped ({}: {}); the game stays retail", group_name,
+                result.failed_row, result.reason);
     return;
   }
-  for (const std::string& line : result.lines) REXLOG_INFO("SCRIPTPATCH coop {}", line);
-  REXLOG_INFO("SCRIPTPATCH coop: {} rows applied for {} players, set hash {:016x}",
+  for (const std::string& line : result.lines) REXLOG_INFO("SCRIPTPATCH {} {}", group_name, line);
+  REXLOG_INFO("SCRIPTPATCH {}: {} rows applied for {} players, set hash {:016x}", group_name,
               result.lines.size(), players, result.set_hash);
+}
+
+void ApplyAndLogGroup(PPCContext& ctx, uint8_t* base, const PatchGroup& group, int players) {
+  const script_patch::GuestAlloc alloc = [&ctx, base](uint32_t size) {
+    return GuestMalloc(ctx, base, size);
+  };
+  GroupResult result;
+  ApplyCall call{base, &group, players, &alloc, &result};
+  if (!GuardedApply(&call)) {
+    REXLOG_WARN("SCRIPTPATCH {}: skipped (fault while reading guest objects); the game stays retail",
+                group.name);
+    return;
+  }
+  LogResult(result, group.name, players);
+}
+
+void ApplyRegisteredGroups(PPCContext& ctx, uint8_t* base, int players) {
+  for (const script_patch::CoopGroupEntry& entry : script_patch::CoopGroupsByName()) {
+    std::optional<PatchGroup> group = entry.make();
+    if (!group) continue;
+    ApplyAndLogGroup(ctx, base, *group, players);
+  }
 }
 
 void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
@@ -131,16 +156,8 @@ void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   }
   PatchGroup group = script_patch::CoopStage1Group(REXCVAR_GET(gow2_coop_marcus_clones));
   if (REXCVAR_GET(gow2_coop_patch_fail_test)) CorruptFirstExpectedByte(&group);
-  const script_patch::GuestAlloc alloc = [&ctx, base](uint32_t size) {
-    return GuestMalloc(ctx, base, size);
-  };
-  GroupResult result;
-  ApplyCall call{base, &group, players, &alloc, &result};
-  if (!GuardedApply(&call)) {
-    REXLOG_WARN("SCRIPTPATCH coop: skipped (fault while reading guest objects); the game stays retail");
-    return;
-  }
-  LogResult(result, players);
+  ApplyAndLogGroup(ctx, base, group, players);
+  ApplyRegisteredGroups(ctx, base, players);
 }
 
 }  // namespace
