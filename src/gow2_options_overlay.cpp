@@ -568,8 +568,10 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     const auto tabs = VisibleTabs(Catalog(), values_, context_.ctx);
     const float y = .165f*h_;
     const float hint = std::max(44.f, .05f*h_);
-    const float inset = device_ == Device::kTouch ? 0.f : hint;
-    if (device_ != Device::kTouch) {
+    // Pointers tap the tabs directly; touches reach ImGui as mouse clicks, so both hide the hints.
+    const bool pointer = device_ == Device::kTouch || device_ == Device::kMouse;
+    const float inset = pointer ? 0.f : hint;
+    if (!pointer) {
       DrawCap({left_, y}, device_ == Device::kPad ? "LB" : "Q", .02f*h_);
       if (Hit("##previous-tab", {left_,y}, {hint,hint})) Dispatch(Command::kTabPrev);
       DrawCap({left_+width_-hint,y}, device_ == Device::kPad ? "RB" : "E", .02f*h_);
@@ -594,7 +596,9 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
       const bool selected = state_.tab == static_cast<int>(i);
       const auto color = selected ? IM_COL32_WHITE : ImGui::IsItemHovered() ? IM_COL32(208,208,208,255) : IM_COL32(154,154,154,255);
       DrawText({pos.x+.011f*h_,pos.y},text,size,color,true);
-      if (selected) ImGui::GetWindowDrawList()->AddRectFilled({pos.x,pos.y+hint-.004f*h_},{pos.x+tab_width,pos.y+hint},kRed);
+      // Under the text, not at the bottom of the 44 px touch target (far below the text on a phone).
+      const float line_y = pos.y+size*1.25f;
+      if (selected) ImGui::GetWindowDrawList()->AddRectFilled({pos.x,line_y},{pos.x+tab_width,line_y+.004f*h_},kRed);
       if (selected && scroll_selection_) ImGui::SetScrollHereX(.5f);
       ImGui::PopID();
     }
