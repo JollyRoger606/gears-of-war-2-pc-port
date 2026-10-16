@@ -58,7 +58,7 @@ index bccc299..cfce98f 100644
  uint32_t ResolveLocalIp(std::optional<uint32_t> local_ip, std::optional<uint32_t> bind_ip,
                          std::optional<uint32_t> detected_ip);
 diff --git a/include/rex/system/xsocket.h b/include/rex/system/xsocket.h
-index aa8a381..bc66a04 100644
+index aa8a381..2fcda3e 100644
 --- a/include/rex/system/xsocket.h
 +++ b/include/rex/system/xsocket.h
 @@ -13,6 +13,9 @@
@@ -99,7 +99,7 @@ index aa8a381..bc66a04 100644
    system_link::ReplyBudget reply_budget_{system_link::kReplyCopiesPerSecond,
                                           system_link::kReplyBudgetCapacity};
 +  std::vector<std::pair<system_link::Endpoint, uint64_t>> beacon_mismatch_logs_;
-+  std::vector<system_link::Endpoint> beacon_drop_logs_;
++  std::vector<std::pair<system_link::Endpoint, uint64_t>> beacon_drop_logs_;
  
    std::unique_ptr<rex::thread::Event> event_;
    std::mutex incoming_packet_mutex_;
@@ -293,7 +293,7 @@ index 91c5a02..1959571 100644
    return REXCVAR_GET(system_link_trace);
  }
 diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
-index b42ead8..59ec801 100644
+index b42ead8..ec186f9 100644
 --- a/src/system/xsocket.cpp
 +++ b/src/system/xsocket.cpp
 @@ -74,6 +74,22 @@ constexpr uint32_t kIntOptionSize = 4;
@@ -365,7 +365,7 @@ index b42ead8..59ec801 100644
 +void XSocket::LogBeaconDropOnce(const system_link::Endpoint& source,
 +                                system_link::BeaconVerdict verdict, uint64_t ours, uint64_t now) {
 +  if (verdict == system_link::BeaconVerdict::kNoHello) {
-+    if (!RememberOnce(beacon_drop_logs_, source, kBeaconLogCapacity)) {
++    if (!RememberOnce(beacon_drop_logs_, std::pair{source, uint64_t{0}}, kBeaconLogCapacity)) {
 +      return;
 +    }
 +    REXLOG_INFO("[netlink] beacon from {} dropped: no co-op hello (ours {})",
@@ -373,7 +373,7 @@ index b42ead8..59ec801 100644
 +    return;
 +  }
 +  uint64_t theirs = beacon_hellos_.TokenFrom(source, now).value();
-+  if (!RememberOnce(beacon_drop_logs_, source, kBeaconLogCapacity)) {
++  if (!RememberOnce(beacon_drop_logs_, std::pair{source, theirs}, kBeaconLogCapacity)) {
 +    return;
 +  }
 +  REXLOG_INFO("[netlink] beacon from {} dropped: co-op hash {} differs from ours {}",
