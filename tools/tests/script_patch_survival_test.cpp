@@ -482,7 +482,7 @@ void CheckSurvivalLines(const GroupResult& result) {
          "survival S2A-2 line");
   Expect(result.lines[2] ==
              "S2A-3 GearGame.GearPC.Destroyed: script grown to "
-             "1288 bytes, with 2 write(s)",
+             "1275 bytes, with 2 write(s)",
          "survival S2A-3 line");
   Expect(result.lines[3] ==
              "S2A-5 GearGame.GearPC.SaveCheckpoint: script grown to "
@@ -521,12 +521,23 @@ void CheckS2A2(FakeGuest& guest, uint32_t old_data) {
 void CheckS2A3(FakeGuest& guest, uint32_t old_data, const std::vector<uint8_t>& old) {
   uint32_t func = guest.Path("GearGame.GearPC.Destroyed", "Function");
   Expect(guest.U32(func + 84u) != old_data, "S2A-3 Data is new");
-  Expect(guest.U32(func + 88u) == 1288u && guest.U32(func + 92u) == 1288u, "S2A-3 Num==Max==1288");
+  Expect(guest.U32(func + 88u) == 1275u && guest.U32(func + 92u) == 1275u, "S2A-3 Num==Max==1275");
   std::vector<uint8_t> s = ScriptBytes(guest, "GearGame.GearPC.Destroyed");
   Expect(BytesAt(s, 0x63, {0x07, 0x04, 0x37}), "S2A-3 +0x63");
   Expect(BytesAt(s, 0x437, {0x07, 0x00, 0xAD}), "S2A-3 +0x437");
-  Expect(BytesAt(s, 0x504, {0x06, 0x00, 0xA4}), "S2A-3 +0x504");
-  Expect(BytesAt(s, 0x507, {0x53}), "S2A-3 +0x507");
+  Expect(BytesAt(s, 0x4F7, {0x06, 0x00, 0xA4}), "S2A-3 +0x4F7");
+  Expect(BytesAt(s, 0x4FA, {0x53}), "S2A-3 +0x4FA");
+  uint32_t dummy = guest.Path("GearGame.GearPC.bCheckpointDummy", "BoolProperty");
+  Expect(s.size() >= 0x6Eu && U32BE(s, 0x6A) == dummy, "S2A-3 +0x6A dummy operand");
+  size_t tail_end = s.size() < 0x4FBu ? s.size() : 0x4FBu;
+  bool dummy_in_tail = false;
+  for (size_t i = 0x437u; i + 4u <= tail_end; ++i) {
+    if (U32BE(s, i) == dummy) {
+      dummy_in_tail = true;
+      break;
+    }
+  }
+  Expect(!dummy_in_tail, "S2A-3 dummy case: tail has no bCheckpointDummy");
   bool prefix = s.size() >= 0x63u && old.size() >= 0x63u;
   for (size_t i = 0u; prefix && i < 0x63u; ++i) prefix = s[i] == old[i];
   Expect(prefix, "S2A-3 first 0x63 preserved");

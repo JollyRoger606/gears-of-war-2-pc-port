@@ -2,6 +2,7 @@
 // from the rows themselves; no game files needed. Build target gow2_script_patch_test.
 #include "gow2_script_patches.h"
 #include "gow2_script_patch_body.h"
+#include "gow2_script_patch_stack.h"
 
 #include "gow2_guest.h"
 
@@ -967,8 +968,8 @@ void TestCoopBodyGroupApplies() {
                  result.lines[1].rfind("CB-4 ", 0) == 0 && result.lines[2].rfind("CB-5 ", 0) == 0 &&
                  result.lines[3].rfind("CB-1 ", 0) == 0 && result.lines[4].rfind("CB-2 ", 0) == 0;
   Expect(ordered, "coop-body lines in order");
-  Expect(result.lines.size() > 1u && EndsWith(result.lines[1], "script grown to 548 bytes"),
-         "coop-body CB-4 grown to 548");
+  Expect(result.lines.size() > 1u && EndsWith(result.lines[1], "script grown to 658 bytes"),
+         "coop-body CB-4 grown to 658");
   Expect(group.name == "coop-body", "coop-body name");
   uint32_t suggest = guest.Path("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function");
   uint32_t suggest_data = guest.U32(suggest + 84u);
@@ -985,8 +986,8 @@ void TestCoopBodyGroupApplies() {
   Expect(guest.U32(login_data + 0x3C4u) == guest.Path("GearGame.GearPC.DefaultPawnClass", "ClassProperty"),
          "coop-body PostLogin +0x3C4 DefaultPawnClass");
   uint32_t restart = guest.Path("GearGame.GearGame.RestartPlayer", "Function");
-  Expect(guest.U32(restart + 88u) == 548u && guest.U32(restart + 92u) == 548u,
-         "coop-body RestartPlayer Num==Max==548");
+  Expect(guest.U32(restart + 88u) == 658u && guest.U32(restart + 92u) == 658u,
+         "coop-body RestartPlayer Num==Max==658");
   uint32_t mesh = guest.Path("GearGame.Default__GearPawn_COGGear.GearPawnMesh", "SkeletalMeshComponent");
   Expect(guest.U32(mesh + 480u) == guest.Path("COG_Dom.Game.COG_Dom_Game_CamSkel", "SkeletalMesh"),
          "coop-body mesh SkeletalMesh");
@@ -1111,10 +1112,10 @@ void TestCoopRideGroupApplies() {
   GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
   Expect(result.applied, "coop-ride applies");
   Expect(group.name == "coop-ride", "coop-ride name");
-  Expect(result.lines.size() == 2u, "coop-ride 2 lines");
-  Expect(result.lines.size() == 2u && EndsWith(result.lines[0], "script grown to 369 bytes") &&
-             EndsWith(result.lines[1], "script grown to 451 bytes"),
-         "coop-ride lines grown to 369 and 451");
+  Expect(result.lines.size() == 3u, "coop-ride 3 lines");
+  Expect(result.lines.size() == 3u && EndsWith(result.lines[0], "script grown to 369 bytes") &&
+             EndsWith(result.lines[1], "script grown to 451 bytes") && EndsWith(result.lines[2], "script grown to 532 bytes, with 2 write(s)"),
+         "coop-ride lines grown to 369, 451 and 532");
   uint32_t enter = guest.Path("GearGame.GearPawn.OnGearEnterVehicle", "Function");
   uint32_t enter_data = guest.U32(enter + 84u);
   Expect(guest.U8(enter_data + 0xA6u) == 0x07 && guest.U8(enter_data + 0xA7u) == 0x01 &&
@@ -1138,6 +1139,19 @@ void TestCoopRideGroupApplies() {
          "coop-ride exit tail end");
   Expect(guest.U32(leave_data + 0x1A8u) == guest.Path("GearGame.GearPC.FindAvailableTeleportSpot", "Function"),
          "coop-ride exit +0x1A8 FindAvailableTeleportSpot");
+  uint32_t sync = guest.Path("GearGame.GearGameSP_Base.SyncKismetSetProperties", "Function");
+  uint32_t sync_data = guest.U32(sync + 84u);
+  Expect(guest.U8(sync_data + 0x1Du) == 0x06, "coop-ride sync +0x1D patched");
+  Expect(guest.U8(sync_data + 0x1Fu) == 0xCB, "coop-ride sync +0x1F patched");
+  Expect(guest.U8(sync_data + 0x1CBu) == 0x07 && guest.U8(sync_data + 0x1CCu) == 0x01 &&
+             guest.U8(sync_data + 0x1CDu) == 0xC7,
+         "coop-ride sync tail head");
+  Expect(guest.U8(sync_data + 0x210u) == 0x06 && guest.U8(sync_data + 0x211u) == 0x00 &&
+             guest.U8(sync_data + 0x212u) == 0x2C,
+         "coop-ride sync tail jump");
+  Expect(guest.U8(sync_data + 0x213u) == 0x53, "coop-ride sync last byte 0x53");
+  Expect(guest.U32(sync + 88u) == 532u && guest.U32(sync + 92u) == 532u,
+         "coop-ride sync Num==Max==532");
 }
 
 void TestFollowUpHashes() {
@@ -1148,6 +1162,42 @@ void TestFollowUpHashes() {
   Expect(GroupHash(CoopRideGroup(), 4) != 0u, "follow-up ride hash nonzero");
   Expect(GroupHash(CoopStage1Group(false), 4) == 0x937c35f80cb274b7ull,
          "follow-up stage1 hash unchanged");
+}
+
+void TestStackTextOrderAndSpacing() {
+  std::vector<StackEntry> entries = {
+      {"coop", "937c35f80cb274b7"}, {"survival", "off"}, {"coop-scenes", "skipped"}};
+  Expect(StackText(4, entries) == "players=4 coop=937c35f80cb274b7 survival=off coop-scenes=skipped",
+         "stack text order and spacing");
+  Expect(StackText(3, {}) == "players=3", "stack text without entries");
+}
+
+void TestStackHashKnownValues() {
+  Expect(StackHash("") == 14695981039346656037ull, "stack hash empty is basis");
+  Expect(StackHash("a") == 0xaf63dc4c8601ec8cull, "stack hash a");
+}
+
+void TestStackLineEndsWithCombined() {
+  std::vector<StackEntry> entries = {{"coop", "937c35f80cb274b7"}, {"survival", "off"}};
+  std::string text = StackText(4, entries);
+  std::string want = text + " combined=" + FormatGroupHash(StackHash(text));
+  Expect(StackLine(4, entries) == want, "stack line is text plus combined");
+  Expect(EndsWith(StackLine(4, entries), " combined=" + FormatGroupHash(StackHash(text))),
+         "stack line ends with combined");
+}
+
+void TestFormatGroupHashPads() {
+  Expect(FormatGroupHash(0u) == "0000000000000000", "group hash zero pads to 16");
+  Expect(FormatGroupHash(0xabul) == "00000000000000ab", "group hash pads short value");
+  Expect(FormatGroupHash(0x937c35f80cb274b7ull) == "937c35f80cb274b7", "group hash full value");
+}
+
+void TestStackCombinedDiffersOnOneState() {
+  std::vector<StackEntry> first = {{"coop", "937c35f80cb274b7"}, {"survival", "off"}};
+  std::vector<StackEntry> second = first;
+  second[1].state = "skipped";
+  Expect(StackHash(StackText(4, first)) != StackHash(StackText(4, second)),
+         "stack combined differs on one state");
 }
 
 }  // namespace
@@ -1188,6 +1238,11 @@ int main() {
   TestCoopBodyCarmineAfterStage1OnOneGuest();
   TestCoopRideGroupApplies();
   TestFollowUpHashes();
+  TestStackTextOrderAndSpacing();
+  TestStackHashKnownValues();
+  TestStackLineEndsWithCombined();
+  TestFormatGroupHashPads();
+  TestStackCombinedDiffersOnOneState();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return (g_failures == 0) ? 0 : 1;
 }
