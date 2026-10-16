@@ -118,7 +118,7 @@ ScriptRow RowS2A_2() {
   };
 }
 
-// a leaving player 3+: UnPossess and Destroy his pawn; no AI Dom, no SeqEvent_CoopPlayerLeft
+// a leaving player 3+, or a checkpoint dummy holding a player 3+'s record: UnPossess and Destroy his pawn; no AI Dom, no SeqEvent_CoopPlayerLeft
 ScriptRow RowS2A_3() {
   return {
       .id = "S2A-3",
@@ -154,11 +154,9 @@ ScriptRow RowS2A_3() {
       },
       .grow = GrowEdit{
           .keep = 0x0437,
-          .new_size = 1288,
+          .new_size = 1275,
           .tail = {
-              {.bytes = {0x07, 0x00, 0xAD, 0x82, 0x82, 0x82, 0x81, 0x2D, 0x01}},
-              {.object = {"GearGame.GearPC.bCheckpointDummy", "BoolProperty"}},
-              {.bytes = {0x16, 0x18, 0x00, 0x2B, 0x82, 0x82, 0x77, 0x01}},
+              {.bytes = {0x07, 0x00, 0xAD, 0x82, 0x82, 0x82, 0x82, 0x77, 0x01}},
               {.object = {"GearGame.GearPC.DefaultPawnClass", "ClassProperty"}},
               {.bytes = {0x2A, 0x16, 0x18, 0x00, 0x0D, 0x77, 0x01}},
               {.object = {"GearGame.GearPC.DefaultPawnClass", "ClassProperty"}},
@@ -168,7 +166,7 @@ ScriptRow RowS2A_3() {
               {.object = {"GearGame.GearPC.DefaultPawnClass", "ClassProperty"}},
               {.bytes = {0x20}},
               {.object = {"GearGame.GearPawn_COGDom", "Class"}},
-              {.bytes = {0x16, 0x16, 0x16, 0x18, 0x00, 0x17, 0x77, 0x19, 0x00}},
+              {.bytes = {0x16, 0x16, 0x18, 0x00, 0x17, 0x77, 0x19, 0x00}},
               {.object = {"GearGame.GearPC.Destroyed.Gear", "ObjectProperty"}},
               {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
               {.object = {"Core.Object.Class", "ClassProperty"}},
@@ -180,11 +178,11 @@ ScriptRow RowS2A_3() {
               {.object = {"Core.Object.Class", "ClassProperty"}},
               {.bytes = {0x20}},
               {.object = {"GearGame.GearPawn_COGDom", "Class"}},
-              {.bytes = {0x16, 0x16, 0x07, 0x05, 0x04, 0x77, 0x2E}},
+              {.bytes = {0x16, 0x16, 0x07, 0x04, 0xF7, 0x77, 0x2E}},
               {.object = {"GearGame.GearPawn", "Class"}},
               {.bytes = {0x01}},
               {.object = {"Engine.Controller.Pawn", "ObjectProperty"}},
-              {.bytes = {0x2A, 0x16, 0x07, 0x04, 0xE6, 0x84, 0x19, 0x00}},
+              {.bytes = {0x2A, 0x16, 0x07, 0x04, 0xD9, 0x84, 0x19, 0x00}},
               {.object = {"GearGame.GearPC.Destroyed.Gear", "ObjectProperty"}},
               {.bytes = {0x00, 0x08, 0x00, 0x04, 0x1C}},
               {.object = {"GearGame.GearPawn.IsDoingSpecialMove", "Function"}},

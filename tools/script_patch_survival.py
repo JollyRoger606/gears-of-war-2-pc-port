@@ -170,7 +170,7 @@ def special_move(n):
 
 
 t3, _, _ = assemble(0x0437, [
-    ("t0", lambda L: jumpifnot(0x00AD, and_(and_(and_(R(b"\x81\x2D") + inst(DUMMY) + R(b"\x16"), is_extra(inst(DPC))),
+    ("t0", lambda L: jumpifnot(0x00AD, and_(and_(is_extra(inst(DPC)),
                                                   ne(GEAR_CLASS, objconst(MARCUS))), ne(GEAR_CLASS, objconst(DOM))))),
     ("t1", lambda L: jumpifnot(L["super"], ne(R(b"\x2E") + (sp.Ref("GearGame.GearPawn", "Class"),) + inst(PAWN), NONE))),
     ("t2", lambda L: jumpifnot(L["t3"], or_(special_move(42), special_move(43)))),
@@ -182,7 +182,7 @@ t3, _, _ = assemble(0x0437, [
     (None, lambda L: R(b"\x53")),
 ])
 S2A_3 = sp.ScriptRow(
-    "S2A-3", "a leaving player 3+: UnPossess and Destroy his pawn; no AI Dom, no SeqEvent_CoopPlayerLeft",
+    "S2A-3", "a leaving player 3+, or a checkpoint dummy holding a player 3+'s record: UnPossess and Destroy his pawn; no AI Dom, no SeqEvent_CoopPlayerLeft",
     sp.Ref(DES, "Function"), 1080,
     checks=(sp.Check(0x0063, b"\x07"), sp.Check(0x0066, b"\x82\x81\x2D\x01"), sp.Check(0x00A4, b"\x1C"),
             sp.Check(0x00A9, b"\x16\x06\x04\x35\x07\x01\x16\x84\x19\x00"), sp.Check(0x01B2, b"\x0F\x00"),
@@ -193,7 +193,7 @@ S2A_3 = sp.ScriptRow(
               sp.Operand(0x01C9, sp.Ref(DES + ".AI", "ObjectProperty")), sp.Operand(0x01CE, sp.Ref("Engine.Actor.Spawn", "Function")),
               sp.Operand(0x01D3, sp.Ref("GearGame.GearAI_Dom", "Class"))),
     byte_edits=(sp.ByteEdit(0x0064, 0x00, 0x04), sp.ByteEdit(0x0065, 0xAD, 0x37)),
-    grow=sp.Grow(0x0437, 1288, t3))
+    grow=sp.Grow(0x0437, 1275, t3))
 
 SCP = "GearGame.GearPC.SaveCheckpoint"
 SCP_PC = sp.Ref(SCP + ".PC", "ObjectProperty")
