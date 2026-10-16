@@ -35,6 +35,8 @@ set(GOW2_SOURCES
     src/gow2_engine_tick_hook.cpp
     src/gow2_dev_commands.cpp
     src/gow2_dev_guest_calls.cpp
+    src/gow2_dev_cheats.cpp
+    src/gow2_dev_cheats_table.cpp
 )
 
 # The exe icon. CMake already turns on RC for clang on Windows; enable_language makes it explicit.
