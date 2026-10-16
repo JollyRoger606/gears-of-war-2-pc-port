@@ -3,7 +3,7 @@
 It owns the patch rows, prints the C++ table and checks the rows against the
 player's own decompressed packages.
 
-python -I tools/script_patch.py --check <dir with Core.upk, Engine.upk, GameFramework.upk, GearGame.upk> [--players N]
+python -I tools/script_patch.py --check <dir with Core.upk, Engine.upk, GameFramework.upk, GearGame.upk> [--players N] [--stage1-only]
 python -I tools/script_patch.py --cpp
 python -I tools/script_patch.py --cpp --write
 """
@@ -706,6 +706,12 @@ def check_package(pkg_dir, players):
     return 1 if failed else 0
 
 
+def check_stage2_stack(pkg_dir, players):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import script_patch_stage2
+    return script_patch_stage2.check_stack(pkg_dir, players)
+
+
 def _write_stdout(text):
     # Binary write so piped output keeps LF endings on every platform.
     buf = getattr(sys.stdout, "buffer", None)
@@ -723,6 +729,7 @@ def parse_args(argv=None):
     p.add_argument("--cpp", action="store_true", help="print the C++ table file")
     p.add_argument("--write", action="store_true", help="write the C++ table file (with --cpp)")
     p.add_argument("--players", type=int, default=4, help="player count 3..255 (default 4)")
+    p.add_argument("--stage1-only", action="store_true", help="check only the Stage 1 rows, not the Stage 2 stack")
     return p.parse_args(argv)
 
 
@@ -747,7 +754,11 @@ def main(argv=None):
     if args.check is None:
         print("error: need --check PKGDIR or --cpp", file=sys.stderr)
         return 2
-    return check_package(args.check, args.players)
+    stage1 = check_package(args.check, args.players)
+    if args.stage1_only:
+        return stage1
+    stage2 = check_stage2_stack(args.check, args.players)
+    return 1 if stage1 or stage2 else 0
 
 
 if __name__ == "__main__":
