@@ -63,6 +63,18 @@ void TestWindowMapping() {
   Expect(text::WindowSize("2147483648", "720") == "auto", "overflow dimension is auto");
 }
 
+void TestFloatText() {
+  Expect(text::FloatText("0.600000") == "0.6", "float trailing zeros");
+  Expect(text::FloatText("1.000000") == "1.0", "whole float keeps fraction");
+  Expect(text::FloatText("0.050000") == "0.05", "float leading fractional zero");
+  Expect(text::FloatText("-2.500000") == "-2.5", "negative float trailing zeros");
+  Expect(text::FloatText("3") == "3.0", "integer float gets fraction");
+  Expect(text::FloatText("0.000000") == "0.0", "zero float keeps fraction");
+  Expect(text::FloatText("0.6") == "0.6", "short float stays short");
+  Expect(text::FloatText("1.500000e+10") == "1.5e+10", "float exponent stays intact");
+  Expect(text::FloatText("3E-10") == "3.0E-10", "integer mantissa gets fraction");
+}
+
 void TestUpscaleRatio() {
   const std::string_view arrow = " \xe2\x86\x92 ";
   Expect(text::UpscaleRatio("1", "", "") == "1280x720", "internal size alone");
@@ -94,6 +106,7 @@ int main() {
   TestWindowParsing();
   TestMemoryParsing();
   TestWindowMapping();
+  TestFloatText();
   TestUpscaleRatio();
   TestLeaseTime();
   std::printf("options_values_test: %d checks, %d failures\n", checks, failures);

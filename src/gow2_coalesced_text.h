@@ -86,9 +86,30 @@ inline bool LocaleIs(std::string_view locale, const char* want) {
   return true;
 }
 
-// Text for the Options menu's Storage Location button, repurposed as the PC Options entry.
-// Unknown locales fall back to English.
-inline LocalizedPair PcOptionsEntryText(std::string_view locale) {
+inline LocalizedPair DeviceOptionsEntryText(std::string_view locale) {
+  if (LocaleIs(locale, "esn") || LocaleIs(locale, "esm"))
+    return {"Opciones del dispositivo", "Pantalla, gráficos, controles, red y partidas en este dispositivo."};
+  if (LocaleIs(locale, "deu"))
+    return {"Geräteoptionen", "Anzeige, Grafik, Steuerung, Netzwerk und Spielstände auf diesem Gerät."};
+  if (LocaleIs(locale, "fra"))
+    return {"Options appareil", "Affichage, graphismes, commandes, réseau et sauvegardes sur cet appareil."};
+  if (LocaleIs(locale, "ita"))
+    return {"Opzioni dispositivo", "Schermo, grafica, controlli, rete e salvataggi su questo dispositivo."};
+  if (LocaleIs(locale, "pol"))
+    return {"Opcje urządzenia", "Ekran, grafika, sterowanie, sieć i zapisy na tym urządzeniu."};
+  if (LocaleIs(locale, "cze"))
+    return {"Možnosti zařízení", "Obraz, grafika, ovládání, síť a uložené pozice na tomto zařízení."};
+  if (LocaleIs(locale, "hun"))
+    return {"Eszközbeállítások", "Kép, grafika, irányítás, hálózat és mentések ezen az eszközön."};
+  if (LocaleIs(locale, "rus"))
+    return {"Настройки устройства", "Экран, графика, управление, сеть и сохранения на этом устройстве."};
+  if (LocaleIs(locale, "kor")) return {"기기 옵션", "이 기기의 화면, 그래픽, 조작, 네트워크 및 저장 설정."};
+  if (LocaleIs(locale, "cht")) return {"裝置選項", "此裝置的顯示、圖形、控制、網路與存檔設定。"};
+  return {"Device Options", "Graphics, controls, network and saves."};
+}
+
+inline LocalizedPair PcOptionsEntryText(std::string_view locale, bool android) {
+  if (android) return DeviceOptionsEntryText(locale);
   if (LocaleIs(locale, "esn") || LocaleIs(locale, "esm"))
     return {"Opciones de PC", "Pantalla, gráficos, controles, red y partidas en este PC."};
   if (LocaleIs(locale, "deu"))
@@ -107,7 +128,7 @@ inline LocalizedPair PcOptionsEntryText(std::string_view locale) {
     return {"Настройки ПК", "Экран, графика, управление, сеть и сохранения на этом ПК."};
   if (LocaleIs(locale, "kor")) return {"PC 옵션", "이 PC의 화면, 그래픽, 조작, 네트워크 및 저장 설정."};
   if (LocaleIs(locale, "cht")) return {"PC 選項", "此電腦的顯示、圖形、控制、網路與存檔設定。"};
-  return {"PC Options", "Display, graphics, controls, network and saves on this PC."};
+  return {"PC Options", "Graphics, controls, network and saves."};
 }
 
 }  // namespace rex::glue

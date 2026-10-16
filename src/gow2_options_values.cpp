@@ -20,6 +20,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__ANDROID__)
+#include <sys/system_properties.h>
 #endif
 
 #ifndef GOW2_VERSION
@@ -196,7 +198,9 @@ void AppendAssignment(std::string_view name, std::vector<toml_edit::Assignment>*
   if (!flag) return;
   const auto kind = PersistKind(flag->type);
   if (!kind) return;
-  out->push_back({std::string(name), *kind, CurrentValue(name)});
+  auto value = CurrentValue(name);
+  if (*kind == toml_edit::ValueKind::kFloat) value = values_text::FloatText(value);
+  out->push_back({std::string(name), *kind, std::move(value)});
 }
 
 bool ReadConfig(const std::filesystem::path& path, std::string* text, std::string* error) {
@@ -227,6 +231,21 @@ bool HasDlss() {
 #endif
 }
 
+std::string SpanishChoiceLabel(std::string_view label) {
+  static constexpr std::pair<std::string_view, std::string_view> prefixes[] = {
+      {"Main display", "Pantalla principal"},
+      {"Display ", "Pantalla "},
+      {"Automatic", "Automática"},
+      {"Default (this device)", "Predeterminada (este equipo)"},
+      {"Next to the game (portable)", "Junto al juego (portátil)"},
+      {"Custom (", "Personalizada ("},
+  };
+  for (const auto& [en, es] : prefixes) {
+    if (label.starts_with(en)) return std::string(es) + std::string(label.substr(en.size()));
+  }
+  return std::string(label);
+}
+
 void AddChoices(OwnedContext* out, std::string_view id,
                 const std::vector<options_actions::NamedValue>& choices) {
   auto& owned = out->ctx.dynamic_choices[std::string(id)];
@@ -235,7 +254,9 @@ void AddChoices(OwnedContext* out, std::string_view id,
     const std::string_view value = out->text.back();
     out->text.push_back(choice.label);
     const std::string_view label = out->text.back();
-    owned.push_back({value, label, label});
+    out->text.push_back(SpanishChoiceLabel(choice.label));
+    const std::string_view label_es = out->text.back();
+    owned.push_back({value, label, label_es});
   }
 }
 
@@ -251,6 +272,11 @@ void AddUnavailable(Context* ctx) {
 Lang SystemLang() {
 #ifdef _WIN32
   return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_SPANISH ? Lang::kEs : Lang::kEn;
+#elif defined(__ANDROID__)
+  char locale[PROP_VALUE_MAX]{};
+  __system_property_get("persist.sys.locale",locale);
+  if (!locale[0]) __system_property_get("ro.product.locale",locale);
+  return std::string_view(locale).starts_with("es") ? Lang::kEs : Lang::kEn;
 #else
   if (Environment("LC_ALL").starts_with("es")) return Lang::kEs;
   if (Environment("LANG").starts_with("es")) return Lang::kEs;
@@ -262,6 +288,8 @@ Lang SystemLang() {
 
 CvarValues::CvarValues(GamePaths paths) : paths_(std::move(paths)) {}
 
+void CvarValues::set_paths(GamePaths paths) { paths_ = std::move(paths); }
+
 std::string CvarValues::Get(std::string_view id) const {
   if (id == "upscale_ratio")
     return values_text::UpscaleRatio(CurrentValue("resolution_scale"),
@@ -271,7 +299,11 @@ std::string CvarValues::Get(std::string_view id) const {
   if (id == "save_dir_effective") return Utf8Path(paths_.user_data_root);
   if (id == "config_path") return Utf8Path(paths_.config_path);
   if (id == "version") return GOW2_VERSION;
+#if defined(__ANDROID__)
+  if (id == "menu_shortcut") return Localized("Gear · Back + Start", "Engranaje · Back + Start");
+#else
   if (id == "menu_shortcut") return "F10 · Back + Start";
+#endif
   if (IsReadOnly(id)) return {};
   return RowValue(id, CurrentValue);
 }

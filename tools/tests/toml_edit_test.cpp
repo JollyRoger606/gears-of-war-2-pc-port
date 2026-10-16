@@ -283,6 +283,28 @@ void TestRealConfig(int argc, char** argv) {
          "save dir set as literal string");
 }
 
+void TestUnicodeWriteErrors(const fs::path& root) {
+  const fs::path blocked = root / u8"\u4e2d-file";
+  std::string error;
+  Expect(te::WriteFileAtomic(blocked, "block directory creation", &error),
+         "unicode blocker file is created");
+  Expect(!te::WriteFileAtomic(blocked / "gow2.toml", "vsync = true\n", &error),
+         "unicode file parent fails directory creation");
+  Expect(Contains(error, "cannot create directory ") && Contains(error, "\xE4\xB8\xAD-file"),
+         "directory failure reports unicode path as utf8");
+
+  const fs::path file = root / u8"\u4e2d-folder" / "gow2.toml";
+  fs::path sibling = file;
+  sibling += ".tmp";
+  std::error_code ec;
+  Expect(fs::create_directories(sibling, ec), "unicode temporary-file blocker is created");
+  Expect(!te::WriteFileAtomic(file, "vsync = true\n", &error),
+         "temporary directory blocks unicode file write");
+  Expect(Contains(error, "cannot write ") && Contains(error, "\xE4\xB8\xAD-folder") &&
+             EndsWith(error, "gow2.toml.tmp: open failed"),
+         "open failure reports unicode path as utf8");
+}
+
 void TestFileRoundTrip() {
   std::error_code ec;
   fs::path tmp = fs::temp_directory_path(ec);
@@ -306,6 +328,7 @@ void TestFileRoundTrip() {
   Expect(te::WriteFileAtomic(file, "vsync = false\n", &error), "atomic write overwrites");
   Expect(te::ReadFile(file, &text) && text == "vsync = false\n", "read back matches overwrite");
   Expect(!fs::exists(sibling, ec), "no tmp file left behind");
+  TestUnicodeWriteErrors(root);
   fs::remove_all(root, ec);
 }
 

@@ -61,7 +61,7 @@ namespace rex::glue {
 
 namespace {
 
-constexpr int kVersion = 6;  // bump when the edit definitions change (invalidates cached copies)
+constexpr int kVersion = 8;  // bump when the edit definitions change (invalidates cached copies)
 
 // Bundle layout: BE u32 file count; per file a name, BE u32 section count; per section a name and
 // BE u32 key count; per key a key and a value. Strings are a BE int32 length, negative = UTF-16LE
@@ -270,26 +270,33 @@ struct Edit {
   std::string value;    // kSet: the new value; kReplaceSub: "from|to"
   std::string match;    // kReplaceSub only: only values containing this text (empty = all)
   std::string locale;   // only bundles with this locale apply the edit (empty = every locale)
+  bool optional = false;
+  bool pc_options_entry = false;
 };
 
 const char* const kUI = "GearGameUI.int";
 
 void AddPcOptionsEntry(std::vector<Edit>* e) {
+#if defined(__ANDROID__)
+  constexpr bool kAndroid = true;
+#else
+  constexpr bool kAndroid = false;
+#endif
   static const char* const kLocales[] = {"int", "esn", "esm", "deu", "fra", "ita",
                                          "pol", "cze", "hun", "rus", "kor", "cht"};
   // The fallback pair (English text, no filter) comes first so each bundle ends with exactly one
   // value: it writes everywhere, then at most one locale pair overwrites it.
-  const LocalizedPair fallback = PcOptionsEntryText("int");
+  const LocalizedPair fallback = PcOptionsEntryText("int", kAndroid);
   e->push_back({Edit::kSet, "GearGame.int", "OptionsMenu", "StorageLocation",
-                std::string(fallback.label)});
+                std::string(fallback.label), "", "", false, true});
   e->push_back({Edit::kSet, "GearGame.int", "OptionsMenu", "StorageLocation_Desc",
-                std::string(fallback.description)});
+                std::string(fallback.description), "", "", true, true});
   for (const char* loc : kLocales) {
-    const LocalizedPair t = PcOptionsEntryText(loc);
+    const LocalizedPair t = PcOptionsEntryText(loc, kAndroid);
     e->push_back({Edit::kSet, "GearGame.int", "OptionsMenu", "StorageLocation",
-                  std::string(t.label), "", loc});
+                  std::string(t.label), "", loc, false, true});
     e->push_back({Edit::kSet, "GearGame.int", "OptionsMenu", "StorageLocation_Desc",
-                  std::string(t.description), "", loc});
+                  std::string(t.description), "", loc, true, true});
   }
 }
 
@@ -324,9 +331,12 @@ uint64_t Fnv(const std::string& s, uint64_t h = 1469598103934665603ull) {
   return h;
 }
 
-int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std::u16string& locale) {
+int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std::u16string& locale,
+          bool include_optional = true, bool include_pc_options_entry = true) {
   int changed = 0;
   for (const Edit& ed : edits) {
+    if (ed.optional && !include_optional) continue;
+    if (ed.pc_options_entry && !include_pc_options_entry) continue;
     if (!ed.locale.empty() && !EqFold(locale, ed.locale)) continue;
     for (IniFile& f : *files) {
       if (!FileMatches(f.name, ed.file, locale)) continue;
@@ -360,6 +370,17 @@ int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std
     }
   }
   return changed;
+}
+
+bool RebuildWithoutOptionalEdits(const std::vector<uint8_t>& bytes, const std::vector<Edit>& edits,
+                                 const std::u16string& locale, uint64_t size,
+                                 std::vector<uint8_t>* patched, int* changed,
+                                 bool include_pc_options_entry = true) {
+  std::vector<IniFile> files;
+  if (!Parse(bytes, &files)) return false;
+  *changed = Apply(&files, edits, locale, false, include_pc_options_entry);
+  *patched = Serialize(files);
+  return PadToSize(patched, size);
 }
 
 }  // namespace
@@ -413,6 +434,8 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   const std::unordered_map<std::string, uint64_t> toc_sizes =
       ReadTocFileSizes(game_root / "GearGame" / "Xbox360TOC.txt");
   int files_done = 0, values = 0, reused = 0, unreadable = 0, unmatched = 0, too_long = 0;
+  int without_optional = 0;
+  int without_menu_entry = 0;
   for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
     const std::filesystem::path src = it->path();
     const std::string name = src.filename().string();
@@ -430,11 +453,14 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     const std::string stamp =
         std::to_string(h) + " " + std::to_string(size) + " " + std::to_string(time);
     bool fresh = false;
+    bool omitted_optional = false;
+    bool omitted_menu_entry = false;
     if (std::filesystem::exists(dst, ec)) {
       std::ifstream sf(stamp_path);
       std::string have;
       std::getline(sf, have);
       fresh = (have == stamp);
+      if (fresh) sf >> omitted_optional >> omitted_menu_entry;
     }
     if (fresh) {
       ++reused;
@@ -446,16 +472,26 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
         continue;
       }
       const std::u16string locale = W(name.substr(10, name.size() - 14));  // Coalesced_XXX.bin -> XXX
-      const int changed = Apply(&files, edits, locale);
+      int changed = Apply(&files, edits, locale);
       if (changed == 0) {  // this locale file has none of the sections
         ++unmatched;
         continue;
       }
       std::vector<uint8_t> patched = Serialize(files);
       const auto toc = toc_sizes.find(LowerA(name));
-      if (!PadToSize(&patched, toc != toc_sizes.end() ? toc->second : uint64_t(size))) {
-        ++too_long;
-        continue;
+      const uint64_t target_size = toc != toc_sizes.end() ? toc->second : uint64_t(size);
+      if (!PadToSize(&patched, target_size)) {
+        omitted_optional = true;
+        bool fits = RebuildWithoutOptionalEdits(bytes, edits, locale, target_size, &patched, &changed);
+        if (!fits && options.pc_options_entry) {
+          omitted_menu_entry = true;
+          fits = RebuildWithoutOptionalEdits(bytes, edits, locale, target_size, &patched, &changed,
+                                             false);
+        }
+        if (!fits) {
+          ++too_long;
+          continue;
+        }
       }
       {
         std::ofstream of(dst, std::ios::binary | std::ios::trunc);
@@ -464,10 +500,12 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
         if (!of) continue;
       }
       std::ofstream sf(stamp_path, std::ios::trunc);
-      sf << stamp << "\n";
+      sf << stamp << "\n" << omitted_optional << " " << omitted_menu_entry << "\n";
       values += changed;
     }
     ++files_done;
+    if (omitted_optional) ++without_optional;
+    if (omitted_menu_entry) ++without_menu_entry;
     if (!res.overrides.empty()) res.overrides += ";";
     res.overrides += "GearGame/CookedXenon/" + name + "=" + dst.string();
     HashSecEntry entry;
@@ -494,6 +532,10 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
                   std::to_string(values) + " values changed, " + std::to_string(reused) +
                   " reused from cache); the game folder is not modified";
   }
+  if (without_optional > 0)
+    res.summary += " (" + std::to_string(without_optional) + " without optional descriptions)";
+  if (without_menu_entry > 0)
+    res.summary += " (" + std::to_string(without_menu_entry) + " without the menu entry)";
   return res;
 }
 

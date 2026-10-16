@@ -25,6 +25,7 @@ struct GamePaths {
 class CvarValues final : public Values {
  public:
   explicit CvarValues(GamePaths paths);
+  void set_paths(GamePaths paths);
   std::string Get(std::string_view id) const override;
   bool Set(std::string_view id, std::string_view value) override;
   std::string Default(std::string_view id) const override;

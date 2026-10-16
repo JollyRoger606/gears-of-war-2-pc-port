@@ -16,6 +16,7 @@ struct Pair {
 
 std::optional<Pair> ParseWindowSize(std::string_view value);
 std::optional<Pair> ParseTextureMemory(std::string_view value);
+std::string FloatText(std::string_view value);
 std::string WindowMode(std::string_view fullscreen, std::string_view exclusive);
 std::string WindowSize(std::string_view width, std::string_view height);
 std::string UpscaleRatio(std::string_view scale, std::string_view target_w,

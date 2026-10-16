@@ -15,6 +15,11 @@ namespace {
 
 constexpr char kMarker[] = "# Set in game (PC Options)";
 
+std::string PathUtf8(const std::filesystem::path& path) {
+  const auto utf8 = path.u8string();
+  return std::string(utf8.begin(), utf8.end());
+}
+
 bool IsBlank(char c) { return c == ' ' || c == '\t'; }
 
 bool IsDigit(char c) { return c >= '0' && c <= '9'; }
@@ -462,15 +467,15 @@ bool WriteFileAtomic(const std::filesystem::path& path, std::string_view text, s
   if (!parent.empty()) {
     std::error_code ec;
     std::filesystem::create_directories(parent, ec);
-    if (ec) return fail("cannot create directory " + parent.string() + ": " + ec.message());
+    if (ec) return fail("cannot create directory " + PathUtf8(parent) + ": " + ec.message());
   }
   {
     std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    if (!out) return fail("cannot write " + tmp.string() + ": open failed");
+    if (!out) return fail("cannot write " + PathUtf8(tmp) + ": open failed");
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
     out.flush();
     out.close();
-    if (!out) return fail("cannot write " + tmp.string() + ": write failed");
+    if (!out) return fail("cannot write " + PathUtf8(tmp) + ": write failed");
   }
   std::error_code ec;
   std::filesystem::rename(tmp, path, ec);
@@ -480,7 +485,7 @@ bool WriteFileAtomic(const std::filesystem::path& path, std::string_view text, s
       std::filesystem::remove(path, probe);
       std::filesystem::rename(tmp, path, ec);
     }
-    if (ec) return fail("cannot replace " + path.string() + ": " + ec.message());
+    if (ec) return fail("cannot replace " + PathUtf8(path) + ": " + ec.message());
   }
   if (error != nullptr) error->clear();
   return true;

@@ -82,6 +82,21 @@ std::optional<Pair> ParseTextureMemory(std::string_view value) {
   return ParsePair(value, '/', std::numeric_limits<std::uint64_t>::max());
 }
 
+std::string FloatText(std::string_view value) {
+  const auto exponent = value.find_first_of("eE");
+  auto mantissa = value.substr(0, exponent);
+  const auto decimal = mantissa.find('.');
+  if (decimal != mantissa.npos) {
+    while (mantissa.size() > decimal + 2 && mantissa.back() == '0')
+      mantissa.remove_suffix(1);
+  }
+  std::string text(mantissa);
+  if (decimal == mantissa.npos) text += ".0";
+  if (text.back() == '.') text += '0';
+  if (exponent != value.npos) text += value.substr(exponent);
+  return text;
+}
+
 std::string WindowMode(std::string_view fullscreen, std::string_view exclusive) {
   if (fullscreen != "true" && fullscreen != "1") return "windowed";
   if (exclusive == "true" || exclusive == "1") return "exclusive";

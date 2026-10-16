@@ -352,6 +352,7 @@ class Gow2App : public rex::ReXApp {
 #endif
     game_data_root_ = paths.game_data_root;
     cache_root_ = paths.cache_root;
+    options_paths_.config_path = paths.config_path;
   }
 
   static void ReportSaveDir(const rex::glue::SaveDirChoice& saves) {
@@ -386,6 +387,7 @@ class Gow2App : public rex::ReXApp {
     if (UserDataRootOutranksSaveDir()) {
       ReportSaveDirOutranked(paths.user_data_root);
       options_paths_ = {paths.config_path, paths.user_data_root};
+      rex::glue::options::UpdatePcOptionsPaths(options_paths_);
       return paths;
     }
     const rex::glue::SaveDirChoice saves = rex::glue::ChooseUserDataRoot(
@@ -395,6 +397,7 @@ class Gow2App : public rex::ReXApp {
     PinMachineXuid(paths.user_data_root, saves.user_data_root != paths.user_data_root);
     paths.user_data_root = saves.user_data_root;
     options_paths_ = {paths.config_path, paths.user_data_root};
+    rex::glue::options::UpdatePcOptionsPaths(options_paths_);
     return paths;
   }
 

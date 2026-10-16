@@ -165,6 +165,16 @@ add_custom_command(TARGET gow2 POST_BUILD
             $<TARGET_FILE_DIR:gow2>/gow2.toml
     COMMENT "Installing gow2.toml beside gow2.exe")
 
+add_custom_command(TARGET gow2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:gow2>/scripts"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/host-online.ps1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/host-online-upnp.ps1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/host-online-state.ps1"
+            "$<TARGET_FILE_DIR:gow2>/scripts"
+    COMMENT "Installing hosting scripts beside gow2.exe"
+    VERBATIM)
+
 # The SDK DLLs built from source (scripts/build-sdk.ps1 builds them into out/sdk). When they are
 # there, they replace the stock rexruntime.dll / rexgpu-xenos.dll that the SDK stages next to the exe.
 set(GOW2_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/out/sdk" CACHE PATH "Folder with the self-built rexruntime.dll and rexgpu-xenos.dll")

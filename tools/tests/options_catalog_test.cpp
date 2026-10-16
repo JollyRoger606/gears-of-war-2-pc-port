@@ -137,6 +137,31 @@ void TestUiTexts() {
   }
 }
 
+void TestPlatformMenuNames() {
+#if defined(__ANDROID__)
+  constexpr std::string_view title_en = "DEVICE OPTIONS";
+  constexpr std::string_view title_es = "OPCIONES DEL DISPOSITIVO";
+  constexpr std::string_view entry_en = "Options > Device Options";
+  constexpr std::string_view entry_es = "Opciones > Opciones del dispositivo";
+#else
+  constexpr std::string_view title_en = "PC OPTIONS";
+  constexpr std::string_view title_es = "OPCIONES DE PC";
+  constexpr std::string_view entry_en = "Options > PC Options";
+  constexpr std::string_view entry_es = "Opciones > Opciones de PC";
+#endif
+  Expect(options::Text(options::TextId::kTitle, options::Lang::kEn) == title_en,
+         "English menu title matches the platform");
+  Expect(options::Text(options::TextId::kTitle, options::Lang::kEs) == title_es,
+         "Spanish menu title matches the platform");
+  const options::Setting* shortcut = options::FindSetting("menu_shortcut");
+  Expect(shortcut != nullptr, "menu shortcut exists");
+  if (!shortcut) return;
+  Expect(shortcut->help_en.find(entry_en) != std::string_view::npos,
+         "English shortcut help names the platform menu");
+  Expect(shortcut->help_es.find(entry_es) != std::string_view::npos,
+         "Spanish shortcut help names the platform menu");
+}
+
 int CountTab(options::Tab tab) {
   int n = 0;
   for (const options::Setting& s : options::Catalog()) {
@@ -177,6 +202,7 @@ int main() {
     TestVisibleIf();
     TestPageTabs();
     TestUiTexts();
+    TestPlatformMenuNames();
     TestCounts();
   } catch (const std::exception& e) {
     ++g_checks;

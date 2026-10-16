@@ -173,6 +173,7 @@ void AddGraphicsUpscaling(std::vector<Setting>& out) {
       .kind = Kind::kChoice,
       .apply = Apply::kNow,
       .platforms = kWindows,
+      .need = Need::kNoDlss,
       .label_en = "Upscaler",
       .label_es = "Reescalador",
       .help_en =
@@ -1107,8 +1108,13 @@ void AddSystem(std::vector<Setting>& out) {
       .platforms = kAllPlatforms,
       .label_en = "Open this menu",
       .label_es = "Abrir este menú",
+#if defined(__ANDROID__)
+      .help_en = "Gear, or Back + Start on a controller, or Options > Device Options in the game.",
+      .help_es = "Engranaje, o Back + Start en el mando, u Opciones > Opciones del dispositivo en el juego."});
+#else
       .help_en = "F10, or Back + Start on a controller, or Options > PC Options in the game.",
       .help_es = "F10, o Back + Start en el mando, u Opciones > Opciones de PC en el juego."});
+#endif
 }
 
 std::vector<Setting> BuildCatalog() {
@@ -1144,7 +1150,11 @@ const Setting* FindSetting(std::string_view id) {
 std::string_view Text(TextId id, Lang lang) {
   switch (id) {
     case TextId::kTitle:
+#if defined(__ANDROID__)
+      return Pick("DEVICE OPTIONS", "OPCIONES DEL DISPOSITIVO", lang);
+#else
       return Pick("PC OPTIONS", "OPCIONES DE PC", lang);
+#endif
     case TextId::kTabDisplay:
       return Pick("Display", "Pantalla", lang);
     case TextId::kTabGraphics:

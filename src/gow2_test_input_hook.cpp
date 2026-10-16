@@ -14,6 +14,7 @@
 #include <rex/logging.h>
 
 #include "gow2_guest.h"
+#include "gow2_host_ui.h"
 
 REXCVAR_DEFINE_STRING(gow2_test_input, "", "Testing",
                       "Path of a text file whose first line names the pad buttons and stick values "
@@ -81,6 +82,7 @@ bool test_input::CurrentPad(PadState* out) {
 }
 
 void ApplyTestInput(uint8_t* base, uint32_t user_index, uint32_t state_addr, uint32_t* result) {
+  if (HostUiOpen()) return;
   if (user_index != 0) return;
   const std::string path = REXCVAR_GET(gow2_test_input);
   if (path.empty()) return;

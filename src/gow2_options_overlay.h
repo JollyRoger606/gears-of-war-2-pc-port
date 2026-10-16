@@ -16,5 +16,6 @@ void AddOptionsFonts(ImFontAtlas* atlas);
 std::unique_ptr<rex::ui::ImGuiDialog> CreateOptionsOverlay(
     rex::ui::ImGuiDrawer* drawer, const GamePaths& paths, bool touch_controls);
 void TogglePcOptions(OpenSource source);
+void UpdatePcOptionsPaths(const GamePaths& paths);
 void ClosePcOptionsForShutdown();
 }

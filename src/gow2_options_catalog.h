@@ -39,6 +39,7 @@ enum class Need : uint8_t {
   kTouch,           // touch controls were created at launch
   kFidelityFx,      // the runtime was built with AMD FidelityFX (FSR 1 / CAS present effects)
   kDlss,            // a DLSS-capable runtime (never in the release)
+  kNoDlss,
   kNativeMouse,     // the native mouse-look hooks are installed
   kNoNativeMouse,   // the mouse drives the right stick
 };

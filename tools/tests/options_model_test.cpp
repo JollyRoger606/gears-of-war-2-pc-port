@@ -179,6 +179,10 @@ void TestVisibility() {
   Expect(!IsVisible(row, values, context), "no-native requirement rejects native mouse");
   context.native_mouse = false;
   Expect(IsVisible(row, values, context), "no-native requirement permits fallback mouse");
+  row.need = Need::kNoDlss;
+  Expect(!IsVisible(row, values, context), "no-DLSS requirement rejects DLSS runtime");
+  context.dlss = false;
+  Expect(IsVisible(row, values, context), "no-DLSS requirement permits fallback runtime");
   row.need = Need::kNothing;
   row.dynamic_choices = true;
   Expect(!IsVisible(row, values, context), "missing dynamic choices hides row");
@@ -200,6 +204,20 @@ void TestVisibility() {
   Expect(IsVisible(row, values, context), "bare negation compares with empty text");
   values.current["condition"] = "";
   Expect(!IsVisible(row, values, context), "bare negation rejects empty text");
+}
+
+void TestUpscalerVisibility() {
+  FakeValues values;
+  Context context;
+  const auto* fallback = FindSetting("upscaler");
+  const auto* dlss = FindSetting("upscaler_dlss");
+  Expect(fallback && dlss, "both upscaler variants are cataloged");
+  if (!fallback || !dlss) return;
+  Expect(IsVisible(*fallback, values, context), "fallback upscaler visible without DLSS");
+  Expect(!IsVisible(*dlss, values, context), "DLSS upscaler hidden without DLSS");
+  context.dlss = true;
+  Expect(!IsVisible(*fallback, values, context), "fallback upscaler hidden with DLSS");
+  Expect(IsVisible(*dlss, values, context), "DLSS upscaler visible with DLSS");
 }
 
 void TestTabAndPageFiltering() {
@@ -561,6 +579,19 @@ void TestPointerCommandsAndRows() {
   Expect(!rows[IndexOf(f, "number")].changed, "absent opened baseline means unchanged");
 }
 
+void TestInfoAndActionRowsNeverShowChanged() {
+  Fixture f;
+  f.state.opened["run"] = f.values.Get("run");
+  f.values.current["info"] = "Updated status";
+  f.values.current["run"] = "Updated action";
+
+  const auto rows = Rows(f.state, f.catalog, f.values, f.context);
+  const auto& info = rows[IndexOf(f, "info")];
+  Expect(info.value_text == "Updated status", "info view displays updated computed text");
+  Expect(!info.changed, "updated info value never shows changed");
+  Expect(!rows[IndexOf(f, "run")].changed, "updated action value never shows changed even with an opened baseline");
+}
+
 void TestRestartPending() {
   Fixture f;
   f.values.current["restart"] = "true";
@@ -600,6 +631,7 @@ void TestRestartPending() {
 
 int main() {
   TestVisibility();
+  TestUpscalerVisibility();
   TestTabAndPageFiltering();
   TestStepping();
   TestFormatting();
@@ -610,6 +642,7 @@ int main() {
   TestSelectionRevalidation();
   TestUnsavedPrompt();
   TestPointerCommandsAndRows();
+  TestInfoAndActionRowsNeverShowChanged();
   TestRestartPending();
   std::printf("options_model_test: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

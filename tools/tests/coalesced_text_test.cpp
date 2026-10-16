@@ -50,10 +50,10 @@ struct Case {
   const char* description;
 };
 
-void TestLocales() {
+void TestLocales(bool android) {
   using rex::glue::PcOptionsEntryText;
-  static const Case kCases[] = {
-      {"int", "PC Options", "Display, graphics, controls, network and saves on this PC."},
+  static const Case kWindowsCases[] = {
+      {"int", "PC Options", "Graphics, controls, network and saves."},
       {"esn", "Opciones de PC", "Pantalla, gráficos, controles, red y partidas en este PC."},
       {"esm", "Opciones de PC", "Pantalla, gráficos, controles, red y partidas en este PC."},
       {"deu", "PC-Optionen", "Anzeige, Grafik, Steuerung, Netzwerk und Spielstände auf diesem PC."},
@@ -66,8 +66,23 @@ void TestLocales() {
       {"kor", "PC 옵션", "이 PC의 화면, 그래픽, 조작, 네트워크 및 저장 설정."},
       {"cht", "PC 選項", "此電腦的顯示、圖形、控制、網路與存檔設定。"},
   };
+  static const Case kAndroidCases[] = {
+      {"int", "Device Options", "Graphics, controls, network and saves."},
+      {"esn", "Opciones del dispositivo", "Pantalla, gráficos, controles, red y partidas en este dispositivo."},
+      {"esm", "Opciones del dispositivo", "Pantalla, gráficos, controles, red y partidas en este dispositivo."},
+      {"deu", "Geräteoptionen", "Anzeige, Grafik, Steuerung, Netzwerk und Spielstände auf diesem Gerät."},
+      {"fra", "Options appareil", "Affichage, graphismes, commandes, réseau et sauvegardes sur cet appareil."},
+      {"ita", "Opzioni dispositivo", "Schermo, grafica, controlli, rete e salvataggi su questo dispositivo."},
+      {"pol", "Opcje urządzenia", "Ekran, grafika, sterowanie, sieć i zapisy na tym urządzeniu."},
+      {"cze", "Možnosti zařízení", "Obraz, grafika, ovládání, síť a uložené pozice na tomto zařízení."},
+      {"hun", "Eszközbeállítások", "Kép, grafika, irányítás, hálózat és mentések ezen az eszközön."},
+      {"rus", "Настройки устройства", "Экран, графика, управление, сеть и сохранения на этом устройстве."},
+      {"kor", "기기 옵션", "이 기기의 화면, 그래픽, 조작, 네트워크 및 저장 설정."},
+      {"cht", "裝置選項", "此裝置的顯示、圖形、控制、網路與存檔設定。"},
+  };
+  const auto& kCases = android ? kAndroidCases : kWindowsCases;
   for (const Case& c : kCases) {
-    const rex::glue::LocalizedPair got = PcOptionsEntryText(c.locale);
+    const rex::glue::LocalizedPair got = PcOptionsEntryText(c.locale, android);
     char what[64];
     std::snprintf(what, sizeof(what), "locale %s has its own text", c.locale);
     Expect(got.label == std::string_view(c.label) &&
@@ -77,41 +92,43 @@ void TestLocales() {
   static const char* const kFolded[] = {"INT", "ESN", "ESM", "DEU", "FRA", "ITA",
                                         "POL", "CZE", "HUN", "RUS", "KOR", "CHT"};
   for (size_t i = 0; i < 12; ++i) {
-    const rex::glue::LocalizedPair upper = PcOptionsEntryText(kFolded[i]);
+    const rex::glue::LocalizedPair upper = PcOptionsEntryText(kFolded[i], android);
     char what[64];
     std::snprintf(what, sizeof(what), "locale %s matches case-insensitively", kFolded[i]);
     Expect(upper.label == std::string_view(kCases[i].label) &&
                upper.description == std::string_view(kCases[i].description),
            what);
   }
-  Expect(PcOptionsEntryText("EsN").label == PcOptionsEntryText("esn").label,
+  Expect(PcOptionsEntryText("EsN", android).label == PcOptionsEntryText("esn", android).label,
          "mixed case matches too");
   for (const char* unknown : {"jpn", "xxx", "", "e", "esnn", "in"}) {
-    const rex::glue::LocalizedPair got = PcOptionsEntryText(unknown);
+    const rex::glue::LocalizedPair got = PcOptionsEntryText(unknown, android);
     char what[64];
     std::snprintf(what, sizeof(what), "unknown locale '%s' falls back to int", unknown);
-    Expect(got.label == std::string_view("PC Options") &&
+    Expect(got.label == std::string_view(kCases[0].label) &&
                got.description ==
-                   std::string_view("Display, graphics, controls, network and saves on this PC."),
+                   std::string_view("Graphics, controls, network and saves."),
            what);
   }
-  Expect(PcOptionsEntryText("esm").label == PcOptionsEntryText("esn").label &&
-             PcOptionsEntryText("esm").description == PcOptionsEntryText("esn").description,
+  Expect(PcOptionsEntryText("esm", android).label == PcOptionsEntryText("esn", android).label &&
+             PcOptionsEntryText("esm", android).description == PcOptionsEntryText("esn", android).description,
          "esm shares the esn text");
 }
 
-void TestLocalizedConversion() {
+void TestLocalizedConversion(bool android) {
   using rex::glue::PcOptionsEntryText;
   using rex::glue::Utf8ToUtf16;
-  Expect(Utf8ToUtf16(PcOptionsEntryText("kor").label) == u"PC \uC635\uC158",
+  Expect(Utf8ToUtf16(PcOptionsEntryText("kor", android).label) ==
+             (android ? u"기기 옵션" : u"PC \uC635\uC158"),
          "korean label converts to the expected code units");
-  Expect(Utf8ToUtf16(PcOptionsEntryText("rus").label) ==
-             u"\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u041F\u041A",
+  Expect(Utf8ToUtf16(PcOptionsEntryText("rus", android).label) ==
+             (android ? u"Настройки устройства" :
+                        u"\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u041F\u041A"),
          "russian label converts to the expected code units");
   static const char* const kLocales[] = {"int", "esn", "esm", "deu", "fra", "ita",
                                          "pol", "cze", "hun", "rus", "kor", "cht"};
   for (const char* loc : kLocales) {
-    const rex::glue::LocalizedPair t = PcOptionsEntryText(loc);
+    const rex::glue::LocalizedPair t = PcOptionsEntryText(loc, android);
     const std::u16string label = Utf8ToUtf16(t.label);
     const std::u16string desc = Utf8ToUtf16(t.description);
     char what[64];
@@ -125,8 +142,10 @@ void TestLocalizedConversion() {
 
 int main() {
   TestUtf8();
-  TestLocales();
-  TestLocalizedConversion();
+  TestLocales(false);
+  TestLocales(true);
+  TestLocalizedConversion(false);
+  TestLocalizedConversion(true);
   std::printf("coalesced_text_test: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

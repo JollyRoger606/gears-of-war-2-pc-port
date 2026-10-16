@@ -17,6 +17,7 @@ bool NeedSatisfied(Need need, const Context& ctx) {
     case Need::kTouch: return ctx.touch;
     case Need::kFidelityFx: return ctx.fidelityfx;
     case Need::kDlss: return ctx.dlss;
+    case Need::kNoDlss: return !ctx.dlss;
     case Need::kNativeMouse: return ctx.native_mouse;
     case Need::kNoNativeMouse: return !ctx.native_mouse;
     default: return true;
@@ -424,7 +425,7 @@ std::vector<RowView> Rows(const State& state, const std::vector<Setting>& catalo
     view.value_text = FormatValue(*s, value, ctx);
     view.selectable = Selectable(*s);
     view.selected = view.selectable && index == state.row;
-    view.changed = Differs(state.opened, s->id, value);
+    view.changed = s->kind != Kind::kInfo && s->kind != Kind::kAction && Differs(state.opened, s->id, value);
     view.restart_pending = Pending(state, *s, value);
     SetStepAvailability(view, value, ctx);
     views.push_back(view);

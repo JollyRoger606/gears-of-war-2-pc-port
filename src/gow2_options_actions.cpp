@@ -248,16 +248,29 @@ std::wstring ExeDir() {
   return slash == std::wstring::npos ? std::wstring() : exe.substr(0, slash);
 }
 
+bool IsInsideFolder(const std::filesystem::path& path, const std::filesystem::path& folder) {
+  auto part = path.begin();
+  for (const auto& root_part : folder) {
+    if (part == path.end()) return false;
+    const std::wstring& name = part->native();
+    const std::wstring& root_name = root_part.native();
+    if (CompareStringOrdinal(name.data(), int(name.size()), root_name.data(), int(root_name.size()),
+                             TRUE) != CSTR_EQUAL) return false;
+    ++part;
+  }
+  return part != path.end();
+}
+
 std::wstring FindHostScript() {
-  const std::wstring dir = ExeDir();
-  if (dir.empty()) return {};
+  const std::wstring exe_dir = ExeDir();
+  if (exe_dir.empty()) return {};
   std::error_code ec;
-  const std::wstring beside = dir + L"\\scripts\\host-online.ps1";
-  if (std::filesystem::exists(beside, ec)) return beside;
-  ec.clear();
-  const std::wstring repo = dir + L"\\..\\..\\..\\scripts\\host-online.ps1";
-  if (std::filesystem::exists(repo, ec)) return repo;
-  return {};
+  const auto dir = std::filesystem::weakly_canonical(exe_dir, ec);
+  if (ec) return {};
+  const auto script = std::filesystem::weakly_canonical(dir / L"scripts" / L"host-online.ps1", ec);
+  if (ec || !IsInsideFolder(script, dir)) return {};
+  if (!std::filesystem::is_regular_file(script, ec)) return {};
+  return script.wstring();
 }
 
 struct ChildPipes {
