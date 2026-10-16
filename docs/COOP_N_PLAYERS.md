@@ -710,6 +710,13 @@ Four players, one scenario per item:
 
 Each scenario also runs with `gow2_coop_players=2` to confirm retail behaviour is unchanged.
 
+Tooling (group d, 2026-10-16): the scenarios can be driven with `scripts/coop-stage2.ps1`
+(setup, transition, kill-extra, kill-host, checkpoint, leave-rejoin, travel) and the command file.
+`!mapchange`/`!mapcommit` run the retail map change natives to reproduce item 1 without playing
+to the chapter end. `!kill`, `suicide`, `LoadCheckpoint` and `chapter -Chapter <n>` cover items 2,
+4 and chapter travel. Status: built and checked offline only, not yet run in the game. See
+[TEST_TOOLING.md](TEST_TOOLING.md).
+
 ### Stage 3: 8-10 players and bandwidth
 
 - **Caps.** The same Stage 1 rows with N = 8 or 10.
@@ -1008,6 +1015,10 @@ Running four instances on one PC:
 `--user_data_root`, which can be seeded with a copy of a save; its own log file and test pad file;
 `{i}`-expanded flags (for example `--net_bind_ip=127.0.0.{i}`); and a slot in a non-overlapping
 window grid. It also starts and stops the idle guard.
+
+Stage 2 test tooling (dev only): a per-instance command file (`gow2_dev_command_file`) runs console
+commands and host verbs on each instance, and `scripts/coop-instances.ps1` gained `cmd`, `waitlog`,
+`stopone`, `startone`, `chapter` and `macro`. See [TEST_TOOLING.md](TEST_TOOLING.md).
 
 - **Shared folders.** Yes, until this branch. `OnConfigurePaths` replaced the user data and cache
   paths with `%LOCALAPPDATA%\GearsOfWar2PC\{user,cache}` even when `--user_data_root` was given, so
