@@ -37,7 +37,7 @@ Leer en español: [README.es.md](README.es.md)
 - [x] FSR 4 and FSR 3.1 temporal upscaling (`gow2_temporal`, `gow2_upscaler`; off by default). The release has no DLSS
 - [ ] Keyboard keys handled as on a PC (they still pass through an emulated controller)
 - [ ] Full campaign play-through
-- [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four copies on one PC (loopback), and a PC with an Android phone on one LAN for two players, verified 2026-10-14 and 2026-10-15
+- [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four copies on one PC (loopback), and a PC with an Android phone on one LAN for two players, verified 2026-10-14 and 2026-10-15; Stage 2 (chapter changes, deaths, leave/rejoin, checkpoints, cinematics) verified with four copies on one PC on 2026-10-16
 - [x] Internet play, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): a phone on mobile data joined a PC-hosted campaign through ports opened by UPnP, verified 2026-10-15; a PC friend outside the network has not been tried yet
 - [ ] System Link Horde and Versus
 - [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but is not playable yet and no APK is published. The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm ([docs/ANDROID.md](docs/ANDROID.md))
@@ -138,7 +138,7 @@ A replacement is picked up when it has at least as many mip levels as the game t
 Campaign co-op over System Link works between PCs and between several copies on one PC; an Android build joined a PC for two-player co-op. It is off by default: set `net_link_active = true` in `gow2.toml` (or pass `--net_link_active=true`) on every player's copy, and use the same build everywhere; `gow2_coop_players` 3 or more turns it on by itself. The game's UDP port 1000 becomes 41000 on every platform (`net_port_offset`, because Android cannot bind ports below 1024) and the System Link beacon uses UDP 14001, so a PC that hosts needs a Windows Firewall rule for those two ports. `system_link_trace = true` logs every network and session call the game makes (`[netlink]` lines).
 
 - [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md): a PC and a phone on one network, the settings, several copies on one PC, troubleshooting.
-- [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): co-op with more than two players (`gow2_coop_players`; four verified on one PC) and what is still missing, such as chapter travel with extra players.
+- [docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md): Stage 2 co-op with more than two players covers chapter changes, deaths, leave/rejoin, checkpoints and cinematics; what is still missing includes co-op splits, vehicle exit, the Ride-Reaver section and four PCs over the internet.
 - [docs/ONLINE.md](docs/ONLINE.md): playing over the internet. From the repository (not in the release zip), [`scripts/host-online.ps1`](https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/scripts/host-online.ps1) `-Start` opens UDP 14001 and 41000 through UPnP on every router between the PC and the internet, with a lease (6 h by default, 24 h at most), and schedules an automatic `-Stop` for the end of the lease; `-Stop` closes them. Run `-Stop` after every session: some routers ignore the lease. Without UPnP: forward by hand; with no open ports: Tailscale or ZeroTier. Verified on 2026-10-15: a phone on mobile data joined a PC host behind two routers in a row.
 
 Horde and Versus over System Link have not been tried. See [ROADMAP.md](ROADMAP.md).
@@ -148,9 +148,9 @@ Horde and Versus over System Link have not been tried. See [ROADMAP.md](ROADMAP.
 - **Mouse aim changed in 0.1.1.** In 0.1.0 the mouse was turned into a right-stick movement, and the game ignored any stick deflection under 30% (its `DeadZone=0.3` binding). Now the mouse goes through the game's own PC mouse axes (`gow2_mouse_aim`), with no dead zone, while controllers keep the game's own aiming. Keys still pass through an emulated controller. Reports of how it feels are welcome in an issue.
 - **Hints show Xbox button pictures.** Menu prompts show keyboard keys ([Space], [E]...) unless a controller is connected at launch (`gow2_prompts` = `auto`, `keyboard` or `controller`); the button pictures inside in-game hints still show Xbox buttons.
 - **Green-looking lighting** has been reported on skin, lights and the menu flames; it has not been reproduced on the development PC yet. Screenshots are welcome in an issue.
-- **Co-op with three or four players is early.** A chapter change, the death of any player, a player leaving, cinematics and vehicles can break it ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)).
-- **Every player needs the same build.** There is no version check yet, and a build without patch 0011 (such as 0.1.0) cannot see a 0.1.1 host.
-- Only Act 1 has been played so far.
+- **Co-op with three or four players is new.** Stage 2 has been tested with four copies on one PC: players 3 and 4 keep their bodies and weapons through chapter changes and travel, respawn, leave and rejoin, return after checkpoint loads, hide during cinematics, stay unharmed on foot while a hero rides, and are moved next to Marcus or Dom by the host when left far behind. Co-op splits, getting out of a vehicle, the Ride-Reaver section, joining during a cinematic, long real combat, four PCs over a LAN or the internet, and Android with 3+ players have not been tried ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)).
+- **Every player needs the same release.** Everyone must run v0.1.2; with three or more players, campaigns with different co-op hashes stay hidden, while two-player co-op has no check and v0.1.1 is expected to crash at the end of Act 1 chapter 2.
+- Only Act 1 has been played through; the co-op tests reached chapters 13, 16 and 27 by chapter travel.
 
 ## Building from source
 

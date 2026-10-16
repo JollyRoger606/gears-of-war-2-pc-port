@@ -60,8 +60,11 @@ port reached more platforms and added features.
       as Carmine-style COG soldiers (`SuggestPawnClassFor` already falls back to
       `GearPawn_COGGear` for a third player). Target four first, then as many as the
       cinematics, checkpoints and bandwidth allow. Stage 1 is done: four players on one PC played
-      Act 1 chapter 2 on 2026-10-15 ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)); chapter
-      travel with extra players and the other Stage 2-3 items remain.
+      Act 1 chapter 2 on 2026-10-15 ([docs/COOP_N_PLAYERS.md](docs/COOP_N_PLAYERS.md)); Stage 2
+      is implemented and ran with four copies on one PC on 2026-10-16 (chapter changes, deaths,
+      leave and rejoin, checkpoints, cinematics, players 3+ on foot unhurt while a hero rides);
+      co-op splits, vehicle exit, the Ride-Reaver section, four PCs over the internet, Android
+      with 3+ players and Stage 3 (8-10 players, bandwidth) remain.
 - [ ] Online play beyond LAN (System Link over the internet / relay). Built in patch 0011
       (`net_peers`, `net_public_address`, `net_allow_peers`; [docs/ONLINE.md](docs/ONLINE.md)),
       not tested over the internet yet.
