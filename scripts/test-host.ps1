@@ -4,7 +4,8 @@
 
 .DESCRIPTION
   1. The port's host test targets gow2_test_input_test, gow2_script_patch_test,
-     gow2_script_patch_survival_test, gow2_save_dir_test and gow2_dev_commands_test in
+     gow2_script_patch_survival_test, gow2_save_dir_test, gow2_dev_commands_test and
+     gow2_coop_leash_test in
      out\build\<config> (configure it with scripts\build.ps1 first).
   2. android\gamelibs\tests\touch_model_test.cpp: pure C++, so it also runs on the PC.
   3. The SDK's System Link and session unit tests of 0010 and 0011
@@ -95,7 +96,7 @@ function Test-HostTargets([string]$build) {
         return $false
     }
     $targets = 'gow2_test_input_test', 'gow2_script_patch_test', 'gow2_script_patch_survival_test',
-        'gow2_save_dir_test', 'gow2_dev_commands_test'
+        'gow2_save_dir_test', 'gow2_dev_commands_test', 'gow2_coop_leash_test'
     if ((Invoke-Native { cmake --build $build --target $targets }) -ne 0) { return $false }
     $ok = $true
     foreach ($t in $targets) {

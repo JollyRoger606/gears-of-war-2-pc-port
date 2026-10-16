@@ -858,6 +858,9 @@ separate: it applies once on the engine tick when `gow2_dev_cheats=true`.
 | gow2_coop_vehicle_ride | true | false: no CR rows; vehicles stay retail |
 | gow2_coop_scenes | true | false: no SC rows (cinematics, teleports, checkpoints, splits stay as in Stage 1) |
 | gow2_coop_scene_probe | false | debug: logs each player controller's cinematic state every 2 s |
+| gow2_coop_leash | true | false: no leash. true: on the host, a player 3+ who stays more than gow2_coop_leash_distance from the nearest human Marcus or Dom for gow2_coop_leash_seconds is moved next to him (FindAvailableTeleportSpot near him, or near a player on foot next to him when he is in a vehicle; else one of 24 spots 120, 360 or 600 units around that player); log lines COOPLEASH |
+| gow2_coop_leash_distance | 4000 | game units |
+| gow2_coop_leash_seconds | 8 | seconds |
 | gow2_dev_command_file / gow2_dev_cheats | empty / false | dev only, see TEST_TOOLING.md |
 
 Every peer must use the same gow2_coop_players and the same group settings (coop-body's

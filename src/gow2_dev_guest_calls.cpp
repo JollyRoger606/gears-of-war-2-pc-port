@@ -126,16 +126,29 @@ uint32_t FindFunction(const PPCContext& ctx, uint8_t* base, uint32_t object, uin
   return out;
 }
 
-bool ProcessEvent(const PPCContext& ctx, uint8_t* base, uint32_t object, uint32_t function) {
+bool ProcessEventWithParms(const PPCContext& ctx, uint8_t* base, uint32_t object,
+                           uint32_t function, const std::vector<uint8_t>& parms_in,
+                           std::vector<uint8_t>* parms_out, uint32_t out_bytes) {
   if (object == 0 || function == 0) return false;
   const uint32_t fn = VirtualFunction(base, object, kProcessEventSlot);
   if (fn == 0) return false;
   const uint32_t parms = Malloc(ctx, base, kParmsBytes);
   if (parms == 0) return false;
-  for (uint32_t i = 0; i < kParmsBytes; ++i) guest::StoreU8(base, parms + i, 0);
+  for (uint32_t i = 0; i < kParmsBytes; ++i) {
+    const uint8_t v = i < parms_in.size() ? parms_in[i] : 0;
+    guest::StoreU8(base, parms + i, v);
+  }
   const bool ok = Invoke(ctx, base, fn, {object, function, parms, 0});
+  if (parms_out != nullptr) {
+    const uint32_t want = out_bytes < kParmsBytes ? out_bytes : kParmsBytes;
+    *parms_out = guest::ReadBytes(base, parms, want);
+  }
   Free(ctx, base, parms);
   return ok;
+}
+
+bool ProcessEvent(const PPCContext& ctx, uint8_t* base, uint32_t object, uint32_t function) {
+  return ProcessEventWithParms(ctx, base, object, function, {}, nullptr, 0);
 }
 
 bool GuardedRun(void (*fn)(void* arg), void* arg) {

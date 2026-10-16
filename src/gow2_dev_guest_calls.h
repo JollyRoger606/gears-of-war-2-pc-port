@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <rex/ppc.h>
 
@@ -38,6 +39,9 @@ std::optional<std::string> ConsoleCommand(const PPCContext& ctx, uint8_t* base, 
                                           std::string_view ascii);
 uint32_t FindFunction(const PPCContext& ctx, uint8_t* base, uint32_t object, uint64_t name);
 bool ProcessEvent(const PPCContext& ctx, uint8_t* base, uint32_t object, uint32_t function);
+bool ProcessEventWithParms(const PPCContext& ctx, uint8_t* base, uint32_t object, uint32_t function,
+                           const std::vector<uint8_t>& parms_in, std::vector<uint8_t>* parms_out,
+                           uint32_t out_bytes);
 bool GuardedRun(void (*fn)(void* arg), void* arg);
 
 template <class F>
