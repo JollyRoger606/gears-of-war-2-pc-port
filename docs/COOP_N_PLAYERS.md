@@ -641,8 +641,12 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
 
    Fix: after Marcus's pawn is teleported, place every extra player who is not in a vehicle near the
    destination with `FindAvailableTeleportSpot`. Skip moves shorter than about 1500 uu, so local
-   placements do not drag extras along. Open: whether several pawns sent to one destination fail
-   silently (`Pawn.OnTeleport`, DE:31182).
+   placements do not drag extras along. Answered: `Pawn.OnTeleport` (DE:31182) calls
+   `SetLocation` and silently does nothing when it fails.
+
+   Status (2026-10-15): implemented by coop-scenes row SC-4. It passes the offline check
+   against the retail packages and is not yet tested in game. Details:
+   [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
 5. **Cinematics.**
    - 151 of 254 `SeqAct_ToggleCinematicMode` targets are hero-only.
    - `GearPC.SetCinematicMode` (DG:34716) hides the pawn, freezes it and sets `bInvisible`, which
@@ -656,11 +660,19 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
 
    Fix: mirror Marcus's cinematic mode to every extra PC (never mirror Dom's), including right
    after an extra spawns.
-6. **Co-op splits.** `SeqAct_NotifyCoopSplit`, present in 11 maps, teleports Marcus and Dom onto
-   separate paths and strands the extra players. [V]
+
+   Status (2026-10-15): implemented by coop-scenes rows SC-1, SC-2 and SC-6. They pass the
+   offline check against the retail packages and are not yet tested in game. Details:
+   [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
+6. **Co-op splits.** `SeqAct_NotifyCoopSplit`, 19 objects in 12 packages, teleports Marcus and
+   Dom onto separate paths and strands the extra players. [V]
 
    Fix: send the extras alternately with each hero, and copy the hero's `SquadName` when Kismet runs
    `ChangeSquad` on him.
+
+   Status (2026-10-15): implemented by coop-scenes rows SC-4 and SC-5. They pass the
+   offline check against the retail packages and are not yet tested in game. Details:
+   [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
 7. **Checkpoints.**
    - `GearPC.OnCheckpoint` (DG:32633) pulls far players to the host, except at 29 checkpoints whose
      `TeleportClasses` lists only Marcus and Dom (plus `Vehicle_Jack`).
@@ -669,6 +681,10 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
 
    [V script] Not traced: how native code matches records to PCs (by `MyGuid` at GearPC+0xC4C, by
    order, or by class) and who sets `bCheckpointDummy`.
+
+   Status (2026-10-15): implemented by coop-scenes rows SC-3 and SC-2. They pass the
+   offline check against the retail packages and are not yet tested in game. Details:
+   [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
 
    Fix: treat the extra classes as matching `TeleportClasses`.
 8. **Vehicles.** [V]
