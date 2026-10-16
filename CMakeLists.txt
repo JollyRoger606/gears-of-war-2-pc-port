@@ -27,6 +27,7 @@ set(GOW2_SOURCES
     src/gow2_save_dir_setting.cpp
     src/gow2_script_patches.cpp
     src/gow2_script_patch_table.cpp
+    src/gow2_script_patch_body_table.cpp
     src/gow2_script_patch_hook.cpp
     src/gow2_coop_census.cpp
     src/gow2_test_input.cpp
@@ -52,6 +53,7 @@ add_executable(gow2_script_patch_test EXCLUDE_FROM_ALL
     tools/tests/script_patch_core_test.cpp
     src/gow2_script_patches.cpp
     src/gow2_script_patch_table.cpp
+    src/gow2_script_patch_body_table.cpp
 )
 target_include_directories(gow2_script_patch_test PRIVATE src)
 
