@@ -213,6 +213,27 @@ class GroupPlanner {
     return true;
   }
 
+  bool PlanObjectField(const ObjectFieldRow& row) {
+    current_id_ = row.id;
+    uint32_t object = 0;
+    uint32_t value = 0;
+    if (!ResolveOne(row.object, &object) || !ResolveOne(row.value, &value)) return false;
+    for (const FieldAnchor& anchor : row.anchors)
+      if (!CheckAnchor(anchor)) return false;
+    const uint32_t addr = object + row.offset;
+    const uint32_t found = guest::LoadU32(base_, addr);
+    size_t writes = 0;
+    if (found == 0) {
+      writes_.push_back({addr, BigEndian(value)});
+      writes = 1;
+    } else if (found != value) {
+      return Fail(At(row.offset) + " points at 0x" + Hex(found, 8) + ", expected None or " +
+                  Describe(row.value));
+    }
+    lines_.push_back(RowLine(row.id, row.object, writes, 0));
+    return true;
+  }
+
   void Commit() {
     for (const Write& w : writes_) guest::WriteBytes(base_, w.addr, w.bytes);
     for (const ScriptSwap& s : swaps_) {
@@ -260,6 +281,16 @@ class GroupPlanner {
     if (v < 0 || uint32_t(v) > limit) return Fail("value " + std::to_string(v) + " out of range");
     *out = uint32_t(v);
     return true;
+  }
+
+  bool CheckAnchor(const FieldAnchor& anchor) {
+    uint32_t object = 0;
+    uint32_t value = 0;
+    if (!ResolveOne(anchor.object, &object) || !ResolveOne(anchor.value, &value)) return false;
+    const uint32_t found = guest::LoadU32(base_, object + anchor.offset);
+    if (found == value) return true;
+    return Fail("anchor " + Describe(anchor.object) + " " + At(anchor.offset) + " points at 0x" +
+                Hex(found, 8) + ", expected " + Describe(anchor.value));
   }
 
   // An entry past the kept prefix of an already grown script described the old tail: skip it.
@@ -508,6 +539,18 @@ void HashDefaultRow(uint64_t* h, const DefaultRow& row, int players) {
   HashNumber(h, ValueOf(row.new_value, players));
 }
 
+void HashObjectFieldRow(uint64_t* h, const ObjectFieldRow& row) {
+  HashText(h, row.id);
+  HashRef(h, row.object);
+  HashNumber(h, row.offset);
+  HashRef(h, row.value);
+  for (const FieldAnchor& a : row.anchors) {
+    HashRef(h, a.object);
+    HashNumber(h, a.offset);
+    HashRef(h, a.value);
+  }
+}
+
 GroupResult Skipped(std::string row, std::string reason) {
   GroupResult result;
   result.failed_row = std::move(row);
@@ -529,6 +572,7 @@ uint64_t GroupHash(const PatchGroup& group, int players) {
   HashNumber(&h, players);
   for (const ScriptRow& row : group.scripts) HashScriptRow(&h, row, players);
   for (const DefaultRow& row : group.defaults) HashDefaultRow(&h, row, players);
+  for (const ObjectFieldRow& row : group.object_fields) HashObjectFieldRow(&h, row);
   return h;
 }
 
@@ -541,6 +585,8 @@ GroupResult ApplyGroup(uint8_t* base, const GuestTables& tables, const PatchGrou
     if (!planner.PlanScript(row)) return Skipped(planner.failed_row(), planner.reason());
   for (const DefaultRow& row : group.defaults)
     if (!planner.PlanDefault(row)) return Skipped(planner.failed_row(), planner.reason());
+  for (const ObjectFieldRow& row : group.object_fields)
+    if (!planner.PlanObjectField(row)) return Skipped(planner.failed_row(), planner.reason());
   planner.Commit();
   GroupResult result;
   result.applied = true;

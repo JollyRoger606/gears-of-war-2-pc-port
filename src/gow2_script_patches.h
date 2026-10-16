@@ -87,10 +87,27 @@ struct DefaultRow {
   int new_value;  // or kPlayers
 };
 
+// A 4-byte object field, usually of a default subobject template: None (0) -> the address of
+// `value`. Each anchor's field must already hold its value; that proves the offset at run time.
+struct FieldAnchor {
+  ObjectRef object;
+  uint32_t offset;
+  ObjectRef value;
+};
+
+struct ObjectFieldRow {
+  std::string_view id;
+  ObjectRef object;
+  uint32_t offset;
+  ObjectRef value;
+  std::vector<FieldAnchor> anchors;
+};
+
 struct PatchGroup {
   std::string_view name;
   std::vector<ScriptRow> scripts;
   std::vector<DefaultRow> defaults;
+  std::vector<ObjectFieldRow> object_fields;
 };
 
 // Guest addresses of the engine's name table (TArray<FNameEntry*>) and object table

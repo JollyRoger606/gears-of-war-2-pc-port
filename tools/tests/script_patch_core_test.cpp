@@ -383,7 +383,21 @@ void BuildDefaultObjects(FakeGuest& guest, const DefaultRow& row) {
   guest.Put32(obj + row.offset, row.old_value);
 }
 
+constexpr uint32_t kFieldObjectSize = 1024u;  // room for field offsets up to ~1000
+
+void BuildObjectFieldObjects(FakeGuest& guest, const ObjectFieldRow& row) {
+  uint32_t object = guest.Path(row.object.path, row.object.cls, kFieldObjectSize);
+  guest.Put32(object + row.offset, 0u);
+  guest.Path(row.value.path, row.value.cls);
+  for (const FieldAnchor& anchor : row.anchors) {
+    uint32_t holder = guest.Path(anchor.object.path, anchor.object.cls, kFieldObjectSize);
+    guest.Put32(holder + anchor.offset, guest.Path(anchor.value.path, anchor.value.cls));
+  }
+}
+
 void BuildGroupObjects(FakeGuest& guest, const PatchGroup& group) {
+  // First so field objects get the large size before anything else creates them small.
+  for (const ObjectFieldRow& row : group.object_fields) BuildObjectFieldObjects(guest, row);
   for (const ScriptRow& row : group.scripts) BuildScriptObjects(guest, row);
   for (const DefaultRow& row : group.defaults) BuildDefaultObjects(guest, row);
 }
@@ -798,6 +812,144 @@ void TestGrowEditPastKeptPrefixSkips() {
   Expect(PrefixMatches(guest, data, bytes, 10u), "past-prefix edit bytes unchanged");
 }
 
+ObjectFieldRow MakeObjectFieldRow() {
+  ObjectFieldRow row;
+  row.id = "OF-1";
+  row.object = {"Pkg.Default__Thing.Mesh", "SkeletalMeshComponent"};
+  row.offset = 468u;
+  row.value = {"Assets.Body", "SkeletalMesh"};
+  FieldAnchor anchor;
+  anchor.object = {"Pkg.Default__Hero.Mesh", "SkeletalMeshComponent"};
+  anchor.offset = 468u;
+  anchor.value = {"Assets.HeroBody", "SkeletalMesh"};
+  row.anchors.push_back(anchor);
+  return row;
+}
+
+PatchGroup MakeObjectFieldGroup() {
+  PatchGroup group;
+  group.name = "test";
+  group.object_fields.push_back(MakeObjectFieldRow());
+  return group;
+}
+
+ScriptRow MakeT1Row() {
+  ScriptRow row;
+  row.id = "T-1";
+  row.function = {"Pkg.ClassA.FuncA", "Function"};
+  row.script_size = 16u;
+  row.byte_edits.push_back({0x02, 0x9A, kPlayers});
+  return row;
+}
+
+void TestObjectFieldWritesBigEndian() {
+  PatchGroup group = MakeObjectFieldGroup();
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "object field applies");
+  Expect(result.lines.size() == 1u &&
+             result.lines[0] == "OF-1 Pkg.Default__Thing.Mesh: 1 write(s)",
+         "object field line");
+  uint32_t object = guest.Path("Pkg.Default__Thing.Mesh", "SkeletalMeshComponent");
+  uint32_t value = guest.Path("Assets.Body", "SkeletalMesh");
+  Expect(guest.U32(object + 468u) == value, "object field holds value address");
+  Expect(guest.U8(object + 468u) == static_cast<uint8_t>(value >> 24u), "object field big-endian");
+}
+
+void TestObjectFieldSecondApplyIsAlreadyApplied() {
+  PatchGroup group = MakeObjectFieldGroup();
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult first = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(first.applied, "object field first applies");
+  GroupResult second = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(second.applied, "object field second applies");
+  Expect(second.lines.size() == 1u && EndsWithApplied(second.lines[0]),
+         "object field second already applied");
+}
+
+void TestObjectFieldUnrelatedValueSkipsGroup() {
+  PatchGroup group;
+  group.name = "test";
+  group.scripts.push_back(MakeT1Row());
+  group.object_fields.push_back(MakeObjectFieldRow());
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  uint32_t object = guest.Path("Pkg.Default__Thing.Mesh", "SkeletalMeshComponent");
+  guest.Put32(object + 468u, 0x12345678u);
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(!result.applied, "unrelated value skips");
+  Expect(result.failed_row == "OF-1", "unrelated value failed_row");
+  Expect(result.reason == "+0x01D4 points at 0x12345678, expected None or Assets.Body (SkeletalMesh)",
+         "unrelated value reason");
+  uint32_t func = guest.Path("Pkg.ClassA.FuncA", "Function");
+  Expect(guest.U8(guest.U32(func + 84u) + 0x02u) == 0x9A, "unrelated value script unchanged");
+}
+
+void TestObjectFieldAnchorMismatchSkips() {
+  PatchGroup group = MakeObjectFieldGroup();
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  uint32_t anchor = guest.Path("Pkg.Default__Hero.Mesh", "SkeletalMeshComponent");
+  guest.Put32(anchor + 468u, 0u);
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(!result.applied, "anchor mismatch skips");
+  Expect(result.failed_row == "OF-1", "anchor mismatch failed_row");
+  Expect(result.reason ==
+             "anchor Pkg.Default__Hero.Mesh (SkeletalMeshComponent) +0x01D4 points at 0x00000000, "
+             "expected Assets.HeroBody (SkeletalMesh)",
+         "anchor mismatch reason");
+  uint32_t object = guest.Path("Pkg.Default__Thing.Mesh", "SkeletalMeshComponent");
+  Expect(guest.U32(object + 468u) == 0u, "anchor mismatch field still None");
+}
+
+void TestObjectFieldMissingValueSkips() {
+  PatchGroup built = MakeObjectFieldGroup();
+  FakeGuest guest = BuildForGroup(built);
+  GuestTables tables = guest.tables();
+  PatchGroup group = MakeObjectFieldGroup();
+  group.object_fields[0].value = {"Assets.Missing", "SkeletalMesh"};
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(!result.applied, "missing value skips");
+  Expect(result.failed_row == "OF-1", "missing value failed_row");
+  Expect(result.reason.find("found 0 times") != std::string::npos, "missing value reason");
+  uint32_t object = guest.Path("Pkg.Default__Thing.Mesh", "SkeletalMeshComponent");
+  Expect(guest.U32(object + 468u) == 0u, "missing value field still None");
+}
+
+void TestStage1HashUnchanged() {
+  Expect(GroupHash(CoopStage1Group(false), 4) == 0x937c35f80cb274b7ull, "stage1 hash unchanged");
+}
+
+void TestObjectFieldsChangeHash() {
+  PatchGroup full = MakeObjectFieldGroup();
+  PatchGroup cleared = full;
+  cleared.object_fields.clear();
+  Expect(GroupHash(full, 4) != GroupHash(cleared, 4), "object fields change hash");
+}
+
+void TestObjectFieldLinesComeLast() {
+  PatchGroup group;
+  group.name = "test";
+  group.scripts.push_back(MakeT1Row());
+  group.object_fields.push_back(MakeObjectFieldRow());
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "script plus field applies");
+  Expect(result.lines.size() == 2u, "script plus field 2 lines");
+  bool ordered = result.lines.size() == 2u && result.lines[0].rfind("T-1 ", 0) == 0 &&
+                 result.lines[1].rfind("OF-1 ", 0) == 0;
+  Expect(ordered, "object field lines come last");
+}
+
 }  // namespace
 
 int main() {
@@ -819,6 +971,14 @@ int main() {
   TestGrowIntoPhysicalHeap();
   TestGrowWithPrefixEditUsesEditedPrefix();
   TestGrowEditPastKeptPrefixSkips();
+  TestObjectFieldWritesBigEndian();
+  TestObjectFieldSecondApplyIsAlreadyApplied();
+  TestObjectFieldUnrelatedValueSkipsGroup();
+  TestObjectFieldAnchorMismatchSkips();
+  TestObjectFieldMissingValueSkips();
+  TestStage1HashUnchanged();
+  TestObjectFieldsChangeHash();
+  TestObjectFieldLinesComeLast();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return (g_failures == 0) ? 0 : 1;
 }
