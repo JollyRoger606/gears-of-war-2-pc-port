@@ -94,6 +94,8 @@ powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Stop
 file records, both ports on every router, any other mapping with the script's description, and
 the scheduled `-Stop`. `-PortOffset` follows a different `net_port_offset`.
 
+Add `-Json` to any mode for a machine-readable result: the last stdout line is `GOW2HOST <compact JSON>` with the fields `mode`, `ok`, `error`, `public_address`, `peer_name`, `ports`, `lease_hours`, `lease_end`, `stop_scheduled_at`, `routers`, `open_ports` and `warnings`. The game's in-game "Host over the internet" menu runs the script hidden with `-Json` and reads that line; every existing message stays as it is.
+
 `-Stop` must run on the PC and under the Windows account that ran `-Start`, because it reads that
 account's state file; the PC's LAN address may have changed since. It:
 1. deletes every mapping the state file records, at the router and control URL recorded, if it

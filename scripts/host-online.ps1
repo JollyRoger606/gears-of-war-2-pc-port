@@ -1,8 +1,11 @@
 # Opens the System Link ports on every UPnP router between this PC and the internet, with a lease,
 # and closes them again. Usage: docs/ONLINE.md, "Host setup". Runs in Windows PowerShell 5.1 and pwsh.
-#   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Start [-LeaseHours 6] [-Hostname gow2.example.com] [-AllowPeers a,b] [-AllowPermanent] [-Players 4]
-#   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Status
-#   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Stop
+#   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Start [-LeaseHours 6] [-Hostname gow2.example.com] [-AllowPeers a,b] [-AllowPermanent] [-Players 4] [-Json]
+#   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Status [-Json]
+#   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Stop [-Json]
+# With -Json, the last stdout line is "GOW2HOST <compact JSON>" with mode, ok, error, public_address,
+# peer_name, ports, lease_hours, lease_end, stop_scheduled_at, routers, open_ports and warnings.
+# The game's in-game "Host over the internet" menu runs the script hidden with -Json and reads that line.
 param(
     [switch]$Start,
     [switch]$Stop,
@@ -13,7 +16,8 @@ param(
     [ValidateRange(1024, 64512)][int]$PortOffset = 40000,
     [ValidateRange(2, 255)][int]$Players = 2,
     [switch]$AllowPermanent,
-    [string]$LogFile = ''
+    [string]$LogFile = '',
+    [switch]$Json
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,7 +65,12 @@ $PermanentRouters = @{}
 
 function Write-Section([string]$Title) { Write-Host ''; Write-Host "== $Title" -ForegroundColor Cyan }
 function Write-Note([string]$Text) { Write-Host "  $Text" }
-function Write-Warn([string]$Text) { Write-Host "  WARNING: $Text" -ForegroundColor Yellow }
+$script:JsonWarnings = New-Object Collections.Generic.List[string]
+function Write-Warn([string]$Text) {
+    if ($null -eq $script:JsonWarnings) { $script:JsonWarnings = New-Object Collections.Generic.List[string] }
+    $script:JsonWarnings.Add($Text)
+    Write-Host "  WARNING: $Text" -ForegroundColor Yellow
+}
 
 function Select-Mode([bool]$IsStart, [bool]$IsStop, [bool]$IsStatus) {
     $chosen = @($IsStart, $IsStop, $IsStatus | Where-Object { $_ }).Count
@@ -410,16 +419,24 @@ function Invoke-StartMappings($Path, [string]$Public, $Created) {
     Write-Section "Mappings (lease $LeaseHours h)"
     Add-PlannedMappings $plan $leaseSeconds $Created
     $leaseEnd = (Get-Date).AddSeconds($leaseSeconds)
+    $script:JsonResult['lease_end'] = $leaseEnd.ToString('yyyy-MM-ddTHH:mm:ss')
     $static = @(Find-StaticLeaseRouters $plan $leaseSeconds)
     $stopAt = $leaseEnd.AddMinutes($StopTaskDelayMinutes)
     $isScheduled = Register-StopTaskOrWarn $stopAt
-    Show-GameSettings (Select-PeerName $Hostname $Public)
+    if ($isScheduled) { $script:JsonResult['stop_scheduled_at'] = $stopAt.ToString('yyyy-MM-ddTHH:mm:ss') }
+    $script:JsonResult['routers'] = @($Path.Routers | ForEach-Object { [pscustomobject]@{ address = $_.Address; closing = (Get-RouterClosing $_ $leaseEnd $static) } })
+    $peerName = Select-PeerName $Hostname $Public
+    $script:JsonResult['peer_name'] = $peerName
+    Show-GameSettings $peerName
     Show-Closing $Path $leaseEnd $static $isScheduled $stopAt
 }
 
 function Invoke-Start {
     $path = Get-DiscoveredPath $false
+    $script:JsonResult['routers'] = @($path.Routers | ForEach-Object { [pscustomobject]@{ address = $_.Address; closing = '' } })
     $public = Assert-ReachableFromInternet $path
+    $script:JsonResult['public_address'] = $public
+    $script:JsonResult['lease_hours'] = $LeaseHours
     $created = New-Object Collections.Generic.List[object]
     $completed = $false
     try {
@@ -476,6 +493,7 @@ function Invoke-Stop {
     $hadState = Remove-RecordedMappings $failures
     $path = Get-PathOrFailure $true $failures
     if ($path) {
+        $script:JsonResult['routers'] = @($path.Routers | ForEach-Object { [pscustomobject]@{ address = $_.Address; closing = '' } })
         Write-Section "Mappings described '$MappingDescription' on the routers found now"
         foreach ($router in $path.Routers) { Remove-DescribedMappings $router $failures }
         if ((Test-IncompletePath $path) -and -not $hadState) { $failures.Add("routers from hop $($path.EndHop) on were not checked ($($path.End)), and no state file recorded where -Start mapped") }
@@ -520,11 +538,26 @@ function Show-RouterStatus($Router) {
 function Invoke-Status {
     Show-RecordedMappings
     $path = Get-DiscoveredPath $true
+    $script:JsonResult['routers'] = @($path.Routers | ForEach-Object { [pscustomobject]@{ address = $_.Address; closing = '' } })
     Write-Section 'System Link mappings'
     foreach ($router in $path.Routers) { Show-RouterStatus $router }
+    $openCount = 0
+    foreach ($router in $path.Routers) {
+        foreach ($port in $script:Ports) {
+            try {
+                $statusMapping = Get-PortMapping $router $port
+                if ((Get-MappingVerdict $router $statusMapping $port) -eq 'ours') { $openCount++ }
+            } catch { }
+        }
+    }
+    $script:JsonResult['open_ports'] = $openCount
     Write-Section 'Scheduled -Stop'
     $at = Get-StopTaskTime
     if ($at) { Write-Note "task '$StopTaskName' at $at" } else { Write-Note 'none' }
+    if ($at) {
+        try { $script:JsonResult['stop_scheduled_at'] = ([datetime]$at).ToString('yyyy-MM-ddTHH:mm:ss') }
+        catch { $script:JsonResult['stop_scheduled_at'] = $at }
+    }
 }
 
 function Start-LogFile {
@@ -535,11 +568,27 @@ function Start-LogFile {
 
 function Stop-LogFile { if ($LogFile) { Stop-Transcript | Out-Null } }
 
+$script:JsonResult = [ordered]@{
+    mode = 'Status'
+    ok = $true
+    error = ''
+    public_address = ''
+    peer_name = ''
+    ports = @()
+    lease_hours = $null
+    lease_end = ''
+    stop_scheduled_at = ''
+    routers = @()
+    open_ports = 0
+    warnings = @()
+}
 $exitCode = 0
 try {
     Start-LogFile
     $mode = Select-Mode $Start.IsPresent $Stop.IsPresent $Status.IsPresent
+    $script:JsonResult['mode'] = $mode
     $script:Ports = Get-SystemLinkPorts $PortOffset
+    $script:JsonResult['ports'] = @($script:Ports)
     $script:Http = New-LanHttpClient
     Write-Host ("gow2 host-online -{0}, {1:yyyy-MM-dd HH:mm:ss}" -f $mode, (Get-Date))
     switch ($mode) {
@@ -551,8 +600,19 @@ try {
     Write-Host ''
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     if ($_.FullyQualifiedErrorId -ne $_.Exception.Message) { Write-Host $_.ScriptStackTrace }  # not one of this script's own messages
+    $script:JsonResult['error'] = $_.Exception.Message
     $exitCode = 1
 } finally {
-    Stop-LogFile
+    try { Stop-LogFile } finally {
+        if ($Json) {
+            $script:JsonResult['ok'] = ($exitCode -eq 0)
+            if ($null -ne $script:JsonWarnings) { $script:JsonResult['warnings'] = [object[]]$script:JsonWarnings.ToArray() } else { $script:JsonResult['warnings'] = [object[]]@() }
+            $script:JsonResult['ports'] = [object[]]@($script:JsonResult['ports'])
+            $script:JsonResult['routers'] = [object[]]@($script:JsonResult['routers'])
+            $script:JsonResult['warnings'] = [object[]]@($script:JsonResult['warnings'])
+            $jsonText = ConvertTo-Json -InputObject $script:JsonResult -Compress -Depth 4
+            Write-Output ("GOW2HOST " + $jsonText)
+        }
+    }
 }
 exit $exitCode
