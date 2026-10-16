@@ -15,11 +15,11 @@ ObjectFieldRow RowCB_1() {
   return {
       .id = "CB-1",
       .object = {"GearGame.Default__GearPawn_COGGear.GearPawnMesh", "SkeletalMeshComponent"},
-      .offset = 468,
+      .offset = 480,
       .value = {"COG_Dom.Game.COG_Dom_Game_CamSkel", "SkeletalMesh"},
       .anchors = {
-          {{"GearGame.Default__GearPawn_COGDom.GearPawnMesh", "SkeletalMeshComponent"}, 468, {"COG_Dom.Game.COG_Dom_Game_CamSkel", "SkeletalMesh"}},
-          {{"GearGame.Default__GearPawn_COGMarcus.GearPawnMesh", "SkeletalMeshComponent"}, 468, {"COG_MarcusFenix.COG_Marcus_Fenix_CamSkel", "SkeletalMesh"}},
+          {{"GearGame.Default__GearPawn_COGDom.GearPawnMesh", "SkeletalMeshComponent"}, 480, {"COG_Dom.Game.COG_Dom_Game_CamSkel", "SkeletalMesh"}},
+          {{"GearGame.Default__GearPawn_COGMarcus.GearPawnMesh", "SkeletalMeshComponent"}, 480, {"COG_MarcusFenix.COG_Marcus_Fenix_CamSkel", "SkeletalMesh"}},
       },
   };
 }
@@ -29,11 +29,11 @@ ObjectFieldRow RowCB_2() {
   return {
       .id = "CB-2",
       .object = {"GearGame.Default__GearPawn_COGGear.GearPawnMesh", "SkeletalMeshComponent"},
-      .offset = 496,
+      .offset = 508,
       .value = {"COG_Dom.COG_Dom_CamSkel_Physics", "PhysicsAsset"},
       .anchors = {
-          {{"GearGame.Default__GearPawn_COGDom.GearPawnMesh", "SkeletalMeshComponent"}, 496, {"COG_Dom.COG_Dom_CamSkel_Physics", "PhysicsAsset"}},
-          {{"GearGame.Default__GearPawn_COGMarcus.GearPawnMesh", "SkeletalMeshComponent"}, 496, {"COG_MarcusFenix.COG_Marcus_Fenix_CamSkel_Physics", "PhysicsAsset"}},
+          {{"GearGame.Default__GearPawn_COGDom.GearPawnMesh", "SkeletalMeshComponent"}, 508, {"COG_Dom.COG_Dom_CamSkel_Physics", "PhysicsAsset"}},
+          {{"GearGame.Default__GearPawn_COGMarcus.GearPawnMesh", "SkeletalMeshComponent"}, 508, {"COG_MarcusFenix.COG_Marcus_Fenix_CamSkel_Physics", "PhysicsAsset"}},
       },
   };
 }

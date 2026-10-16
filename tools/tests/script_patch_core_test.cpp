@@ -988,9 +988,9 @@ void TestCoopBodyGroupApplies() {
   Expect(guest.U32(restart + 88u) == 548u && guest.U32(restart + 92u) == 548u,
          "coop-body RestartPlayer Num==Max==548");
   uint32_t mesh = guest.Path("GearGame.Default__GearPawn_COGGear.GearPawnMesh", "SkeletalMeshComponent");
-  Expect(guest.U32(mesh + 468u) == guest.Path("COG_Dom.Game.COG_Dom_Game_CamSkel", "SkeletalMesh"),
+  Expect(guest.U32(mesh + 480u) == guest.Path("COG_Dom.Game.COG_Dom_Game_CamSkel", "SkeletalMesh"),
          "coop-body mesh SkeletalMesh");
-  Expect(guest.U32(mesh + 496u) == guest.Path("COG_Dom.COG_Dom_CamSkel_Physics", "PhysicsAsset"),
+  Expect(guest.U32(mesh + 508u) == guest.Path("COG_Dom.COG_Dom_CamSkel_Physics", "PhysicsAsset"),
          "coop-body mesh PhysicsAsset");
 }
 
@@ -1056,7 +1056,7 @@ void TestCoopBodySkipsOnUngrownSuggest() {
   Expect(result.failed_row == "CB-3", "coop-body ungrown suggest failed_row CB-3");
   Expect(result.reason == "Script.Num is 145, expected 318", "coop-body ungrown suggest reason");
   uint32_t mesh = guest.Path("GearGame.Default__GearPawn_COGGear.GearPawnMesh", "SkeletalMeshComponent");
-  Expect(guest.U32(mesh + 468u) == 0u, "coop-body ungrown suggest mesh still None");
+  Expect(guest.U32(mesh + 480u) == 0u, "coop-body ungrown suggest mesh still None");
   Expect(guest.U32(restart + 88u) == 387u, "coop-body ungrown suggest RestartPlayer Num still 387");
   Expect(guest.U32(restart + 84u) == restart_data, "coop-body ungrown suggest RestartPlayer data unchanged");
 }

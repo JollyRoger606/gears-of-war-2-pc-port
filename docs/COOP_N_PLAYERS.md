@@ -780,9 +780,10 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    - `Default__GearPawn_COGGear.GearPawnMesh` sets neither `SkeletalMesh` nor `PhysicsAsset`. Its
      archetypes (Infantry, GearPawn) set neither either. The Dom and Marcus templates differ
      from it only in those two fields. Their archetype is the COGGear template. [V]
-   - CB-1 and CB-2 write Dom's mesh (+468, 0x1D4) and physics asset (+496, 0x1F0) into the COGGear
-     mesh template at startup. They anchor on the Dom and Marcus templates (`layout.py` chain:
-     `MeshComponent` ends at 468). Every peer instances new COGGear pawns from that template.
+   - CB-1 and CB-2 write Dom's mesh (+480, 0x1E0) and physics asset (+508, 0x1FC) into the COGGear
+     mesh template at startup. They anchor on the Dom and Marcus templates (measured in game on
+     2026-10-16: `layout.py` says 468 and 496, 12 bytes short). Every peer instances new COGGear
+     pawns from that template.
      Content subclasses that set their own mesh are unaffected (Ben, RedShirt, Tai and A. Carmine
      checked). Baird, Gus and Hoffman were not checked. [I]
    - CB-3 makes players 3+ always `GearPawn_COGGear`. It reuses the 318-byte script S1-2 grows

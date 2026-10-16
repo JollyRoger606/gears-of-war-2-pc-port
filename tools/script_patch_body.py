@@ -110,8 +110,9 @@ DOM_SKEL = sp.Ref("COG_Dom.Game.COG_Dom_Game_CamSkel", "SkeletalMesh")
 MARCUS_SKEL = sp.Ref("COG_MarcusFenix.COG_Marcus_Fenix_CamSkel", "SkeletalMesh")
 DOM_PHYSICS = sp.Ref("COG_Dom.COG_Dom_CamSkel_Physics", "PhysicsAsset")
 MARCUS_PHYSICS = sp.Ref("COG_MarcusFenix.COG_Marcus_Fenix_CamSkel_Physics", "PhysicsAsset")
-SKELETAL_MESH_OFFSET = 468
-PHYSICS_ASSET_OFFSET = 496
+# Measured in game (2026-10-16): tools/ue3/layout.py undercounts SkeletalMeshComponent by 12 bytes.
+SKELETAL_MESH_OFFSET = 480
+PHYSICS_ASSET_OFFSET = 508
 
 SUGGEST = sp.Ref("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function")
 RESTART = sp.Ref("GearGame.GearGame.RestartPlayer", "Function")

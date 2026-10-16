@@ -209,7 +209,7 @@ def test_cb1_wrong_value():
     model.fields[(coggear, spb.SKELETAL_MESH_OFFSET)] = 0x12345678
     with pytest.raises(sp.PatchSkip) as exc:
         spb.plan_object_field(model, row)
-    assert exc.value.reason == ("+0x01D4 points at 0x12345678, expected None or "
+    assert exc.value.reason == ("+0x01E0 points at 0x12345678, expected None or "
                                  "COG_Dom.Game.COG_Dom_Game_CamSkel (SkeletalMesh)")
 
 
@@ -220,7 +220,7 @@ def test_cb1_bad_anchor():
         spb.plan_object_field(model, row)
     assert exc.value.reason.startswith(
         "anchor GearGame.Default__GearPawn_COGMarcus.GearPawnMesh (SkeletalMeshComponent) "
-        "+0x01D4 points at 0x00000000")
+        "+0x01E0 points at 0x00000000")
 
 
 def test_group_composition():
