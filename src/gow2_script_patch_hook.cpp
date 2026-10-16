@@ -42,6 +42,10 @@ REXCVAR_DEFINE_BOOL(gow2_coop_extra_carmine, false, "Coop",
 REXCVAR_DEFINE_BOOL(gow2_coop_vehicle_ride, true, "Coop",
                     "While Marcus or Dom rides a vehicle, players 3+ on foot cannot be hurt, and they "
                     "are brought to him when he gets out (rows CR-1 and CR-2)");
+REXCVAR_DEFINE_BOOL(gow2_coop_body, true, "Coop",
+                    "Players 3+ get Dom's body on GearPawn_COGGear, the pistol and Gnasher at every "
+                    "spawn, and spawn without Right Trigger (rows CB-1 to CB-5); off keeps the "
+                    "Stage 1 behaviour");
 
 namespace rex::glue {
 
@@ -157,6 +161,17 @@ void ApplyFollowUpGroup(uint8_t* base, const PatchGroup& group, std::string_view
   LogFollowUpResult(result, group.name, fallback, players);
 }
 
+void ApplyCoopBody(uint8_t* base, int players, const script_patch::GuestAlloc& alloc) {
+  if (!REXCVAR_GET(gow2_coop_body)) {
+    REXLOG_INFO("SCRIPTPATCH coop-body: off (gow2_coop_body=false)");
+    return;
+  }
+  const PatchGroup body =
+      script_patch::CoopBodyGroup(REXCVAR_GET(gow2_coop_extra_carmine),
+                                  REXCVAR_GET(gow2_coop_marcus_clones));
+  ApplyFollowUpGroup(base, body, kBodyFallback, players, alloc);
+}
+
 void ApplyCoopFollowUps(uint8_t* base, bool coop_applied, int players,
                         const script_patch::GuestAlloc& alloc) {
   if (!coop_applied) {
@@ -164,10 +179,7 @@ void ApplyCoopFollowUps(uint8_t* base, bool coop_applied, int players,
     REXLOG_INFO("SCRIPTPATCH coop-ride: off (the coop group was not applied)");
     return;
   }
-  const PatchGroup body =
-      script_patch::CoopBodyGroup(REXCVAR_GET(gow2_coop_extra_carmine),
-                                  REXCVAR_GET(gow2_coop_marcus_clones));
-  ApplyFollowUpGroup(base, body, kBodyFallback, players, alloc);
+  ApplyCoopBody(base, players, alloc);
   if (!REXCVAR_GET(gow2_coop_vehicle_ride)) {
     REXLOG_INFO("SCRIPTPATCH coop-ride: off (gow2_coop_vehicle_ride=false)");
     return;
