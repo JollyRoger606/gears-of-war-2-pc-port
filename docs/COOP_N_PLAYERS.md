@@ -764,8 +764,9 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
      `src/gow2_script_patch_body_table.cpp`. `tools/script_patch_body.py` prints them (`--cpp`)
      and checks them (`--check <folder>`). The check plans the Stage 1 rows first and checks
      these rows on top of them.
-   - The hook applies each group fail-closed on its own, right after the `coop` group and only
-     when that group applied. `gow2_coop_players=2` runs and logs nothing new.
+   - The hook applies each group fail-closed on its own, after `coop` and `survival` and before
+     `coop-scenes`, and only when `coop` applied (see Stage 2 integration below).
+     `gow2_coop_players=2` runs and logs nothing new.
      `gow2_coop_body=false` turns `coop-body` off (players 3+ keep the Stage 1 behaviour).
    - Success logs `SCRIPTPATCH coop-body: 5 rows applied for 4 players, set hash ...`. A failed
      check logs `SCRIPTPATCH coop-body: skipped (<row>: <reason>); players 3+ keep the Stage 1
@@ -829,6 +830,106 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
     - With 3+ players a local split-screen player 2 (Dom) now also waits for Right Trigger
       (network co-op has no split-screen). `CANCELCINE` on remote joins after 15 s is unchanged
       (item 5).
+
+#### Stage 2 integration (branch `stage2`, 2026-10-16)
+
+The four group branches (a-survival, b-scenes, c-body, d-tools) are merged into `stage2`.
+The hook (`src/gow2_script_patch_hook.cpp`) applies, in this order: `coop` (Stage 1),
+`survival`, `split-revive` (only with `gow2_coop_split_revive=true` and when `survival`
+applied), `coop-body`, `coop-ride`, then the self-registered groups by name (today only
+`coop-scenes`). One function, `ApplyAndLogGroup`, applies and logs every group. [V]
+
+- Every group is fail-closed on its own: a failed check logs
+  `SCRIPTPATCH <group>: skipped (<row>: <reason>); <what stays>` and the others still apply.
+- Every Stage 2 group runs only when `coop` applied; otherwise each logs
+  `SCRIPTPATCH <group>: off (the coop group was not applied)`.
+
+With `gow2_coop_players=2` (the default) the hook returns before Stage 1, so no Stage 2 code
+runs and two-player co-op with a v0.1.1 peer is unchanged. The devcheats group (dev only) is
+separate: it applies once on the engine tick when `gow2_dev_cheats=true`.
+
+| Setting | Default | Effect |
+|---|---|---|
+| gow2_coop_survival | true | false: Stage 1 only (no survival rows) |
+| gow2_coop_split_revive | false | true: row S2A-4, a standing player 3+ of the downed player's squad counts as a reviver in co-op splits |
+| gow2_coop_body | true | false: players 3+ keep the Stage 1 class and loadout (no CB rows) |
+| gow2_coop_extra_carmine | false | true: players 3+ are Ben Carmine where his class is loaded (CB-3c instead of CB-3) |
+| gow2_coop_vehicle_ride | true | false: no CR rows; vehicles stay retail |
+| gow2_coop_scenes | true | false: no SC rows (cinematics, teleports, checkpoints, splits stay as in Stage 1) |
+| gow2_coop_scene_probe | false | debug: logs each player controller's cinematic state every 2 s |
+| gow2_dev_command_file / gow2_dev_cheats | empty / false | dev only, see TEST_TOOLING.md |
+
+Every peer must use the same gow2_coop_players and the same group settings (coop-body's
+CB-1/CB-2 must also run on the clients).
+
+Expected log at 4 players with the default settings:
+
+```
+SCRIPTPATCH coop S1-1 GearGame.GearGameSP_Base.AtCapacity: 2 write(s)
+SCRIPTPATCH coop S1-2 GearGame.GearGameSP_Base.SuggestPawnClassFor: script grown to 318 bytes
+SCRIPTPATCH coop S1-3 GearGame.GearMenuGame.ChangeCoopInviteSetting: 1 write(s)
+SCRIPTPATCH coop S1-5 GearGame.GearCampaignLobbyGame_Base.InitGame: 1 write(s)
+SCRIPTPATCH coop S1-6 GearGame.GearGameSP_Base.InitGame: 1 write(s)
+SCRIPTPATCH coop S1-4 GearGame.Default__GearCoopGameSettings: 1 write(s)
+SCRIPTPATCH coop: 6 rows applied for 4 players
+SCRIPTPATCH survival S2A-1 GearGame.GearGameSP_Base.SpawnDefaultPawnFor: script grown to 183 bytes, with 1 write(s)
+SCRIPTPATCH survival S2A-2 GearGame.GearPC.ProcessGameOver: script grown to 159 bytes
+SCRIPTPATCH survival S2A-3 GearGame.GearPC.Destroyed: script grown to 1288 bytes, with 2 write(s)
+SCRIPTPATCH survival S2A-5 GearGame.GearPC.SaveCheckpoint: script grown to 496 bytes, with 3 write(s)
+SCRIPTPATCH survival: 4 rows applied for 4 players
+SCRIPTPATCH coop-body CB-3 GearGame.GearGameSP_Base.SuggestPawnClassFor: 3 write(s)
+SCRIPTPATCH coop-body CB-4 GearGame.GearGame.RestartPlayer: script grown to 548 bytes
+SCRIPTPATCH coop-body CB-5 GearGame.GearGameSP_Base.PostLogin: 4 write(s)
+SCRIPTPATCH coop-body CB-1 GearGame.Default__GearPawn_COGGear.GearPawnMesh: 1 write(s)
+SCRIPTPATCH coop-body CB-2 GearGame.Default__GearPawn_COGGear.GearPawnMesh: 1 write(s)
+SCRIPTPATCH coop-body: 5 rows applied for 4 players
+SCRIPTPATCH coop-ride CR-1 GearGame.GearPawn.OnGearEnterVehicle: script grown to 369 bytes
+SCRIPTPATCH coop-ride CR-2 GearGame.GearPawn.OnGearExitVehicle: script grown to 451 bytes
+SCRIPTPATCH coop-ride: 2 rows applied for 4 players
+SCRIPTPATCH coop-scenes SC-1 GearGame.GearPC.SetCinematicMode: script grown to 679 bytes
+SCRIPTPATCH coop-scenes SC-2 GearGame.GearGameSP_Base.RestartPlayer: script grown to 2403 bytes
+SCRIPTPATCH coop-scenes SC-3 GearGame.GearPC.OnCheckpoint: script grown to 1029 bytes, with 1 write(s)
+SCRIPTPATCH coop-scenes SC-4 GearGame.GearPawn.OnTeleport: script grown to 607 bytes
+SCRIPTPATCH coop-scenes SC-5 GearGame.GearPC.SetSquadName: script grown to 371 bytes
+SCRIPTPATCH coop-scenes SC-6 GearGame.GearGameSP_Base.PostLogin: 1 write(s)
+SCRIPTPATCH coop-scenes: 6 rows applied for 4 players
+```
+
+The game appends ", set hash <16 hex>" to each "rows applied" line; the hashes known so
+far are coop 937c35f80cb274b7 (Stage 1 results) and coop-scenes cddd0eadc988a154
+(COOP_STAGE2_SCENES.md).
+
+Functions two groups change:
+
+- `GearGameSP_Base.SuggestPawnClassFor`: S1-2 grows it to 318 bytes and CB-3 makes same-size
+  edits inside that grown tail, so coop-body must apply after coop.
+- `GearGameSP_Base.PostLogin`: CB-5 edits +0x03B3..+0x03C7 and SC-6 swaps one operand at
+  +0x0413; no group grows it.
+- Function ownership for later rows (no other group may grow these): group A (survival and
+  split-revive) owns SpawnDefaultPawnFor, ProcessGameOver, GearPC.Destroyed, SaveCheckpoint,
+  TeamHasAnyChanceOfSurvival; coop-body owns GearGame.RestartPlayer, OnGearEnterVehicle,
+  OnGearExitVehicle (coop-ride rows) and PostLogin; coop-scenes owns GearPC.SetCinematicMode,
+  GearGameSP_Base.RestartPlayer, GearPC.OnCheckpoint, GearPawn.OnTeleport, GearPC.SetSquadName.
+
+Offline check: `python -I tools/script_patch.py --check <folder with the decompressed
+packages>` checks the Stage 1 rows and then `tools/script_patch_stage2.py`'s stack: every group
+is planned on top of the bytes the earlier groups produce, in the hook's order, for the default
+settings and the split-revive, extra-carmine and marcus-clones variants; every function two
+groups change is decoded to its end with every jump on a statement start; and the devcheats row.
+`--stage1-only` checks only Stage 1. On the player's retail packages it exits 0 for 4 players.
+[V offline] Each group's own tool (`script_patch_survival.py`, `script_patch_scenes.py`,
+`script_patch_body.py`, `dev_cheats_patch.py`) still prints its C++ table with `--cpp`.
+
+Not yet run in the game.
+
+Test plans are in [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md),
+[COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md), items 8-10 above and
+[TEST_TOOLING.md](TEST_TOOLING.md). TEST_TOOLING.md "Evidence" lists the engine addresses the dev tooling relies
+on and what the first `!selftest` must confirm.
+
+Builds (2026-10-16, this branch): `scripts/build.ps1` built `gow2.exe`, `scripts/build-android.ps1`
+built the APK (every new source compiles for arm64; not run on a phone) and
+`scripts/test-host.ps1` passed all five steps. [V build]
 
 #### Stage 2 test
 
