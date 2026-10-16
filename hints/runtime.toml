@@ -2,3 +2,4 @@
 [functions]
 0x82D3D5C8 = {}  # boot run 1
 0x82BFA4C0 = {}  # boot run 2
+0x82ADBEF0 = {}  # leaf (zeroes +4/+8/+12) after the noreturn rethrow ending sub_82ADBED8; called indirectly in a map commit
