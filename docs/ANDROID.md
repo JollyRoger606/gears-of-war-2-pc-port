@@ -21,7 +21,12 @@ Target device for bring-up: Samsung Galaxy S25 Ultra
 (Snapdragon 8 Elite, Adreno 830, Vulkan 1.3). Controls:
 [`android/README.md`](../android/README.md#controls). [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md)
 has the experiments, their results and what comes next.
-Cross-play with a PC running v0.1.1: see [NETWORK_PLAY.md](NETWORK_PLAY.md).
+On October 15 (evening), the current build (commit `d65fe7d`) joined a co-op campaign hosted by
+the v0.1.1 PC build over the home LAN; both lobbies listed both players, both loaded Act 1 chapter 2,
+and each player saw the other in game. As the client in the hospital, the phone ran at 30 fps at
+443-660 MHz for about 70 s, then 27-30 fps at 342-389 MHz (a short run, not a sustained rate, and
+a different scene from the courtyard measurements above). See [NETWORK_PLAY.md](NETWORK_PLAY.md)
+for the setup.
 
 ## Building the APK
 

@@ -102,11 +102,21 @@ The PC (Ethernet, 192.168.10.10) and a Galaxy S25 Ultra (Wi-Fi,
   `bind port 1000 -> 41000 (net_port_offset)` and
   `XGISessionJoinRemote ... members=2`; the PC sent the phone about 2.8 KB/s
   and received about 1 KB/s (`[nettraffic]`).
+- Evening check: the Android performance build (`d65fe7d`) joined the
+  v0.1.1 PC host with no `net_peers`. Both lobbies listed Pc and User,
+  both loaded Act 1 chapter 2, and the phone spawned as Dom on RT. Each
+  player saw the other in game. The phone received the PC's 188-byte
+  beacon answer on port 14001. The phone logged
+  `XGISessionJoinRemote ... first_xuid=B13E000000000001 members=2`;
+  the PC logged
+  `XGISessionJoinRemote ... first_xuid=B13E50A1BB0DC9A9 members=2`.
+  Both sides used port 41000 for game traffic.
 
 Both logs show `XGISessionJoinRemote ... members=2` with the other
 side's XUID, and game traffic on port 41000 in both directions. The phone
-renders a few frames per second in game (docs/ANDROID.md), so let the PC
-host once its firewall rule is in place. In chapter 1 the second player's
+ran at 27-30 fps as the client in the first two minutes of chapter 2
+(docs/ANDROID.md). Either side can host; a PC copy hosts only from a path
+with the inbound firewall rule (below). In chapter 1 the second player's
 sticks did nothing until they held LB for the objectives prompt.
 
 A script can drive the phone without touching the screen: put
@@ -115,6 +125,15 @@ in the phone's `gow2.toml`, then write pad lines to that file with
 `adb shell "echo 'A' > /sdcard/Android/data/com.santiquiroz.gow2recomp/files/pad.txt"`
 (format in `src/gow2_test_input.h`; an empty line releases everything).
 Hold a menu direction only briefly, or the menu repeats it.
+Time the hold on the phone in one adb call, with `<files>` replaced by
+the app's files folder:
+
+```
+adb shell "echo 'DOWN' > <files>/pad.txt; sleep 0.12; echo '' > <files>/pad.txt"
+```
+
+A 0.12 s hold for a menu direction and 0.2-0.3 s for A/START/X worked.
+The file is read every 15 ms.
 
 ### Windows Firewall
 
