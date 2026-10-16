@@ -4,6 +4,7 @@
 // native script packages, by replacing the recompiled FStartupPackages::LoadAll.
 
 #include "gow2_script_patches.h"
+#include "gow2_script_patch_body.h"
 #include "gow2_coop_census.h"
 #include "gow2_coop_network.h"
 
@@ -12,6 +13,7 @@
 #endif
 
 #include <cstdint>
+#include <string_view>
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
@@ -33,6 +35,13 @@ REXCVAR_DEFINE_BOOL(gow2_coop_marcus_clones, false, "Coop",
 REXCVAR_DEFINE_BOOL(gow2_coop_patch_fail_test, false, "Coop",
                     "Debug: corrupt one expected byte of the co-op patch rows. The whole group must "
                     "then be skipped and the game stays retail");
+REXCVAR_DEFINE_BOOL(gow2_coop_extra_carmine, false, "Coop",
+                    "Players 3+ are Ben Carmine where his class is loaded (chapters 2, 5-11) and "
+                    "GearPawn_COGGear elsewhere; off makes them always GearPawn_COGGear with Dom's "
+                    "body, which exists in every chapter on every peer");
+REXCVAR_DEFINE_BOOL(gow2_coop_vehicle_ride, true, "Coop",
+                    "While Marcus or Dom rides a vehicle, players 3+ on foot cannot be hurt, and they "
+                    "are brought to him when he gets out (rows CR-1 and CR-2)");
 
 namespace rex::glue {
 
@@ -121,6 +130,52 @@ void LogResult(const GroupResult& result, int players) {
               result.lines.size(), players, result.set_hash);
 }
 
+constexpr std::string_view kBodyFallback = "players 3+ keep the Stage 1 behaviour";
+constexpr std::string_view kRideFallback = "vehicles stay retail";
+
+void LogFollowUpResult(const GroupResult& result, std::string_view name, std::string_view fallback,
+                       int players) {
+  if (!result.applied) {
+    REXLOG_WARN("SCRIPTPATCH {}: skipped ({}: {}); {}", name, result.failed_row, result.reason,
+                fallback);
+    return;
+  }
+  for (const std::string& line : result.lines) REXLOG_INFO("SCRIPTPATCH {} {}", name, line);
+  REXLOG_INFO("SCRIPTPATCH {}: {} rows applied for {} players, set hash {:016x}", name,
+              result.lines.size(), players, result.set_hash);
+}
+
+void ApplyFollowUpGroup(uint8_t* base, const PatchGroup& group, std::string_view fallback,
+                        int players, const script_patch::GuestAlloc& alloc) {
+  GroupResult result;
+  ApplyCall call{base, &group, players, &alloc, &result};
+  if (!GuardedApply(&call)) {
+    REXLOG_WARN("SCRIPTPATCH {}: skipped (fault while reading guest objects); {}", group.name,
+                fallback);
+    return;
+  }
+  LogFollowUpResult(result, group.name, fallback, players);
+}
+
+void ApplyCoopFollowUps(uint8_t* base, bool coop_applied, int players,
+                        const script_patch::GuestAlloc& alloc) {
+  if (!coop_applied) {
+    REXLOG_INFO("SCRIPTPATCH coop-body: off (the coop group was not applied)");
+    REXLOG_INFO("SCRIPTPATCH coop-ride: off (the coop group was not applied)");
+    return;
+  }
+  const PatchGroup body =
+      script_patch::CoopBodyGroup(REXCVAR_GET(gow2_coop_extra_carmine),
+                                  REXCVAR_GET(gow2_coop_marcus_clones));
+  ApplyFollowUpGroup(base, body, kBodyFallback, players, alloc);
+  if (!REXCVAR_GET(gow2_coop_vehicle_ride)) {
+    REXLOG_INFO("SCRIPTPATCH coop-ride: off (gow2_coop_vehicle_ride=false)");
+    return;
+  }
+  const PatchGroup ride = script_patch::CoopRideGroup();
+  ApplyFollowUpGroup(base, ride, kRideFallback, players, alloc);
+}
+
 void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   REXLOG_INFO("SCRIPTPATCH startup script packages loaded");
   StartCoopCensus(base);
@@ -138,9 +193,11 @@ void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   ApplyCall call{base, &group, players, &alloc, &result};
   if (!GuardedApply(&call)) {
     REXLOG_WARN("SCRIPTPATCH coop: skipped (fault while reading guest objects); the game stays retail");
+    ApplyCoopFollowUps(base, false, players, alloc);
     return;
   }
   LogResult(result, players);
+  ApplyCoopFollowUps(base, result.applied, players, alloc);
 }
 
 }  // namespace
