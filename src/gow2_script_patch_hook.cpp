@@ -5,6 +5,7 @@
 
 #include "gow2_script_patches.h"
 #include "gow2_script_patch_groups.h"
+#include "gow2_script_patch_stack.h"
 #include "gow2_script_patch_survival.h"
 #include "gow2_script_patch_body.h"
 #include "gow2_coop_census.h"
@@ -16,7 +17,9 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
@@ -29,8 +32,10 @@
 #include "gow2_guest.h"
 
 REXCVAR_DEFINE_INT32(gow2_coop_players, 2, "Coop",
-                     "Campaign co-op player cap. 2 keeps the retail game; 3 to 255 apply the Stage 1 "
-                     "script patches of docs/COOP_N_PLAYERS.md for that many players")
+                     "Campaign co-op player cap. 2 keeps the retail game; 3 to 255 apply the co-op "
+                     "patch groups (Stage 1 and 2, docs/COOP_N_PLAYERS.md) for that many players and "
+                     "turn System Link on. Every player, host and friends, must use the same value and "
+                     "the same build")
     .range(2, 255);
 REXCVAR_DEFINE_BOOL(gow2_coop_marcus_clones, false, "Coop",
                     "Debug (row D-1): players 3+ spawn as Marcus clones instead of Ben Carmine or a "
@@ -79,6 +84,10 @@ constexpr uint32_t kMallocSlot = 4;
 constexpr uint32_t kMallocAlign = 8;
 constexpr int kFirstCoopCount = 3;
 constexpr int kLastCoopCount = 255;
+
+// Written once by the startup hook below; read by CoopStage1Applied() and CoopStackHash().
+bool g_coop_stage1_applied = false;
+uint64_t g_coop_stack_hash = 0;
 
 uint32_t GuestMalloc(PPCContext& ctx, uint8_t* base, uint32_t size) {
   rex::Runtime* runtime = rex::Runtime::instance();
@@ -152,80 +161,109 @@ void LogResult(std::string_view tag, std::string_view when_skipped, const GroupR
               result.lines.size(), players, result.set_hash);
 }
 
-bool ApplyAndLogGroup(uint8_t* base, const PatchGroup& group, int players,
-                      const script_patch::GuestAlloc& alloc, std::string_view when_skipped) {
+std::string StateForResult(const GroupResult& result) {
+  return result.applied ? script_patch::FormatGroupHash(result.set_hash) : "skipped";
+}
+
+void RecordOff(std::vector<script_patch::StackEntry>& stack, std::string_view name) {
+  stack.push_back({std::string(name), "off"});
+}
+
+GroupResult ApplyAndLogGroup(uint8_t* base, const PatchGroup& group, int players,
+                             const script_patch::GuestAlloc& alloc, std::string_view when_skipped,
+                             std::vector<script_patch::StackEntry>& stack) {
   GroupResult result;
   if (!ApplyPatchGroup(base, group, players, alloc, &result)) {
     REXLOG_WARN("SCRIPTPATCH {}: skipped (fault while reading guest objects); {}", group.name,
                 when_skipped);
-    return false;
+  } else {
+    LogResult(group.name, when_skipped, result, players);
   }
-  LogResult(group.name, when_skipped, result, players);
-  return result.applied;
+  stack.push_back({std::string(group.name), StateForResult(result)});
+  return result;
 }
 
 void ApplySurvivalGroups(uint8_t* base, const script_patch::GuestAlloc& alloc, bool coop_applied,
-                         int players) {
+                         int players, std::vector<script_patch::StackEntry>& stack) {
   if (!coop_applied) {
     REXLOG_INFO("SCRIPTPATCH survival: off (the coop group was not applied)");
+    RecordOff(stack, "survival");
+    RecordOff(stack, "split-revive");
     return;
   }
   if (!REXCVAR_GET(gow2_coop_survival)) {
     REXLOG_INFO("SCRIPTPATCH survival: off (gow2_coop_survival=false)");
+    RecordOff(stack, "survival");
+    RecordOff(stack, "split-revive");
     return;
   }
-  const bool survival_applied = ApplyAndLogGroup(base, script_patch::CoopSurvivalGroup(), players,
-                                                 alloc, "Stage 1 stays applied");
-  if (survival_applied && REXCVAR_GET(gow2_coop_split_revive)) {
+  const GroupResult survival = ApplyAndLogGroup(base, script_patch::CoopSurvivalGroup(), players,
+                                                alloc, "Stage 1 stays applied", stack);
+  if (survival.applied && REXCVAR_GET(gow2_coop_split_revive)) {
     ApplyAndLogGroup(base, script_patch::CoopSplitReviveGroup(), players, alloc,
-                     "the survival group stays applied");
+                     "the survival group stays applied", stack);
+  } else {
+    RecordOff(stack, "split-revive");
   }
 }
 
 void ApplyRegisteredGroup(const script_patch::CoopGroupEntry& entry, uint8_t* base,
-                          const script_patch::GuestAlloc& alloc, bool coop_applied, int players) {
+                          const script_patch::GuestAlloc& alloc, bool coop_applied, int players,
+                          std::vector<script_patch::StackEntry>& stack) {
   if (!coop_applied) {
     REXLOG_INFO("SCRIPTPATCH {}: off (the coop group was not applied)", entry.name);
+    RecordOff(stack, entry.name);
     return;
   }
   std::optional<PatchGroup> group = entry.make();
-  if (group) ApplyAndLogGroup(base, *group, players, alloc, "the other groups stay applied");
+  if (!group) {
+    // The factory logs its own off line; the hook never tried this group.
+    RecordOff(stack, entry.name);
+    return;
+  }
+  ApplyAndLogGroup(base, *group, players, alloc, "the other groups stay applied", stack);
 }
 
 void ApplyRegisteredGroups(uint8_t* base, const script_patch::GuestAlloc& alloc, bool coop_applied,
-                           int players) {
+                           int players, std::vector<script_patch::StackEntry>& stack) {
   for (const script_patch::CoopGroupEntry& entry : script_patch::CoopGroupsByName()) {
-    ApplyRegisteredGroup(entry, base, alloc, coop_applied, players);
+    ApplyRegisteredGroup(entry, base, alloc, coop_applied, players, stack);
   }
 }
 
 constexpr std::string_view kBodyFallback = "players 3+ keep the Stage 1 behaviour";
 constexpr std::string_view kRideFallback = "vehicles stay retail";
 
-void ApplyCoopBody(uint8_t* base, int players, const script_patch::GuestAlloc& alloc) {
+void ApplyCoopBody(uint8_t* base, int players, const script_patch::GuestAlloc& alloc,
+                   std::vector<script_patch::StackEntry>& stack) {
   if (!REXCVAR_GET(gow2_coop_body)) {
     REXLOG_INFO("SCRIPTPATCH coop-body: off (gow2_coop_body=false)");
+    RecordOff(stack, "coop-body");
     return;
   }
   const PatchGroup body =
       script_patch::CoopBodyGroup(REXCVAR_GET(gow2_coop_extra_carmine),
                                   REXCVAR_GET(gow2_coop_marcus_clones));
-  ApplyAndLogGroup(base, body, players, alloc, kBodyFallback);
+  ApplyAndLogGroup(base, body, players, alloc, kBodyFallback, stack);
 }
 
 void ApplyCoopFollowUps(uint8_t* base, bool coop_applied, int players,
-                        const script_patch::GuestAlloc& alloc) {
+                        const script_patch::GuestAlloc& alloc,
+                        std::vector<script_patch::StackEntry>& stack) {
   if (!coop_applied) {
     REXLOG_INFO("SCRIPTPATCH coop-body: off (the coop group was not applied)");
     REXLOG_INFO("SCRIPTPATCH coop-ride: off (the coop group was not applied)");
+    RecordOff(stack, "coop-body");
+    RecordOff(stack, "coop-ride");
     return;
   }
-  ApplyCoopBody(base, players, alloc);
+  ApplyCoopBody(base, players, alloc, stack);
   if (!REXCVAR_GET(gow2_coop_vehicle_ride)) {
     REXLOG_INFO("SCRIPTPATCH coop-ride: off (gow2_coop_vehicle_ride=false)");
+    RecordOff(stack, "coop-ride");
     return;
   }
-  ApplyAndLogGroup(base, script_patch::CoopRideGroup(), players, alloc, kRideFallback);
+  ApplyAndLogGroup(base, script_patch::CoopRideGroup(), players, alloc, kRideFallback, stack);
 }
 
 void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
@@ -241,13 +279,26 @@ void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   const script_patch::GuestAlloc alloc = [&ctx, base](uint32_t size) {
     return GuestMalloc(ctx, base, size);
   };
-  const bool coop_applied = ApplyAndLogGroup(base, group, players, alloc, "the game stays retail");
-  ApplySurvivalGroups(base, alloc, coop_applied, players);
-  ApplyCoopFollowUps(base, coop_applied, players, alloc);
-  ApplyRegisteredGroups(base, alloc, coop_applied, players);
+  std::vector<script_patch::StackEntry> stack;
+  const GroupResult coop =
+      ApplyAndLogGroup(base, group, players, alloc, "the game stays retail", stack);
+  const bool coop_applied = coop.applied;
+  ApplySurvivalGroups(base, alloc, coop_applied, players, stack);
+  ApplyCoopFollowUps(base, coop_applied, players, alloc, stack);
+  ApplyRegisteredGroups(base, alloc, coop_applied, players, stack);
+  REXLOG_INFO("SCRIPTPATCH stack: {}", script_patch::StackLine(players, stack));
+  g_coop_stage1_applied = coop_applied;
+  g_coop_stack_hash = script_patch::StackHash(script_patch::StackText(players, stack));
 }
 
 }  // namespace
+
+namespace script_patch {
+
+bool CoopStage1Applied() { return g_coop_stage1_applied; }
+uint64_t CoopStackHash() { return g_coop_stack_hash; }
+
+}  // namespace script_patch
 
 void EnableSystemLinkForCoop() {
   const int players = REXCVAR_GET(gow2_coop_players);

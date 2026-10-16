@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -18,6 +19,10 @@ struct CoopGroupEntry {
   std::string_view name;
   CoopGroupFactory make;
 };
+
+// Both are final before the first engine tick: the startup hook sets them after FStartupPackages::LoadAll.
+bool CoopStage1Applied();
+uint64_t CoopStackHash();
 
 inline std::vector<CoopGroupEntry>& CoopGroupEntries() {
   static std::vector<CoopGroupEntry> entries;
