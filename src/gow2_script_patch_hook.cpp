@@ -15,6 +15,7 @@
 #include <windows.h>
 #endif
 
+#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -86,8 +87,8 @@ constexpr int kFirstCoopCount = 3;
 constexpr int kLastCoopCount = 255;
 
 // Written once by the startup hook below; read by CoopStage1Applied() and CoopStackHash().
-bool g_coop_stage1_applied = false;
-uint64_t g_coop_stack_hash = 0;
+std::atomic<bool> g_coop_stage1_applied{false};
+std::atomic<uint64_t> g_coop_stack_hash{0};
 
 uint32_t GuestMalloc(PPCContext& ctx, uint8_t* base, uint32_t size) {
   rex::Runtime* runtime = rex::Runtime::instance();
@@ -294,17 +295,18 @@ void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   ApplyCoopFollowUps(base, coop_applied, players, alloc, stack);
   ApplyRegisteredGroups(base, alloc, coop_applied, players, stack);
   REXLOG_INFO("SCRIPTPATCH stack: {}", script_patch::StackLine(players, stack));
-  g_coop_stage1_applied = coop_applied;
-  g_coop_stack_hash = script_patch::StackHash(script_patch::StackText(players, stack));
-  PublishCoopHashToSystemLink(g_coop_stack_hash);
+  const uint64_t hash = script_patch::StackHash(script_patch::StackText(players, stack));
+  g_coop_stack_hash.store(hash, std::memory_order_release);
+  g_coop_stage1_applied.store(coop_applied, std::memory_order_release);
+  PublishCoopHashToSystemLink(hash);
 }
 
 }  // namespace
 
 namespace script_patch {
 
-bool CoopStage1Applied() { return g_coop_stage1_applied; }
-uint64_t CoopStackHash() { return g_coop_stack_hash; }
+bool CoopStage1Applied() { return g_coop_stage1_applied.load(std::memory_order_acquire); }
+uint64_t CoopStackHash() { return g_coop_stack_hash.load(std::memory_order_acquire); }
 
 }  // namespace script_patch
 

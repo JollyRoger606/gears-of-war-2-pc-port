@@ -457,10 +457,20 @@ class Gow2App : public rex::ReXApp {
     options_overlay_ = rex::glue::options::CreateOptionsOverlay(drawer, options_paths_, touch_controls);
   }
 
+  static void CloseHostPortsBeforeExit() {
+    auto& host = rex::glue::options_actions::Host();
+    if (!rex::cvar::Query<bool>("gow2_host_close_on_exit")) return;
+    host.StopBlocking(15000);
+  }
+
+  bool OnWindowCloseRequested() override {
+    CloseHostPortsBeforeExit();
+    return true;
+  }
+
   void OnShutdown() override {
     rex::glue::options::ClosePcOptionsForShutdown();
-    if (rex::cvar::Query<bool>("gow2_host_close_on_exit"))
-      rex::glue::options_actions::Host().StopBlocking(15000);
+    CloseHostPortsBeforeExit();
     options_overlay_.reset();
 #if defined(__ANDROID__)
     touch_overlay_.reset();

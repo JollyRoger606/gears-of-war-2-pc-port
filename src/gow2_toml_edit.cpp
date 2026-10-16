@@ -4,10 +4,20 @@
 #include "gow2_toml_edit.h"
 
 #include <charconv>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <system_error>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace rex::glue::toml_edit {
 
@@ -157,10 +167,9 @@ bool IsActiveAny(std::string_view line) {
 }
 
 // Finds the '#' starting a trailing comment, skipping over any quoted strings.
-std::string TrailingComment(std::string_view line, size_t eq) {
-  char triple = 0;
+std::string TrailingComment(std::string_view line, size_t start, char triple = 0) {
   char str = 0;
-  size_t i = eq + 1;
+  size_t i = start;
   while (i < line.size()) {
     const char c = line[i];
     if (triple != 0) {
@@ -340,22 +349,48 @@ std::string FormatString(std::string_view value) {
   return out;
 }
 
+size_t ValueEnd(const std::vector<std::string>& lines, size_t start) {
+  char triple = ScanLine(lines[start], 0);
+  size_t end = start + 1;
+  while (triple != 0 && end < lines.size()) {
+    triple = ScanLine(lines[end], triple);
+    ++end;
+  }
+  return end;
+}
+
+void CommentSpan(std::vector<std::string>& lines, size_t start, size_t end) {
+  for (size_t i = start; i < end; ++i) lines[i] = "# " + lines[i];
+}
+
 bool ReplaceActive(std::vector<std::string>& lines, const std::vector<char>& inside, size_t top,
                    std::string_view key, const std::string& made) {
-  bool done = false;
+  size_t first = top;
   for (size_t i = 0; i < top; ++i) {
+    if (inside[i]) continue;
+    if (MatchActive(lines[i], key).hit) {
+      first = i;
+      break;
+    }
+  }
+  if (first == top) return false;
+  for (size_t i = top; i-- > first;) {
     if (inside[i]) continue;
     const LineKey at = MatchActive(lines[i], key);
     if (!at.hit) continue;
-    if (!done) {
-      const std::string comment = TrailingComment(lines[i], at.eq);
-      lines[i] = lines[i].substr(0, at.key_start) + made + (comment.empty() ? "" : "  " + comment);
-      done = true;
-    } else {
-      lines[i] = "# " + lines[i];
+    const size_t end = ValueEnd(lines, i);
+    if (i != first) {
+      CommentSpan(lines, i, end);
+      continue;
     }
+    const std::string comment = end == i + 1
+        ? TrailingComment(lines[i], at.eq + 1)
+        : TrailingComment(lines[end - 1], 0, ScanLine(lines[i], 0));
+    lines[i] = lines[i].substr(0, at.key_start) + made + (comment.empty() ? "" : "  " + comment);
+    lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(i + 1),
+                lines.begin() + static_cast<std::ptrdiff_t>(end));
   }
-  return done;
+  return true;
 }
 
 bool ReplaceCommented(std::vector<std::string>& lines, const std::vector<char>& inside, size_t top,
@@ -431,7 +466,9 @@ std::string Remove(std::string_view text, const std::vector<std::string>& keys) 
     for (size_t i = 0; i < top; ++i) {
       if (inside[i]) continue;
       if (!MatchActive(lines[i], key).hit) continue;
-      lines[i] = "# " + lines[i];
+      const size_t end = ValueEnd(lines, i);
+      CommentSpan(lines, i, end);
+      i = end - 1;
     }
   }
   StripTrailingEmpty(lines);
@@ -454,9 +491,38 @@ bool ReadFile(const std::filesystem::path& path, std::string* text) {
   return true;
 }
 
-bool WriteFileAtomic(const std::filesystem::path& path, std::string_view text, std::string* error) {
+namespace {
+
+std::filesystem::path TemporaryPath(const std::filesystem::path& path) {
+  static std::atomic<unsigned long long> counter{0};
+#ifdef _WIN32
+  const auto pid = GetCurrentProcessId();
+#else
+  const auto pid = getpid();
+#endif
   std::filesystem::path tmp = path;
-  tmp += ".tmp";
+  tmp += ".tmp." + std::to_string(pid) + "." +
+         std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
+  return tmp;
+}
+
+std::error_code ReplaceFile(const std::filesystem::path& tmp, const std::filesystem::path& path) {
+#ifdef _WIN32
+  if (MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    return {};
+  }
+  return std::error_code(GetLastError(), std::system_category());
+#else
+  std::error_code ec;
+  std::filesystem::rename(tmp, path, ec);
+  return ec;
+#endif
+}
+
+}  // namespace
+
+bool WriteFileAtomic(const std::filesystem::path& path, std::string_view text, std::string* error) {
+  const std::filesystem::path tmp = TemporaryPath(path);
   const auto fail = [&](const std::string& what) {
     if (error != nullptr) *error = what;
     std::error_code gone;
@@ -477,16 +543,8 @@ bool WriteFileAtomic(const std::filesystem::path& path, std::string_view text, s
     out.close();
     if (!out) return fail("cannot write " + PathUtf8(tmp) + ": write failed");
   }
-  std::error_code ec;
-  std::filesystem::rename(tmp, path, ec);
-  if (ec) {
-    std::error_code probe;
-    if (std::filesystem::exists(path, probe)) {
-      std::filesystem::remove(path, probe);
-      std::filesystem::rename(tmp, path, ec);
-    }
-    if (ec) return fail("cannot replace " + PathUtf8(path) + ": " + ec.message());
-  }
+  const std::error_code ec = ReplaceFile(tmp, path);
+  if (ec) return fail("cannot replace " + PathUtf8(path) + ": " + ec.message());
   if (error != nullptr) error->clear();
   return true;
 }

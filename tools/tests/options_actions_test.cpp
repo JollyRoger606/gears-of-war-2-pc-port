@@ -7,6 +7,9 @@
 #include <string_view>
 
 using rex::glue::host_line::ParseHostLine;
+using rex::glue::host_line::IsValidAllowPeers;
+using rex::glue::host_line::IsValidHostname;
+using rex::glue::host_line::QuoteWindowsArg;
 using rex::glue::options_actions::HostResult;
 
 int g_checks = 0;
@@ -150,7 +153,57 @@ void TestTrailingSpaceAndDefaults() {
   }
 }
 
+void TestWindowsArgumentQuoting() {
+  Expect(QuoteWindowsArg(L"plain") == L"\"plain\"", "plain argument is quoted");
+  Expect(QuoteWindowsArg(L"two words") == L"\"two words\"", "spaces stay in one argument");
+  Expect(QuoteWindowsArg(L"say \"hi\"") == L"\"say \\\"hi\\\"\"", "embedded quotes are escaped");
+  Expect(QuoteWindowsArg(L"path\\") == L"\"path\\\\\"", "trailing backslash is doubled");
+  Expect(QuoteWindowsArg(L"") == L"\"\"", "empty argument is preserved");
+  Expect(QuoteWindowsArg(L"a\\\"b") == L"\"a\\\\\\\"b\"", "backslash before quote is doubled");
+  Expect(QuoteWindowsArg(L"a\\b") == L"\"a\\b\"", "ordinary backslash stays unchanged");
+}
+
+void TestHostnameValidation() {
+  Expect(IsValidHostname(""), "empty hostname is allowed");
+  Expect(IsValidHostname("example.com"), "hostname is allowed");
+  Expect(IsValidHostname("example-1.com:41000"), "hostname with port is allowed");
+  Expect(IsValidHostname("127.0.0.1:1"), "IPv4 with port is allowed");
+  Expect(IsValidHostname(std::string(253, 'a') + ":12345"), "maximum hostname and port fit");
+  Expect(!IsValidHostname(std::string(254, 'a')), "oversized hostname fails");
+  Expect(!IsValidHostname("example.com -AllowPermanent"), "hostname switch injection fails");
+  Expect(!IsValidHostname("-LogFile"), "hostname cannot start with hyphen");
+  Expect(!IsValidHostname(".example.com"), "hostname starts with alphanumeric");
+  Expect(!IsValidHostname("example.com:"), "empty port fails");
+  Expect(!IsValidHostname("example.com:123456"), "oversized port fails");
+  Expect(!IsValidHostname("example.com:abc"), "nonnumeric port fails");
+  Expect(!IsValidHostname("example.com:12:34"), "multiple port separators fail");
+  Expect(!IsValidHostname("example_com"), "underscore hostname fails");
+  Expect(!IsValidHostname("example.com\n"), "hostname newline fails");
+}
+
+void TestPeerValidation() {
+  Expect(IsValidAllowPeers(""), "empty peer list is allowed");
+  Expect(IsValidAllowPeers("192.0.2.1"), "single peer is allowed");
+  Expect(IsValidAllowPeers(" 192.0.2.0/24 ,\t2001:db8::1,example-host.com:14001 "),
+         "trimmed comma list accepts CIDR IPv6 and hostname");
+  Expect(IsValidAllowPeers(std::string(253, 'a')), "maximum peer size fits");
+  Expect(!IsValidAllowPeers(std::string(254, 'a')), "oversized peer fails");
+  Expect(!IsValidAllowPeers("-LogFile x"), "peer switch injection fails");
+  Expect(!IsValidAllowPeers(" -LogFile"), "trimmed peer cannot start with hyphen");
+  Expect(!IsValidAllowPeers("good.com,-AllowPermanent"), "injected second peer fails");
+  Expect(!IsValidAllowPeers("a b"), "peer interior whitespace fails");
+  Expect(!IsValidAllowPeers("a;whoami"), "peer semicolon fails");
+  Expect(!IsValidAllowPeers("a\"b"), "peer quote fails");
+  Expect(!IsValidAllowPeers("a,"), "trailing empty peer fails");
+  Expect(!IsValidAllowPeers(",a"), "leading empty peer fails");
+  Expect(!IsValidAllowPeers("a,,b"), "interior empty peer fails");
+  Expect(!IsValidAllowPeers(" \t"), "blank peer fails");
+}
+
 int main() {
+  TestWindowsArgumentQuoting();
+  TestHostnameValidation();
+  TestPeerValidation();
   TestExample();
   TestStatusNullsAndEmptyArrays();
   TestOneRouterUnknownFieldsAndNulls();

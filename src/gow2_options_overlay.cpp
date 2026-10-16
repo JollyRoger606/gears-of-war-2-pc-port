@@ -73,6 +73,8 @@ PadSample CurrentPad() {
 bool HostInputsReleased(const ImGuiIO& io) {
   const auto pad = ReadHostPad();
   if (pad.buttons || std::abs(pad.lx) > .25f || std::abs(pad.ly) > .25f) return false;
+  if (std::abs(pad.rx) > .25f || std::abs(pad.ry) > .25f) return false;
+  if (pad.lt >= 30 || pad.rt >= 30) return false;
   for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
     if (ImGui::IsKeyDown(static_cast<ImGuiKey>(key))) return false;
   }
@@ -129,6 +131,26 @@ float TextWidth(std::string_view text, float size, bool bold = false) {
   return width;
 }
 
+std::string ElideMiddle(std::string_view text, float width, float font) {
+  if (TextWidth(text,font) <= width) return std::string(text);
+  if (TextWidth("...",font) > width) return {};
+  std::vector<size_t> characters;
+  for (size_t i=0;i<text.size();++i) {
+    if ((static_cast<unsigned char>(text[i]) & 0xc0) != 0x80) characters.push_back(i);
+  }
+  characters.push_back(text.size());
+  for (size_t count=characters.size()-1;count>0;--count) {
+    const size_t keep = count-1;
+    const size_t left = characters[(keep+1)/2];
+    const size_t right = characters[characters.size()-1-keep/2];
+    std::string result(text.substr(0,left));
+    result += "...";
+    result += text.substr(right);
+    if (TextWidth(result,font) <= width) return result;
+  }
+  return "...";
+}
+
 std::string Uppercase(std::string_view text) {
   std::string result(text);
   for (char& c : result) if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
@@ -146,6 +168,12 @@ void DeleteLastCharacter(std::vector<char>& buffer) {
   if (!size) return;
   do { --size; } while (size && (static_cast<unsigned char>(buffer[size]) & 0xc0) == 0x80);
   buffer[size] = 0;
+}
+
+void CloseHostPortsBeforeExit() {
+  if (!rex::cvar::Query<bool>("gow2_host_close_on_exit")) return;
+  auto& host = options_actions::Host();
+  host.StopBlocking(15000);
 }
 
 void RequestQuit() {
@@ -282,7 +310,7 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     retire_popups_ = true;
     popup_id_.clear();
     releasing_ = true;
-    release_deadline_ = NowMs() + 2000;
+    release_deadline_ = NowMs() + 5000;
     reader_.Reset(CurrentPad());
     NotifyClosed();
     REXLOG_INFO("PCOPTIONS close");
@@ -327,7 +355,7 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     if (!releasing_) return;
     if (HostInputsReleased(io)) { ReleaseInput(); return; }
     if (now < release_deadline_) return;
-    REXLOG_INFO("PCOPTIONS input release timed out");
+    REXLOG_INFO("PCOPTIONS input release timed out after 5 s");
     ReleaseInput();
   }
 
@@ -383,9 +411,16 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
       if (runtime) ToggleRuntimeSettings(runtime->display_window());
       return;
     }
-    if (id == "quit_game") { if (SaveBeforeExit()) RequestQuit(); return; }
+    if (id == "quit_game") {
+      if (!SaveBeforeExit()) return;
+      CloseHostPortsBeforeExit();
+      RequestQuit();
+      return;
+    }
     if (id == "restart_game") {
-      if (SaveBeforeExit() && options_actions::RestartGame()) RequestQuit();
+      if (!SaveBeforeExit()) return;
+      CloseHostPortsBeforeExit();
+      if (options_actions::RestartGame()) RequestQuit();
       return;
     }
     if (id == "save_open") { options_actions::OpenFolder(values_.paths().user_data_root); return; }
@@ -615,21 +650,25 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     const auto label = Label(*row.setting,context_.ctx.lang);
     const float label_x = pos.x+.022f*h_;
     const float label_y = pos.y+(row.selected ? .004f*h_ : (row_height-font)*.5f);
-    const float value_width = TextWidth(row.value_text,font);
-    const float right = pos.x+row_width-arrow_width-.008f*h_;
+    const float gap = .02f*h_;
+    const float right = pos.x+row_width-arrow_width;
+    const float value_start = label_x+row_width*.4f+gap+arrow_width;
+    const float value_available = std::max(0.f,right-value_start);
+    const auto value = ElideMiddle(row.value_text,value_available,font);
+    const float value_width = TextWidth(value,font);
     const float value_x = right-value_width;
     const float arrow_left = value_x-arrow_width;
-    const float hit_end = row.can_increase ? right+.004f*h_-pos.x : row_width;
+    const float hit_end = row.can_increase ? right-pos.x : row_width;
     const float row_hit_width = row.can_decrease ? std::max(1.f,arrow_left-pos.x) : hit_end;
     const bool clicked = Hit("##row",pos,{row_hit_width,row_height});
     const bool value_clicked = row.can_decrease && Hit("##value",{value_x,pos.y},
         {std::max(1.f,hit_end-(value_x-pos.x)),row_height});
-    const float label_max = std::max(0.f, value_x-label_x-.06f*h_);
+    const float label_max = std::max(row_width*.4f,arrow_left-label_x-gap);
     auto* draw = ImGui::GetWindowDrawList();
     draw->PushClipRect({label_x,pos.y},{label_x+label_max,pos.y+row_height},true);
     DrawText({label_x,label_y},label,font,row.selectable ? color : IM_COL32(138,138,138,255));
     draw->PopClipRect();
-    DrawText({value_x,pos.y+(row_height-font)*.5f},row.value_text,font,
+    DrawText({value_x,pos.y+(row_height-font)*.5f},value,font,
              row.selectable ? color : IM_COL32(176,176,176,255));
     if (row.changed) draw->AddCircleFilled({label_x+std::min(label_max,TextWidth(label,font))+.009f*h_,label_y+.014f*h_},.0035f*h_,kAmber);
     if (row.restart_pending) DrawRestartIcon({label_x+std::min(label_max,TextWidth(label,font))+.028f*h_,label_y+.014f*h_});
@@ -639,7 +678,7 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     if (row.setting->kind == Kind::kNumber) DrawProgress(row,{value_x,pos.y+row_height-.008f*h_},value_width);
     const bool blocked = state_.prompt != Prompt::kNone || !popup_id_.empty();
     if (row.can_decrease) DrawStep(row,index,-1,{arrow_left,pos.y},row_height,blocked);
-    if (row.can_increase) DrawStep(row,index,1,{right+.004f*h_,pos.y},row_height,blocked);
+    if (row.can_increase) DrawStep(row,index,1,{right,pos.y},row_height,blocked);
     if ((clicked || value_clicked) && row.selectable && !blocked)
       ApplyOutcome(Click(state_,index,Catalog(),values_,context_.ctx));
     ImGui::SetCursorScreenPos({pos.x,pos.y+row_height});
@@ -822,7 +861,7 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     float height = .044f*h_+PanelTextHeight(title,width)+style.ItemSpacing.y+
         std::max(44.f,.055f*h_);
     if (capture_) return height;
-    height += .026f*h_+style.FramePadding.y*2+style.ItemSpacing.y;
+    height += std::max(44.f,.026f*h_+style.FramePadding.y*2)+style.ItemSpacing.y;
     if (osk) height += KeyboardHeight(width-.044f*h_)+style.ItemSpacing.y;
     return height;
   }
@@ -867,6 +906,7 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     keyboard_gates_ = {};
     keyboard_row_ = keyboard_col_ = 0;
     shift_ = false;
+    symbols_ = false;
     pending_edits_.clear();
     show_keyboard_ = device_ == Device::kPad;
   }
@@ -930,8 +970,17 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     ImGui::TextWrapped("%.*s",static_cast<int>(label.size()),label.data());
     ImGui::SetNextItemWidth(-1);
     if (popup_focus_) { ImGui::SetKeyboardFocusHere(); popup_focus_ = false; }
+    ImGui::PushStyleColor(ImGuiCol_TextSelectedBg,ImVec4(179.f/255.f,25.f/255.f,27.f/255.f,.55f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(1.f,1.f,1.f,.10f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,ImVec4(1.f,1.f,1.f,.14f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive,ImVec4(1.f,1.f,1.f,.18f));
+    const auto padding = ImGui::GetStyle().FramePadding;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+        ImVec2(padding.x,std::max(padding.y,(44.f-ImGui::GetFontSize())*.5f)));
     const bool accepted = ImGui::InputText("##option-text",buffer_.data(),buffer_.size(),
         ImGuiInputTextFlags_EnterReturnsTrue|ImGuiInputTextFlags_CallbackAlways,EditCallback,this);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(4);
     if (!ImGui::IsItemActive()) FlushEdits();
     if (accepted) {
       FinishEditor(true); return;
@@ -957,11 +1006,13 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     if (DrawButton(std::string(T(TextId::kEditTextCancel)).c_str(),size)) FinishEditor(false);
   }
 
-  int KeyboardColumns() const { return keyboard_row_ == 4 ? 3 : static_cast<int>(KeyboardRows()[keyboard_row_].size()); }
+  int KeyboardColumns() const { return keyboard_row_ == 4 ? 4 : static_cast<int>(KeyboardRows()[keyboard_row_].size()); }
 
-  static const std::array<std::string_view,4>& KeyboardRows() {
+  const std::array<std::string_view,4>& KeyboardRows() const {
     static constexpr std::array<std::string_view,4> rows{"1234567890","qwertyuiop","asdfghjkl.","zxcvbnm-_:"};
-    return rows;
+    static constexpr std::array<std::string_view,4> symbols{
+        "!@#$%^&*()",",./\\;:=+-_","'\"?[]{}<>|","~`"};
+    return symbols_ ? symbols : rows;
   }
 
   void ReadKeyboardPad() {
@@ -992,7 +1043,8 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     switch (col) {
       case 0: return "Shift";
       case 1: return context_.ctx.lang == Lang::kEs ? "Espacio" : "Space";
-      default: return context_.ctx.lang == Lang::kEs ? "Borrar" : "Delete";
+      case 2: return context_.ctx.lang == Lang::kEs ? "Borrar" : "Delete";
+      default: return symbols_ ? "[ABC]" : "[Symbols]";
     }
   }
 
@@ -1001,6 +1053,7 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     if (col == 0) { shift_ = !shift_; return; }
     if (col == 1) { AppendText(" "); return; }
     if (col == 2) pending_edits_.push_back({true,{}});
+    if (col == 3) symbols_ = !symbols_;
   }
 
   void AppendText(std::string_view text) {
@@ -1046,7 +1099,7 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     ImGui::BeginChild("##options-keyboard",{available,KeyboardHeight(available)},ImGuiChildFlags_None,
         ImGuiWindowFlags_HorizontalScrollbar);
     for (int row=0;row<5;++row) {
-      const int columns = row==4 ? 3 : static_cast<int>(KeyboardRows()[row].size());
+      const int columns = row==4 ? 4 : static_cast<int>(KeyboardRows()[row].size());
       const float width = (keyboard_width-spacing*(columns-1))/columns;
       for (int col=0;col<columns;++col) {
         if (col) ImGui::SameLine();
@@ -1098,6 +1151,7 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
   bool capture_ = false;
   bool popup_focus_ = false;
   bool shift_ = false;
+  bool symbols_ = false;
   bool host_pending_ = false;
   std::optional<std::string> closed_host_original_;
   bool show_keyboard_ = false;

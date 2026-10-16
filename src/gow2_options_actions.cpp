@@ -463,7 +463,7 @@ void RunHostCommand(std::shared_ptr<HostState> state, std::string mode, std::wst
   state->busy.store(false, std::memory_order_release);
 }
 
-bool LaunchHostRun(const std::string& mode, const std::wstring& args) {
+bool LaunchHostRun(const std::string& mode, const std::vector<std::wstring>& args) {
   const std::shared_ptr<HostState> state = HostStateInstance();
   if (state->busy.exchange(true, std::memory_order_acq_rel)) return false;
   const std::wstring script = FindHostScript();
@@ -471,11 +471,11 @@ bool LaunchHostRun(const std::string& mode, const std::wstring& args) {
     state->busy.store(false, std::memory_order_release);
     return false;
   }
-  std::wstring command =
-      L"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"";
-  command += script;
-  command += L"\" ";
-  command += args;
+  std::wstring command = host_line::QuoteWindowsArg(L"powershell.exe");
+  const std::vector<std::wstring> prefix = {
+      L"-NoProfile", L"-NonInteractive", L"-ExecutionPolicy", L"Bypass", L"-File", script};
+  for (const std::wstring& arg : prefix) command += L" " + host_line::QuoteWindowsArg(arg);
+  for (const std::wstring& arg : args) command += L" " + host_line::QuoteWindowsArg(arg);
   try {
     std::thread(RunHostCommand, state, mode, command).detach();
   } catch (...) {
@@ -628,12 +628,30 @@ std::optional<HostResult> ParseHostLine(std::string_view line) {
 
 bool HostRunner::Start(const HostRequest& request) {
 #ifdef _WIN32
-  std::wstring args = L"-Start -LeaseHours " + std::to_wstring(request.lease_hours);
-  if (!request.hostname.empty()) args += L" -Hostname " + Utf8ToWide(request.hostname);
-  if (!request.allow_peers.empty()) args += L" -AllowPeers " + Utf8ToWide(request.allow_peers);
-  args += L" -Players " + std::to_wstring(request.players);
-  args += L" -PortOffset " + std::to_wstring(request.port_offset);
-  args += L" -Json";
+  const std::string* invalid = nullptr;
+  if (!host_line::IsValidHostname(request.hostname)) invalid = &request.hostname;
+  if (!host_line::IsValidAllowPeers(request.allow_peers)) invalid = &request.allow_peers;
+  if (invalid != nullptr) {
+    HostResult result;
+    result.mode = "Start";
+    result.error = "Invalid address: " + invalid->substr(0, 80);
+    const std::shared_ptr<HostState> state = HostStateInstance();
+    std::lock_guard<std::mutex> lock(state->mutex);
+    state->last = std::move(result);
+    return false;
+  }
+  std::vector<std::wstring> args = {L"-Start", L"-LeaseHours",
+                                    std::to_wstring(request.lease_hours)};
+  if (!request.hostname.empty()) {
+    args.push_back(L"-Hostname");
+    args.push_back(Utf8ToWide(request.hostname));
+  }
+  if (!request.allow_peers.empty()) {
+    args.push_back(L"-AllowPeers");
+    args.push_back(Utf8ToWide(request.allow_peers));
+  }
+  args.insert(args.end(), {L"-Players", std::to_wstring(request.players), L"-PortOffset",
+                           std::to_wstring(request.port_offset), L"-Json"});
   return LaunchHostRun("Start", args);
 #else
   (void)request;
@@ -643,7 +661,7 @@ bool HostRunner::Start(const HostRequest& request) {
 
 bool HostRunner::Stop() {
 #ifdef _WIN32
-  return LaunchHostRun("Stop", L"-Stop -Json");
+  return LaunchHostRun("Stop", {L"-Stop", L"-Json"});
 #else
   return false;
 #endif
@@ -651,7 +669,7 @@ bool HostRunner::Stop() {
 
 bool HostRunner::Status() {
 #ifdef _WIN32
-  return LaunchHostRun("Status", L"-Status -Json");
+  return LaunchHostRun("Status", {L"-Status", L"-Json"});
 #else
   return false;
 #endif
@@ -693,10 +711,17 @@ bool HostRunner::OpenedThisSession() const {
 
 void HostRunner::StopBlocking(int timeout_ms) {
 #ifdef _WIN32
-  if (!OpenedThisSession()) return;
-  if (!Stop()) return;
   const ULONGLONG deadline = GetTickCount64() + ULONGLONG(timeout_ms < 0 ? 0 : timeout_ms);
-  while (Busy() && GetTickCount64() < deadline) Sleep(20);
+  const auto wait = [this, deadline]() {
+    while (Busy()) {
+      const ULONGLONG now = GetTickCount64();
+      if (now >= deadline) return false;
+      Sleep(DWORD(std::min<ULONGLONG>(20, deadline - now)));
+    }
+    return true;
+  };
+  if (!wait() || !OpenedThisSession() || GetTickCount64() >= deadline) return;
+  if (Stop()) wait();
 #else
   (void)timeout_ms;
 #endif

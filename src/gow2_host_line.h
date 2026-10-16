@@ -4,11 +4,16 @@
 #pragma once
 
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include "gow2_options_actions.h"
 
 namespace rex::glue::host_line {
+
+std::wstring QuoteWindowsArg(std::wstring_view arg);
+bool IsValidHostname(std::string_view value);
+bool IsValidAllowPeers(std::string_view value);
 
 // Nullopt when the line has no "GOW2HOST " prefix or the JSON is malformed.
 std::optional<options_actions::HostResult> ParseHostLine(std::string_view line);

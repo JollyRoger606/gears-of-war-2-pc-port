@@ -29,6 +29,26 @@ bool IsSpace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
 bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 
+bool IsAlphanumeric(char c) {
+  return IsDigit(c) || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+std::string_view TrimAddress(std::string_view value) {
+  constexpr std::string_view kSpace = " \t\r\n\f\v";
+  const size_t first = value.find_first_not_of(kSpace);
+  if (first == std::string_view::npos) return {};
+  return value.substr(first, value.find_last_not_of(kSpace) - first + 1);
+}
+
+bool IsValidPeer(std::string_view value) {
+  value = TrimAddress(value);
+  if (value.empty() || value.size() > 253 || value.front() == '-') return false;
+  for (char c : value) {
+    if (!IsAlphanumeric(c) && c != '.' && c != ':' && c != '/' && c != '-') return false;
+  }
+  return true;
+}
+
 void AppendUtf8(std::string* out, uint32_t code) {
   if (code < 0x80) {
     out->push_back(char(code));
@@ -366,6 +386,51 @@ bool TakeRouters(const Value* value, std::vector<options_actions::HostRouter>* o
 }
 
 }  // namespace
+
+std::wstring QuoteWindowsArg(std::wstring_view arg) {
+  std::wstring quoted(1, L'"');
+  size_t slashes = 0;
+  for (wchar_t c : arg) {
+    if (c == L'\\') {
+      ++slashes;
+      continue;
+    }
+    quoted.append(c == L'"' ? slashes * 2 + 1 : slashes, L'\\');
+    quoted.push_back(c);
+    slashes = 0;
+  }
+  quoted.append(slashes * 2, L'\\');
+  quoted.push_back(L'"');
+  return quoted;
+}
+
+bool IsValidHostname(std::string_view value) {
+  if (value.empty()) return true;
+  if (!IsAlphanumeric(value.front())) return false;
+  const size_t colon = value.find(':');
+  const std::string_view host = value.substr(0, colon);
+  if (host.size() > 253) return false;
+  for (char c : host) {
+    if (!IsAlphanumeric(c) && c != '.' && c != '-') return false;
+  }
+  if (colon == std::string_view::npos) return true;
+  const std::string_view port = value.substr(colon + 1);
+  if (port.empty() || port.size() > 5) return false;
+  for (char c : port) {
+    if (!IsDigit(c)) return false;
+  }
+  return true;
+}
+
+bool IsValidAllowPeers(std::string_view value) {
+  if (value.empty()) return true;
+  while (true) {
+    const size_t comma = value.find(',');
+    if (!IsValidPeer(value.substr(0, comma))) return false;
+    if (comma == std::string_view::npos) return true;
+    value.remove_prefix(comma + 1);
+  }
+}
 
 std::optional<options_actions::HostResult> ParseHostLine(std::string_view line) {
   constexpr std::string_view kPrefix = "GOW2HOST ";

@@ -22,6 +22,8 @@ struct HostPad {
   uint16_t buttons = 0;  // XInput button bits
   float lx = 0;          // -1..1
   float ly = 0;          // -1..1, up is positive
+  float rx = 0, ry = 0;
+  uint8_t lt = 0, rt = 0;
 };
 
 // User 0's pad as the runtime's input system reports it, through the same lock the guest's input

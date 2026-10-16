@@ -7,6 +7,7 @@
 #include "gow2_test_input.h"
 #include "gow2_xam_input_guard.h"
 
+#include <algorithm>
 #include <atomic>
 #include <string>
 
@@ -55,7 +56,10 @@ HostPad ReadHostPad() {
   if (result == X_ERROR_SUCCESS) {
     pad = {true, static_cast<uint16_t>(state.gamepad.buttons),
            NormalizeStick(static_cast<int16_t>(state.gamepad.thumb_lx)),
-           NormalizeStick(static_cast<int16_t>(state.gamepad.thumb_ly))};
+           NormalizeStick(static_cast<int16_t>(state.gamepad.thumb_ly)),
+           NormalizeStick(static_cast<int16_t>(state.gamepad.thumb_rx)),
+           NormalizeStick(static_cast<int16_t>(state.gamepad.thumb_ry)),
+           state.gamepad.left_trigger, state.gamepad.right_trigger};
   }
   test_input::PadState scripted;
   if (test_input::CurrentPad(&scripted)) {
@@ -64,6 +68,12 @@ HostPad ReadHostPad() {
       pad.lx = NormalizeStick(scripted.lx);
       pad.ly = NormalizeStick(scripted.ly);
     }
+    if (scripted.rx != 0 || scripted.ry != 0) {
+      pad.rx = NormalizeStick(scripted.rx);
+      pad.ry = NormalizeStick(scripted.ry);
+    }
+    pad.lt = std::max(pad.lt, scripted.left_trigger);
+    pad.rt = std::max(pad.rt, scripted.right_trigger);
     pad.connected = true;
   }
   return pad;

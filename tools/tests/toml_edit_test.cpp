@@ -5,11 +5,13 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <iterator>
 #include <random>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <vector>
+#include <thread>
 
 namespace fs = std::filesystem;
 namespace te = rex::glue::toml_edit;
@@ -204,6 +206,28 @@ void TestMultilineString() {
          "blocked key appends instead");
 }
 
+void TestMultilineEdits() {
+  for (const std::string& quote : {std::string("\"\"\""), std::string("'''")}) {
+    const std::string original = "desc = " + quote + "\n[not_a_table]\nvsync = true\n" +
+                                 quote + " # description\nother = 7\n";
+    const std::string replaced =
+        te::Upsert(original, {{"desc", te::ValueKind::kString, "new"}});
+    Expect(replaced == "desc = \"new\"  # description\nother = 7\n",
+           "multiline replacement removes whole value and keeps closing comment");
+    const std::string removed = te::Remove(original, {"desc"});
+    Expect(removed == "# desc = " + quote + "\n# [not_a_table]\n# vsync = true\n# " +
+                          quote + " # description\nother = 7\n",
+           "multiline removal comments every value line");
+    const std::string duplicate = te::Upsert(
+        "desc = \"first\"\n" + original, {{"desc", te::ValueKind::kString, "new"}});
+    Expect(duplicate == "desc = \"new\"\n" + removed,
+           "duplicate multiline value is fully commented");
+    Expect(te::Upsert(removed, {{"desc", te::ValueKind::kString, "new"}}).find(
+               "desc = \"new\"\n# [not_a_table]") == 0,
+           "removed multiline value can be enabled again safely");
+  }
+}
+
 void TestPrefixKeys() {
   using te::ValueKind;
   const std::string out =
@@ -294,15 +318,32 @@ void TestUnicodeWriteErrors(const fs::path& root) {
          "directory failure reports unicode path as utf8");
 
   const fs::path file = root / u8"\u4e2d-folder" / "gow2.toml";
-  fs::path sibling = file;
-  sibling += ".tmp";
   std::error_code ec;
-  Expect(fs::create_directories(sibling, ec), "unicode temporary-file blocker is created");
+  Expect(fs::create_directories(file / "child", ec), "unicode replacement blocker is created");
   Expect(!te::WriteFileAtomic(file, "vsync = true\n", &error),
-         "temporary directory blocks unicode file write");
-  Expect(Contains(error, "cannot write ") && Contains(error, "\xE4\xB8\xAD-folder") &&
-             EndsWith(error, "gow2.toml.tmp: open failed"),
-         "open failure reports unicode path as utf8");
+         "nonempty destination directory blocks atomic replacement");
+  Expect(Contains(error, "cannot replace ") && Contains(error, "\xE4\xB8\xAD-folder"),
+         "replacement failure reports unicode path as utf8");
+  Expect(fs::exists(file / "child"), "failed replacement preserves destination");
+  const auto entries = std::distance(fs::directory_iterator(file.parent_path()),
+                                     fs::directory_iterator());
+  Expect(entries == 1, "failed replacement removes its temporary file");
+}
+
+void TestConcurrentWrites(const fs::path& file) {
+  const std::vector<std::string> contents = {
+      std::string(8192, 'a'), std::string(8192, 'b'), std::string(8192, 'c')};
+  bool success[3] = {};
+  std::vector<std::thread> writers;
+  for (size_t i = 0; i < contents.size(); ++i) {
+    writers.emplace_back([&, i] { success[i] = te::WriteFileAtomic(file, contents[i], nullptr); });
+  }
+  for (auto& writer : writers) writer.join();
+  Expect(success[0] && success[1] && success[2], "concurrent writes each replace successfully");
+  std::string text;
+  Expect(te::ReadFile(file, &text) &&
+             (text == contents[0] || text == contents[1] || text == contents[2]),
+         "concurrent writes leave one complete value");
 }
 
 void TestFileRoundTrip() {
@@ -318,8 +359,6 @@ void TestFileRoundTrip() {
   fs::remove_all(root, ec);
   ec.clear();
   const fs::path file = root / "sub" / "dir" / "gow2.toml";
-  fs::path sibling = file;
-  sibling += ".tmp";
   std::string text;
   Expect(!te::ReadFile(file, &text), "missing file reads false");
   std::string error;
@@ -327,7 +366,10 @@ void TestFileRoundTrip() {
   Expect(te::ReadFile(file, &text) && text == "vsync = true\n", "read back matches write");
   Expect(te::WriteFileAtomic(file, "vsync = false\n", &error), "atomic write overwrites");
   Expect(te::ReadFile(file, &text) && text == "vsync = false\n", "read back matches overwrite");
-  Expect(!fs::exists(sibling, ec), "no tmp file left behind");
+  TestConcurrentWrites(file);
+  const auto entries = std::distance(fs::directory_iterator(file.parent_path()),
+                                     fs::directory_iterator());
+  Expect(entries == 1, "no temporary files left after overwrites and concurrent writes");
   TestUnicodeWriteErrors(root);
   fs::remove_all(root, ec);
 }
@@ -340,6 +382,7 @@ int main(int argc, char** argv) {
     TestUpsertAppend();
     TestTableHeader();
     TestMultilineString();
+    TestMultilineEdits();
     TestPrefixKeys();
     TestDuplicates();
     TestLineEndings();
