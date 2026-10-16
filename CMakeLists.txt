@@ -27,6 +27,7 @@ set(GOW2_SOURCES
     src/gow2_save_dir_setting.cpp
     src/gow2_script_patches.cpp
     src/gow2_script_patch_table.cpp
+    src/gow2_script_patch_survival.cpp
     src/gow2_script_patch_hook.cpp
     src/gow2_coop_census.cpp
     src/gow2_coop_scenes.cpp
@@ -64,6 +65,16 @@ add_executable(gow2_script_patch_test EXCLUDE_FROM_ALL
     src/gow2_script_patch_table.cpp
 )
 target_include_directories(gow2_script_patch_test PRIVATE src)
+
+# Host-side test of the Stage 2 survival rows (group A) on synthetic guest memory. Not part of the
+# default build: cmake --build <dir> --target gow2_script_patch_survival_test, then run the exe.
+add_executable(gow2_script_patch_survival_test EXCLUDE_FROM_ALL
+    tools/tests/script_patch_survival_test.cpp
+    src/gow2_script_patches.cpp
+    src/gow2_script_patch_table.cpp
+    src/gow2_script_patch_survival.cpp
+)
+target_include_directories(gow2_script_patch_survival_test PRIVATE src)
 
 # Host-side test of the focus-free test input parser and XINPUT_STATE merge.
 add_executable(gow2_test_input_test EXCLUDE_FROM_ALL
