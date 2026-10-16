@@ -14,6 +14,8 @@ SHOT_WIDTHS = {
     "title": (1200, 640),
     "scale-1x-vs-3x": (1416, 760),
     "texture-pack-test": (1280, 640),
+    "pc-options": (1600, 800),
+    "device-options": (1600, 800),
 }
 OG_CARDS = {"og-image-1200x630.png": "og-image.jpg", "og-image-es-1200x630.png": "og-image-es.jpg"}
 

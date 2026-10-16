@@ -76,7 +76,7 @@
         "url": "https://santiquiroz.github.io/gears-of-war-2-pc-port/",
         "applicationCategory": "GameApplication",
         "operatingSystem": "Windows 10, Windows 11 (x64)",
-        "softwareVersion": "0.1.2",
+        "softwareVersion": "0.2.0",
         "datePublished": "2026-10-15",
         "softwareRequirements": "A DirectX 12 GPU and your own retail Xbox 360 copy of Gears of War 2 (title ID 4D53082D)",
         "downloadUrl": "https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest",
@@ -176,7 +176,7 @@
             <a class="btn btn--primary" href="https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest">
               <svg aria-hidden="true"><use href="#i-download"/></svg>
               Download for Windows
-              <span class="btn__meta">v0.1.2</span>
+              <span class="btn__meta">v0.2.0</span>
             </a>
             <a class="btn btn--ghost" href="https://github.com/santiquiroz/gears-of-war-2-pc-port">
               <svg aria-hidden="true"><use href="#i-star"/></svg>
@@ -331,6 +331,20 @@
             <p>The release has no DLSS: NVIDIA's license does not allow it in an open-source release. Only builds made from source with your own copy of NVIDIA's DLSS SDK can use it.</p>
           </li>
           <li class="feat">
+            <h3>Settings in game</h3>
+            <p>Every setting of the port lives in a game-style menu, opened from the game's own Options screen (PC Options; Device Options on Android), with F10, or with Back+Start held together. It works with a controller, keyboard, mouse and touch. Changes apply at once where possible, and rows that need a restart say so. It saves only what you change into <code>gow2.toml</code> and keeps its comments. On Windows it can open the router ports for internet play from the menu.</p>
+            <figure class="feat__figure">
+              <a href="screenshots/pc-options.jpg">
+                <img src="assets/img/pc-options-800.webp"
+                  srcset="assets/img/pc-options-800.webp 800w, assets/img/pc-options-1600.webp 1600w"
+                  sizes="(min-width: 901px) 26rem, 100vw"
+                  width="800" height="450" loading="lazy" decoding="async"
+                  alt="The port's PC Options menu open over the dimmed game, showing the Display tab with rows for window mode, monitor, window size, graphics card, VSync and the frame-rate unlock">
+              </a>
+              <figcaption>PC Options: every setting of the port in a game-style menu.</figcaption>
+            </figure>
+          </li>
+          <li class="feat">
             <h3>Campaign co-op over System Link</h3>
             <p>Up to four players in the campaign on PC; a PC and an Android phone have joined for two-player co-op. It is off by default: set <code>net_link_active = true</code> on every player's copy for two players, or <code>gow2_coop_players = 3</code> or <code>4</code> for more. Verified with four copies on one PC, and with a PC and an Android phone on one LAN. Playing over the internet is experimental: the host opens two UDP ports and friends join with <code>net_peers</code>; a phone on mobile data has joined a PC host this way (<a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">guide</a>).</p>
             <div class="feat__keys"><span class="chip">net_link_active</span><span class="chip">gow2_coop_players</span><span class="chip">net_peers</span></div>
@@ -371,7 +385,7 @@
         <div class="section-head">
           <p class="eyebrow">Status</p>
           <h2 id="status-title">Act 1 is playable. The rest is in progress.</h2>
-          <p class="status__stamp">v0.1.2 · October 2026</p>
+          <p class="status__stamp">v0.2.0 · October 2026</p>
         </div>
         <div class="status__grid">
           <div class="panel plate">
@@ -399,12 +413,12 @@
             </ul>
           </div>
           <div class="panel plate issues">
-            <h3>Known issues in 0.1.2</h3>
+            <h3>Known issues in 0.2.0</h3>
             <ul role="list">
               <li><strong>Hints show Xbox button pictures.</strong> Menu prompts show keyboard keys ([Space], [E]...) unless a controller is connected at launch (<code>gow2_prompts</code>); the button pictures inside in-game hints are still the Xbox ones.</li>
               <li><strong>Green-looking lighting.</strong> It has been reported on one PC and could not be reproduced yet. <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/issues">Screenshots in an issue</a> help.</li>
               <li><strong>Co-op with three or four players is new.</strong> Stage 2 was tested with four copies on one PC: players 3 and 4 keep their bodies and weapons through chapter changes and travel, respawn, leave and rejoin, return after checkpoint loads, hide during cinematics, stay unharmed on foot while a hero rides, and are moved next to Marcus or Dom by the host when left far behind. Co-op splits, getting out of a vehicle, the Ride-Reaver section, joining during a cinematic, long real combat, four PCs over a LAN or the internet, and Android with 3+ players have not been tried.</li>
-              <li><strong>Every player needs the same release.</strong> Everyone must run v0.1.2; with three or more players, campaigns with different co-op hashes stay hidden, while two-player co-op has no check and v0.1.1 is expected to crash at the end of Act 1 chapter 2.</li>
+              <li><strong>Every player needs the same release.</strong> Everyone should run 0.2.0: the network code and co-op patches are those of 0.1.2, but mixed versions have not been tried. With three or more players, campaigns with different co-op hashes stay hidden, while two-player co-op has no check and v0.1.1 is expected to crash at the end of Act 1 chapter 2.</li>
             </ul>
           </div>
         </div>
@@ -522,7 +536,17 @@
           <details>
             <summary>Is there an Android or Linux version?</summary>
             <div class="faq__answer">
-              <p>Experimental: the v0.1.2 release attaches an Android APK (arm64, Android 10+, you copy your own game files to the phone), but it is not a finished port yet. On a Samsung Galaxy S25 Ultra a build from the repository reaches gameplay with touch controls and joins a PC's System Link campaign. The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm. The plan and status are in <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
+              <p>Experimental: the v0.2.0 release attaches an Android APK (arm64, Android 10+, you copy your own game files to the phone), but it is not a finished port yet. On a Samsung Galaxy S25 Ultra a build from the repository reaches gameplay with touch controls and joins a PC's System Link campaign. The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm. The in-game settings menu is called Device Options on Android. The plan and status are in <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
+              <figure class="feat__figure">
+                <a href="screenshots/device-options.jpg">
+                  <img src="assets/img/device-options-800.webp"
+                    srcset="assets/img/device-options-800.webp 800w, assets/img/device-options-1600.webp 1600w"
+                    sizes="(min-width: 901px) 26rem, 100vw"
+                    width="800" height="369" loading="lazy" decoding="async"
+                    alt="The port's Device Options menu on Android, showing the Display tab with rows for VSync, the frame-rate unlock and the display refresh rate">
+                </a>
+                <figcaption>Device Options on Android: the same menu, driven by touch.</figcaption>
+              </figure>
               <p>A Linux x64 build with Vulkan is planned as the first non-Windows target.</p>
             </div>
           </details>

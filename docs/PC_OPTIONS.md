@@ -7,7 +7,12 @@ On Android, the menu and its entry on the game's Options screen are called
 "Device Options" ("Opciones del dispositivo" in Spanish). Windows keeps
 "PC Options" ("Opciones de PC" in Spanish). Everything else is the same menu.
 
-Verified in game on a PC on 2026-10-16. Android: see the Touch tab below.
+Verified in game on a PC on 2026-10-16. Verified on a Galaxy S25 Ultra
+on 2026-10-16: the gear and the game's Options > Device Options open
+the menu (log `PCOPTIONS open (gear)` / `(game-menu)`); tabs and
+arrows work by touch; Save wrote `gow2_touch_opacity` into
+files/gow2.toml keeping its comment; the menu follows the phone's
+language (persist.sys.locale).
 
 ## Opening it
 
@@ -216,3 +221,12 @@ selector call with the UI flag (0x200) runs the command cvar
 `gow2_pc_options_modal`, which opens this menu and waits; the boot-time call
 (flags 0) stays headless. The game is told through the system-UI
 notification (XN_SYS_UI) while the menu is open.
+
+## Known limits
+
+- Back + Start also reaches the game during the 300 ms before the menu
+  opens, so the game may open its pause menu underneath.
+- In two of the twelve languages on the phone, the renamed Options
+  entry did not fit its bundle and keeps the game's own text; the
+  button still opens the menu.
+- Controller remapping is the game's own Options > Controller layouts.

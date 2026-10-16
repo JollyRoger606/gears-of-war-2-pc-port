@@ -17,6 +17,7 @@ Read in English: [README.md](README.md)
 
 ![Pantalla de título](docs/screenshots/title.jpg)
 ![Menú principal](docs/screenshots/main-menu.jpg)
+![Menú de opciones de PC](docs/screenshots/pc-options.jpg)
 ![Acto 1, Jacinto Med](docs/screenshots/act1-jacintomed.jpg)
 ![Acto 1 con renderizado interno 4K (resolution_scale = 3)](docs/screenshots/act1-4k-internal.jpg)
 
@@ -39,7 +40,7 @@ Read in English: [README.md](README.md)
 - [ ] Campaña completa de principio a fin
 - [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15; Etapa 2 (cambios de capítulo, muertes, salida y reingreso, puntos de control y cinemáticas) verificada con cuatro copias en un mismo PC el 2026-10-16
 - [x] Juego por internet, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): un teléfono con datos móviles se unió a una campaña alojada en un PC a través de puertos abiertos por UPnP, verificado el 2026-10-15; todavía no se probó con un amigo en otro PC fuera de la red
-- [x] Menú de opciones en el juego ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): PC verificado el 2026-10-16; Android: see docs/PC_OPTIONS.md
+- [x] Menú de opciones en el juego (Opciones de PC; Opciones del dispositivo en Android) ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): verificado en un PC y en un Galaxy S25 Ultra el 2026-10-16
 - [ ] Horda y Versus por System Link
 - [ ] Android: una compilación del repositorio llega a jugar y se une a la campaña de un PC por System Link, pero todavía no está terminado; la release v0.1.2 trae un APK experimental. Toda la escena se dibuja desde el 15 de octubre; corre a unos 30 fps durante los primeros minutos desde un arranque en frío y baja a unos 10-12,5 fps cuando el teléfono está caliente ([docs/ANDROID.md](docs/ANDROID.md))
 

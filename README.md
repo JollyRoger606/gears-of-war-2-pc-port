@@ -17,6 +17,7 @@ Leer en español: [README.es.md](README.es.md)
 
 ![Title screen](docs/screenshots/title.jpg)
 ![Main menu](docs/screenshots/main-menu.jpg)
+![PC Options menu](docs/screenshots/pc-options.jpg)
 ![Act 1, Jacinto Med](docs/screenshots/act1-jacintomed.jpg)
 ![Act 1 with 4K internal rendering (resolution_scale = 3)](docs/screenshots/act1-4k-internal.jpg)
 
@@ -39,7 +40,7 @@ Leer en español: [README.es.md](README.es.md)
 - [ ] Full campaign play-through
 - [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four copies on one PC (loopback), and a PC with an Android phone on one LAN for two players, verified 2026-10-14 and 2026-10-15; Stage 2 (chapter changes, deaths, leave/rejoin, checkpoints, cinematics) verified with four copies on one PC on 2026-10-16
 - [x] Internet play, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): a phone on mobile data joined a PC-hosted campaign through ports opened by UPnP, verified 2026-10-15; a PC friend outside the network has not been tried yet
-- [x] In-game options menu ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): PC verified 2026-10-16; Android: see docs/PC_OPTIONS.md
+- [x] In-game options menu (PC Options; Device Options on Android) ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): verified on a PC and on a Galaxy S25 Ultra on 2026-10-16
 - [ ] System Link Horde and Versus
 - [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but is not finished yet; an experimental APK is attached to the v0.1.2 release. The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm ([docs/ANDROID.md](docs/ANDROID.md))
 

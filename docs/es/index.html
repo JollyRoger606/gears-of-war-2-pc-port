@@ -76,7 +76,7 @@
         "url": "https://santiquiroz.github.io/gears-of-war-2-pc-port/",
         "applicationCategory": "GameApplication",
         "operatingSystem": "Windows 10, Windows 11 (x64)",
-        "softwareVersion": "0.1.2",
+        "softwareVersion": "0.2.0",
         "datePublished": "2026-10-15",
         "softwareRequirements": "A DirectX 12 GPU and your own retail Xbox 360 copy of Gears of War 2 (title ID 4D53082D)",
         "downloadUrl": "https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest",
@@ -176,7 +176,7 @@
             <a class="btn btn--primary" href="https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest">
               <svg aria-hidden="true"><use href="#i-download"/></svg>
               Descargar para Windows
-              <span class="btn__meta">v0.1.2</span>
+              <span class="btn__meta">v0.2.0</span>
             </a>
             <a class="btn btn--ghost" href="https://github.com/santiquiroz/gears-of-war-2-pc-port">
               <svg aria-hidden="true"><use href="#i-star"/></svg>
@@ -331,6 +331,20 @@
             <p>La versión publicada no trae DLSS: la licencia de NVIDIA no lo permite en una versión de código abierto. Solo las compilaciones hechas desde el código fuente con tu propia copia del SDK de DLSS de NVIDIA pueden usarlo.</p>
           </li>
           <li class="feat">
+            <h3>Ajustes en el juego</h3>
+            <p>Todos los ajustes del port viven en un menú al estilo del juego, que se abre desde la propia pantalla de Opciones del juego (Opciones de PC; Opciones del dispositivo en Android), con F10 o con Back+Start juntos. Funciona con mando, teclado, mouse y táctil. Los cambios se aplican al instante donde es posible, y las filas que necesitan reinicio lo indican. Solo guarda en <code>gow2.toml</code> lo que cambias y conserva sus comentarios. En Windows puede abrir los puertos del router para el juego por internet desde el menú.</p>
+            <figure class="feat__figure">
+              <a href="../screenshots/pc-options.jpg">
+                <img src="../assets/img/pc-options-800.webp"
+                  srcset="../assets/img/pc-options-800.webp 800w, ../assets/img/pc-options-1600.webp 1600w"
+                  sizes="(min-width: 901px) 26rem, 100vw"
+                  width="800" height="450" loading="lazy" decoding="async"
+                  alt="El menú de Opciones de PC del port abierto sobre el juego atenuado, con la pestaña de pantalla y filas para el modo de ventana, el monitor, el tamaño de la ventana, la tarjeta gráfica, la sincronización vertical y el desbloqueo de FPS">
+              </a>
+              <figcaption>Opciones de PC: todos los ajustes del port en un menú al estilo del juego.</figcaption>
+            </figure>
+          </li>
+          <li class="feat">
             <h3>Campaña cooperativa por System Link</h3>
             <p>Hasta cuatro jugadores en la campaña en PC; un PC y un teléfono Android se han unido para el cooperativo de dos jugadores. Viene apagada: pon <code>net_link_active = true</code> en la copia de cada jugador para dos jugadores, o <code>gow2_coop_players = 3</code> o <code>4</code> para más. Verificada con cuatro copias en un mismo PC, y con un PC y un teléfono Android en la misma LAN. El juego por internet es experimental: el anfitrión abre dos puertos UDP y los amigos se unen con <code>net_peers</code>; un teléfono con datos móviles ya se unió así a un PC anfitrión (<a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ONLINE.md">guía, en inglés</a>).</p>
             <div class="feat__keys"><span class="chip">net_link_active</span><span class="chip">gow2_coop_players</span><span class="chip">net_peers</span></div>
@@ -371,7 +385,7 @@
         <div class="section-head">
           <p class="eyebrow">Estado</p>
           <h2 id="status-title">El acto 1 se puede jugar. El resto está en progreso.</h2>
-          <p class="status__stamp">v0.1.2 · octubre de 2026</p>
+          <p class="status__stamp">v0.2.0 · octubre de 2026</p>
         </div>
         <div class="status__grid">
           <div class="panel plate">
@@ -399,12 +413,12 @@
             </ul>
           </div>
           <div class="panel plate issues">
-            <h3>Problemas conocidos en la 0.1.2</h3>
+            <h3>Problemas conocidos en la 0.2.0</h3>
             <ul role="list">
               <li><strong>Las pistas muestran imágenes de botones de Xbox.</strong> Los menús muestran las teclas ([Espacio], [E]...) salvo que haya un mando conectado al arrancar (<code>gow2_prompts</code>); las imágenes de botones dentro de las pistas del juego siguen siendo las de Xbox.</li>
               <li><strong>Iluminación verdosa.</strong> Se reportó en un PC y todavía no se ha podido reproducir. Ayudan las <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/issues">capturas en un issue</a>.</li>
               <li><strong>El cooperativo de tres o cuatro jugadores es nuevo.</strong> La Etapa 2 se probó con cuatro copias en un mismo PC: los jugadores 3 y 4 conservan sus cuerpos y armas al cambiar de capítulo y viajar, reaparecen al morir, salen y vuelven a unirse, se restauran al cargar puntos de control, se ocultan durante las cinemáticas, no reciben daño a pie mientras un héroe conduce y el anfitrión los lleva junto a Marcus o Dom si quedan muy atrás. No se han probado las pantallas divididas, salir de un vehículo, la sección Ride-Reaver, unirse durante una cinemática, combates reales prolongados, cuatro PC por LAN o internet ni Android con 3 o más jugadores.</li>
-              <li><strong>Todos los jugadores necesitan la misma versión publicada.</strong> Todos deben usar la 0.1.2; con tres o más jugadores, las campañas con hashes cooperativos distintos permanecen ocultas, mientras que en cooperativo de dos jugadores no hay comprobación y se espera que la 0.1.1 falle al final del capítulo 2 del Acto 1.</li>
+              <li><strong>Todos los jugadores necesitan la misma versión publicada.</strong> Todos deberían usar la 0.2.0: el código de red y los parches cooperativos son los de la 0.1.2, pero no se han probado versiones mezcladas. Con tres o más jugadores, las campañas con hashes cooperativos distintos permanecen ocultas, mientras que en cooperativo de dos jugadores no hay comprobación y se espera que la 0.1.1 falle al final del capítulo 2 del Acto 1.</li>
             </ul>
           </div>
         </div>
@@ -522,7 +536,17 @@
           <details>
             <summary>¿Hay versión para Android o Linux?</summary>
             <div class="faq__answer">
-              <p>Experimental: la release v0.1.2 trae un APK de Android (arm64, Android 10+, copias tus propios archivos del juego al teléfono), pero todavía no es un port terminado. En un Samsung Galaxy S25 Ultra, una compilación del repositorio llega a jugar con controles táctiles y se une a la campaña por System Link de un PC. Toda la escena se dibuja desde el 15 de octubre; corre a unos 30 fps durante los primeros minutos desde un arranque en frío y baja a unos 10-12,5 fps cuando el teléfono está caliente. El plan y el estado están en <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
+              <p>Experimental: la release v0.2.0 trae un APK de Android (arm64, Android 10+, copias tus propios archivos del juego al teléfono), pero todavía no es un port terminado. En un Samsung Galaxy S25 Ultra, una compilación del repositorio llega a jugar con controles táctiles y se une a la campaña por System Link de un PC. Toda la escena se dibuja desde el 15 de octubre; corre a unos 30 fps durante los primeros minutos desde un arranque en frío y baja a unos 10-12,5 fps cuando el teléfono está caliente. El menú de ajustes en el juego se llama Opciones del dispositivo en Android. El plan y el estado están en <a href="https://github.com/santiquiroz/gears-of-war-2-pc-port/blob/master/docs/ANDROID.md">docs/ANDROID.md</a>.</p>
+              <figure class="feat__figure">
+                <a href="../screenshots/device-options.jpg">
+                  <img src="../assets/img/device-options-800.webp"
+                    srcset="../assets/img/device-options-800.webp 800w, ../assets/img/device-options-1600.webp 1600w"
+                    sizes="(min-width: 901px) 26rem, 100vw"
+                    width="800" height="369" loading="lazy" decoding="async"
+                    alt="El menú de Opciones del dispositivo del port en Android, con la pestaña de pantalla y filas para la sincronización vertical, el desbloqueo de FPS y la frecuencia de pantalla">
+                </a>
+                <figcaption>Opciones del dispositivo en Android: el mismo menú, manejado por táctil.</figcaption>
+              </figure>
               <p>Una versión para Linux x64 con Vulkan está planeada como el primer destino fuera de Windows.</p>
             </div>
           </details>
