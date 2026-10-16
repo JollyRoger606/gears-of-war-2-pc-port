@@ -127,16 +127,29 @@ def test_cb4_tail():
     row = spb.ROWS["CB-4"]
     model = model_with_refs(refs_of_script_row(row))
     tail = sp._assemble_tail(model, row.grow, row.id)
-    assert len(tail) == 164
-    assert tail[0:3] == bytes.fromhex("07 02 21")
-    assert tail[0x15:0x18] == bytes.fromhex("07 01 DB")
-    assert tail[0x5B:0x5E] == bytes.fromhex("07 02 21")
+    assert len(tail) == 274
+    assert tail[0:3] == bytes.fromhex("07 02 8F")
+    assert tail[0x83:0x86] == bytes.fromhex("07 02 49")
+    assert tail[0xC9:0xCC] == bytes.fromhex("07 02 8F")
     assert tail[-5:] == bytes.fromhex("27 16 04 0B 53")
     model, handle, plan = plan_on_filled(row)
     new = plan.new
-    assert len(new) == 548
+    assert len(new) == 658
     assert new[:0x180] == model.scripts[handle].data[:0x180]
-    assert spb.row_lines([plan]) == [f"CB-4 {spb.RESTART.path}: script grown to 548 bytes"]
+    assert spb.row_lines([plan]) == [f"CB-4 {spb.RESTART.path}: script grown to 658 bytes"]
+
+
+def test_cb4_tail_guards_extras():
+    tail = spb.CB4_TAIL
+    first_find = next(i for i, p in enumerate(tail) if p == spb.FIND_INVENTORY)
+    before_refs = [p for p in tail[:first_find] if isinstance(p, sp.Ref)]
+    assert spb.GEAR_PC in before_refs
+    assert spb.DEFAULT_PAWN_CLASS in before_refs
+    assert spb.M in before_refs
+    assert spb.D in before_refs
+    raw_before = b"".join(p.data for p in tail[:first_find] if isinstance(p, sp.Raw))
+    assert b"\x2e" in raw_before
+    assert b"\x2a" in raw_before
 
 
 def test_cb5_edits():
@@ -174,6 +187,17 @@ def test_cr2_tail_layout():
     assert new[0x11D:0x11F] == bytes.fromhex("01 BF")
     assert new[0x11F:0x122] == bytes.fromhex("07 01 BE")
     assert new[0x1BB:0x1C3] == bytes.fromhex("4A 4A 16 31 30 04 0B 53")
+
+
+def test_cr3_tail_layout():
+    _, _, plan = plan_on_filled(spb.ROWS["CR-3"])
+    new = plan.new
+    assert len(new) == 532
+    assert new[0x1D] == 0x06
+    assert new[0x1F] == 0xCB
+    assert new[0x1CB:0x1CE] == bytes.fromhex("07 01 C7")
+    assert new[0x210:0x213] == bytes.fromhex("06 00 2C")
+    assert new[0x213] == 0x53
 
 
 def cb1_setup():
@@ -227,7 +251,7 @@ def test_group_composition():
     assert [r.id for r in spb.coop_body_rows()] == ["CB-3", "CB-4", "CB-5", "CB-1", "CB-2"]
     assert [r.id for r in spb.coop_body_rows(carmine=True)] == ["CB-3c", "CB-4", "CB-5", "CB-1", "CB-2"]
     assert [r.id for r in spb.coop_body_rows(marcus_clones=True)] == ["CB-4", "CB-5", "CB-1", "CB-2"]
-    assert [r.id for r in spb.coop_ride_rows()] == ["CR-1", "CR-2"]
+    assert [r.id for r in spb.coop_ride_rows()] == ["CR-1", "CR-2", "CR-3"]
 
 
 def test_forced_export_path():

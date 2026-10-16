@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir
 import script_patch as sp
+import script_patch_survival as sv
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,9 @@ EXIT_TURRET = sp.Ref("GearGame.GearPawn.OnGearExitVehicle.GT", "ObjectProperty")
 PAWN_CONTROLLER = sp.Ref("Engine.Pawn.Controller", "ObjectProperty")
 TELEPORT_SPOT = sp.Ref("GearGame.GearPC.FindAvailableTeleportSpot", "Function")
 M, D, GP, COG_GEAR = sp.MARCUS, sp.DOM, sp.GEAR_PAWN, sp.COG_GEAR
+SYNC = sp.Ref("GearGame.GearGameSP_Base.SyncKismetSetProperties", "Function")
+OTHER_PC = sp.Ref("GearGame.GearGameSP_Base.SyncKismetSetProperties.OtherPC", "ObjectProperty")
+SYNC_PC = sp.Ref("GearGame.GearGameSP_Base.SyncKismetSetProperties.PC", "ObjectProperty")
 
 
 def raw(hex_text):
@@ -165,18 +169,64 @@ RETURN_COG_GEAR = (sp.ByteEdit(0x101, 0x13, 0x20),)
 COG_GEAR_OPERAND = (sp.OperandEdit(0x102, GP, COG_GEAR),)
 CB3C_CHECKS = SUGGEST_GROWN_CHECKS[:2] + (sp.Check(0x84, b"\x07"),) + SUGGEST_GROWN_CHECKS[2:]
 
-CB4_TAIL = (
-    raw("07 02 21 77 19 00"), NEW_PLAYER, raw("00 05 00 04 01"), PAWN,
-    raw("2a 16 07 01 db 72 19 19 00"), NEW_PLAYER, raw("00 05 00 04 01"), PAWN,
-    raw("00 0c 00 04 1c"), FIND_INVENTORY, raw("20"), PISTOL,
-    raw("4a 16 2a 16 19 19 00"), NEW_PLAYER, raw("00 05 00 04 01"), PAWN,
-    raw("00 0c 00 04 1c"), CREATE_INVENTORY, raw("20"), PISTOL,
-    raw("27 16 07 02 21 72 19 19 00"), NEW_PLAYER, raw("00 05 00 04 01"), PAWN,
-    raw("00 0c 00 04 1c"), FIND_INVENTORY, raw("20"), SHOTGUN,
-    raw("4a 16 2a 16 19 19 00"), NEW_PLAYER, raw("00 05 00 04 01"), PAWN,
-    raw("00 0c 00 04 1c"), CREATE_INVENTORY, raw("20"), SHOTGUN,
-    raw("27 16 04 0b 53"),
-)
+
+def _cast_new_player_to_gearpc():
+    return sv.R(b"\x2E") + (GEAR_PC,) + sv.local(NEW_PLAYER)
+
+
+def _new_player_pawn():
+    return sv.ctx(sv.local(NEW_PLAYER), sv.inst(PAWN), 4)
+
+
+def _new_player_default_pawn_class():
+    return sv.ctx(_cast_new_player_to_gearpc(), sv.inst(DEFAULT_PAWN_CLASS), 4)
+
+
+def _cb4_spawn_guard():
+    cast_ok = sv.ne(_cast_new_player_to_gearpc(), sv.NONE)
+    return sv.and_(sv.and_(cast_ok, sv.is_extra(_new_player_default_pawn_class())),
+                   sv.ne(_new_player_pawn(), sv.NONE))
+
+
+def _pawn_find_inventory(weapon):
+    member = sv.R(b"\x1C") + (FIND_INVENTORY,) + sv.objconst(weapon) + sv.R(b"\x4A\x16")
+    return sv.ctx(_new_player_pawn(), member, 4)
+
+
+def _pawn_create_inventory(weapon):
+    member = sv.R(b"\x1C") + (CREATE_INVENTORY,) + sv.objconst(weapon) + sv.R(b"\x27\x16")
+    return sv.ctx(_new_player_pawn(), member, 4)
+
+
+CB4_TAIL, _CB4_LABELS, CB4_GROWN_SIZE = sv.assemble(0x0180, [
+    (None, lambda L: sv.jumpifnot(L["RET"], _cb4_spawn_guard())),
+    (None, lambda L: sv.jumpifnot(L["GNASHER"], sv.eq(_pawn_find_inventory(PISTOL), sv.NONE))),
+    (None, lambda L: _pawn_create_inventory(PISTOL)),
+    ("GNASHER", lambda L: sv.jumpifnot(L["RET"], sv.eq(_pawn_find_inventory(SHOTGUN), sv.NONE))),
+    (None, lambda L: _pawn_create_inventory(SHOTGUN)),
+    ("RET", lambda L: sv.R(b"\x04\x0B")),
+    (None, lambda L: sv.R(b"\x53")),
+])
+
+
+def _other_default_pawn_class():
+    return sv.ctx(sv.local(OTHER_PC), sv.inst(DEFAULT_PAWN_CLASS), 4)
+
+
+def _other_is_hero():
+    return sv.or_(sv.eq(_other_default_pawn_class(), sv.objconst(M)),
+                  sv.eq(_other_default_pawn_class(), sv.objconst(D)))
+
+
+def _sync_keep_other():
+    return sv.and_(sv.ne(sv.local(OTHER_PC), sv.local(SYNC_PC)), _other_is_hero())
+
+
+CR3_TAIL, _CR3_LABELS, CR3_GROWN_SIZE = sv.assemble(0x01CB, [
+    (None, lambda L: sv.jumpifnot(0x01C7, _sync_keep_other())),
+    (None, lambda L: sv.jump(0x002C)),
+    (None, lambda L: sv.R(b"\x53")),
+])
 
 CR1_TAIL = (
     raw("07 01 6e 2d 00"), ENTERED,
@@ -232,7 +282,7 @@ ROWS = {
     "CB-3c": sp.ScriptRow("CB-3c", "players 3+ are Ben Carmine where FindObject finds him, else GearPawn_COGGear",
         SUGGEST, 318, checks=CB3C_CHECKS, operands=SUGGEST_GROWN_OPERANDS,
         byte_edits=RETURN_COG_GEAR, operand_edits=COG_GEAR_OPERAND),
-    "CB-4": sp.ScriptRow("CB-4", "after every player spawn: give GearWeap_COGPistol and GearWeap_Shotgun when missing",
+    "CB-4": sp.ScriptRow("CB-4", "after a player 3+ spawns (a GearPC whose DefaultPawnClass is not None, Marcus or Dom): give GearWeap_COGPistol and GearWeap_Shotgun when missing",
         RESTART, 387,
         checks=(sp.Check(0x00, bytes.fromhex("1C")), sp.Check(0x05, bytes.fromhex("00")),
                 sp.Check(0x0A, bytes.fromhex("16")),
@@ -244,7 +294,7 @@ ROWS = {
         operands=(sp.Operand(0x01, sp.Ref("Engine.GameInfo.RestartPlayer", "Function")),
                   sp.Operand(0x06, NEW_PLAYER), sp.Operand(0x11, NEW_PLAYER),
                   sp.Operand(0x1A, PAWN)),
-        grow=sp.Grow(0x0180, 548, CB4_TAIL)),
+        grow=sp.Grow(0x0180, CB4_GROWN_SIZE, CB4_TAIL)),
     "CB-5": sp.ScriptRow("CB-5", "a joiner who is not Dom spawns at once: LocalPlayer(PC.Player) != None -> class<GearPawn_COGDom>(PC.DefaultPawnClass) == None",
         POST_LOGIN, 1690,
         checks=(sp.Check(0x3A4, bytes.fromhex("07 03 DD 84 81 2D 00")),
@@ -292,9 +342,29 @@ ROWS = {
                   sp.Operand(0x7A, EXIT_ACTION), sp.Operand(0x8C, EXIT_VEHICLE),
                   sp.Operand(0xBE, EXIT_VEHICLE)),
         grow=sp.Grow(0x00D5, 451, CR2_TAIL)),
+    "CR-3": sp.ScriptRow("CR-3", "a joiner copies Kismet's cinematic and god-mode flags from Marcus or Dom, never from a player 3+",
+        SYNC, 460,
+        checks=(sp.Check(0x00, bytes.fromhex("2F 19 01")),
+                sp.Check(0x07, bytes.fromhex("01 BD 00 00 1C")),
+                sp.Check(0x10, bytes.fromhex("20")),
+                sp.Check(0x15, bytes.fromhex("00")),
+                sp.Check(0x1A, bytes.fromhex("16 01 C8")),
+                sp.Check(0x1E, bytes.fromhex("01")),
+                sp.Check(0x20, bytes.fromhex("77 00")),
+                sp.Check(0x26, bytes.fromhex("00")),
+                sp.Check(0x2B, bytes.fromhex("16 14")),
+                sp.Check(0x01C4, bytes.fromhex("06 01 C8 31 30 04 0B 53"))),
+        operands=(sp.Operand(0x03, WORLD_INFO),
+                  sp.Operand(0x0C, ALL_CONTROLLERS),
+                  sp.Operand(0x11, GEAR_PC),
+                  sp.Operand(0x16, OTHER_PC),
+                  sp.Operand(0x22, OTHER_PC),
+                  sp.Operand(0x27, SYNC_PC)),
+        byte_edits=(sp.ByteEdit(0x1D, 0x07, 0x06), sp.ByteEdit(0x1F, 0xC7, 0xCB)),
+        grow=sp.Grow(0x01CB, CR3_GROWN_SIZE, CR3_TAIL)),
 }
 
-ROW_ORDER = ("CB-1", "CB-2", "CB-3", "CB-3c", "CB-4", "CB-5", "CR-1", "CR-2")
+ROW_ORDER = ("CB-1", "CB-2", "CB-3", "CB-3c", "CB-4", "CB-5", "CR-1", "CR-2", "CR-3")
 
 
 def coop_body_rows(carmine=False, marcus_clones=False):
@@ -303,7 +373,7 @@ def coop_body_rows(carmine=False, marcus_clones=False):
 
 
 def coop_ride_rows():
-    return [ROWS["CR-1"], ROWS["CR-2"]]
+    return [ROWS["CR-1"], ROWS["CR-2"], ROWS["CR-3"]]
 
 
 def check_table():
@@ -371,7 +441,7 @@ def render_cpp():
         "PatchGroup CoopRideGroup() {",
         "  return {",
         '      .name = "coop-ride",',
-        "      .scripts = {RowCR_1(), RowCR_2()},",
+        "      .scripts = {RowCR_1(), RowCR_2(), RowCR_3()},",
         "  };",
         "}",
         "",
@@ -573,7 +643,7 @@ def check_package(pkg_dir, players):
     overlay = CoopOverlay(model, {e.handle: e.new for e in stage1.entries
                                   if isinstance(e, sp.ScriptPlan)})
     failed = False
-    for rid in ("CB-3", "CB-3c", "CB-4", "CB-5", "CR-1", "CR-2"):
+    for rid in ("CB-3", "CB-3c", "CB-4", "CB-5", "CR-1", "CR-2", "CR-3"):
         if not _check_script_row(ue3script, model, overlay, ROWS[rid], players):
             failed = True
     for rid in ("CB-1", "CB-2"):

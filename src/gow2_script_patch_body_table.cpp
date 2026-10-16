@@ -126,7 +126,7 @@ ScriptRow RowCB_3c() {
   };
 }
 
-// after every player spawn: give GearWeap_COGPistol and GearWeap_Shotgun when missing
+// after a player 3+ spawns (a GearPC whose DefaultPawnClass is not None, Marcus or Dom): give GearWeap_COGPistol and GearWeap_Shotgun when missing
 ScriptRow RowCB_4() {
   return {
       .id = "CB-4",
@@ -150,13 +150,39 @@ ScriptRow RowCB_4() {
       },
       .grow = GrowEdit{
           .keep = 0x0180,
-          .new_size = 548,
+          .new_size = 658,
           .tail = {
-              {.bytes = {0x07, 0x02, 0x21, 0x77, 0x19, 0x00}},
+              {.bytes = {0x07, 0x02, 0x8F, 0x82, 0x82, 0x77, 0x2E}},
+              {.object = {"GearGame.GearPC", "Class"}},
+              {.bytes = {0x00}},
+              {.object = {"GearGame.GearGame.RestartPlayer.NewPlayer", "ObjectProperty"}},
+              {.bytes = {0x2A, 0x16, 0x18, 0x00, 0x58, 0x82, 0x82, 0x77, 0x19, 0x2E}},
+              {.object = {"GearGame.GearPC", "Class"}},
+              {.bytes = {0x00}},
+              {.object = {"GearGame.GearGame.RestartPlayer.NewPlayer", "ObjectProperty"}},
+              {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
+              {.object = {"GearGame.GearPC.DefaultPawnClass", "ClassProperty"}},
+              {.bytes = {0x2A, 0x16, 0x18, 0x00, 0x1C, 0x77, 0x19, 0x2E}},
+              {.object = {"GearGame.GearPC", "Class"}},
+              {.bytes = {0x00}},
+              {.object = {"GearGame.GearGame.RestartPlayer.NewPlayer", "ObjectProperty"}},
+              {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
+              {.object = {"GearGame.GearPC.DefaultPawnClass", "ClassProperty"}},
+              {.bytes = {0x20}},
+              {.object = {"GearGame.GearPawn_COGMarcus", "Class"}},
+              {.bytes = {0x16, 0x16, 0x18, 0x00, 0x1C, 0x77, 0x19, 0x2E}},
+              {.object = {"GearGame.GearPC", "Class"}},
+              {.bytes = {0x00}},
+              {.object = {"GearGame.GearGame.RestartPlayer.NewPlayer", "ObjectProperty"}},
+              {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
+              {.object = {"GearGame.GearPC.DefaultPawnClass", "ClassProperty"}},
+              {.bytes = {0x20}},
+              {.object = {"GearGame.GearPawn_COGDom", "Class"}},
+              {.bytes = {0x16, 0x16, 0x16, 0x18, 0x00, 0x13, 0x77, 0x19, 0x00}},
               {.object = {"GearGame.GearGame.RestartPlayer.NewPlayer", "ObjectProperty"}},
               {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
               {.object = {"Engine.Controller.Pawn", "ObjectProperty"}},
-              {.bytes = {0x2A, 0x16, 0x07, 0x01, 0xDB, 0x72, 0x19, 0x19, 0x00}},
+              {.bytes = {0x2A, 0x16, 0x16, 0x07, 0x02, 0x49, 0x72, 0x19, 0x19, 0x00}},
               {.object = {"GearGame.GearGame.RestartPlayer.NewPlayer", "ObjectProperty"}},
               {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
               {.object = {"Engine.Controller.Pawn", "ObjectProperty"}},
@@ -172,7 +198,7 @@ ScriptRow RowCB_4() {
               {.object = {"Engine.Pawn.CreateInventory", "Function"}},
               {.bytes = {0x20}},
               {.object = {"GearGame.GearWeap_COGPistol", "Class"}},
-              {.bytes = {0x27, 0x16, 0x07, 0x02, 0x21, 0x72, 0x19, 0x19, 0x00}},
+              {.bytes = {0x27, 0x16, 0x07, 0x02, 0x8F, 0x72, 0x19, 0x19, 0x00}},
               {.object = {"GearGame.GearGame.RestartPlayer.NewPlayer", "ObjectProperty"}},
               {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
               {.object = {"Engine.Controller.Pawn", "ObjectProperty"}},
@@ -397,6 +423,62 @@ ScriptRow RowCR_2() {
   };
 }
 
+// a joiner copies Kismet's cinematic and god-mode flags from Marcus or Dom, never from a player 3+
+ScriptRow RowCR_3() {
+  return {
+      .id = "CR-3",
+      .function = {"GearGame.GearGameSP_Base.SyncKismetSetProperties", "Function"},
+      .script_size = 460,
+      .checks = {
+          {0x0000, {0x2F, 0x19, 0x01}},
+          {0x0007, {0x01, 0xBD, 0x00, 0x00, 0x1C}},
+          {0x0010, {0x20}},
+          {0x0015, {0x00}},
+          {0x001A, {0x16, 0x01, 0xC8}},
+          {0x001E, {0x01}},
+          {0x0020, {0x77, 0x00}},
+          {0x0026, {0x00}},
+          {0x002B, {0x16, 0x14}},
+          {0x01C4, {0x06, 0x01, 0xC8, 0x31, 0x30, 0x04, 0x0B, 0x53}},
+      },
+      .operands = {
+          {0x0003, {"Engine.Actor.WorldInfo", "ObjectProperty"}},
+          {0x000C, {"Engine.WorldInfo.AllControllers", "Function"}},
+          {0x0011, {"GearGame.GearPC", "Class"}},
+          {0x0016, {"GearGame.GearGameSP_Base.SyncKismetSetProperties.OtherPC", "ObjectProperty"}},
+          {0x0022, {"GearGame.GearGameSP_Base.SyncKismetSetProperties.OtherPC", "ObjectProperty"}},
+          {0x0027, {"GearGame.GearGameSP_Base.SyncKismetSetProperties.PC", "ObjectProperty"}},
+      },
+      .byte_edits = {
+          {0x001D, 0x07, 0x06},
+          {0x001F, 0xC7, 0xCB},
+      },
+      .grow = GrowEdit{
+          .keep = 0x01CB,
+          .new_size = 532,
+          .tail = {
+              {.bytes = {0x07, 0x01, 0xC7, 0x82, 0x77, 0x00}},
+              {.object = {"GearGame.GearGameSP_Base.SyncKismetSetProperties.OtherPC", "ObjectProperty"}},
+              {.bytes = {0x00}},
+              {.object = {"GearGame.GearGameSP_Base.SyncKismetSetProperties.PC", "ObjectProperty"}},
+              {.bytes = {0x16, 0x18, 0x00, 0x32, 0x84, 0x72, 0x19, 0x00}},
+              {.object = {"GearGame.GearGameSP_Base.SyncKismetSetProperties.OtherPC", "ObjectProperty"}},
+              {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
+              {.object = {"GearGame.GearPC.DefaultPawnClass", "ClassProperty"}},
+              {.bytes = {0x20}},
+              {.object = {"GearGame.GearPawn_COGMarcus", "Class"}},
+              {.bytes = {0x16, 0x18, 0x00, 0x17, 0x72, 0x19, 0x00}},
+              {.object = {"GearGame.GearGameSP_Base.SyncKismetSetProperties.OtherPC", "ObjectProperty"}},
+              {.bytes = {0x00, 0x05, 0x00, 0x04, 0x01}},
+              {.object = {"GearGame.GearPC.DefaultPawnClass", "ClassProperty"}},
+              {.bytes = {0x20}},
+              {.object = {"GearGame.GearPawn_COGDom", "Class"}},
+              {.bytes = {0x16, 0x16, 0x16, 0x06, 0x00, 0x2C, 0x53}},
+          },
+      },
+  };
+}
+
 }  // namespace
 
 PatchGroup CoopBodyGroup(bool carmine, bool marcus_clones) {
@@ -411,7 +493,7 @@ PatchGroup CoopBodyGroup(bool carmine, bool marcus_clones) {
 PatchGroup CoopRideGroup() {
   return {
       .name = "coop-ride",
-      .scripts = {RowCR_1(), RowCR_2()},
+      .scripts = {RowCR_1(), RowCR_2(), RowCR_3()},
   };
 }
 
