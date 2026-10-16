@@ -13,8 +13,9 @@ Stage 1 "coop" group, only when that group applied. It is gated by
 `gow2_coop_survival` (default true; false keeps Stage 1 only). Row S2A-4 is a
 separate group "split-revive", off by default (`gow2_coop_split_revive`). Every
 row is host-only logic: clients may run without it. With
-`gow2_coop_players=2` nothing is applied and the game stays retail; a two-player
-game with a v0.1.1 peer is unaffected.
+the default gow2_coop_players=2 nothing in this group runs. Every player must
+still run the same build: a v0.1.1 peer lacks the d074c0d codegen fix and is
+expected to crash at the chapter 2 -> 3 map commit even in two-player co-op [I].
 
 ## Who is an extra player (the hero test)
 
@@ -128,7 +129,7 @@ Notation follows [COOP_N_PLAYERS.md](COOP_N_PLAYERS.md) section 4. `[X]` is a
 |---|---|---|---|---|
 | S2A-1 | `GearGame.GearGameSP_Base.SpawnDefaultPawnFor` (162 -> 183) | +0x008C 95 -> A1 (the empty `if !(ResultPawn == None) goto 0x95` at +0x008A now jumps to the tail); keep 0x00A1 | +0x0061 `0F 00`, +0x0067 `1C`, +0x008A `07 00`, +0x008D `72 00`, +0x0093 `2A 16 04 00`, +0x009B `04 3A`, +0x00A1 `53`; operands +0x0063/+0x008F/+0x0097 ResultPawn, +0x0068 Engine.Actor.Spawn, +0x009D ReturnValue | Yes: players 3+ survive chapter travel |
 | S2A-2 | `GearGame.GearPC.ProcessGameOver` (64 -> 159) | whole function replaced (keep 0x0000) | +0x0000 `1B`, +0x0009 `16 2F 19 01`, +0x0011 `00 27 00 00 1C`, +0x001A `20`, +0x001F `00`, +0x0024 `16 00 3C 19 00`, +0x002D `00 0A 00 00 1B`, +0x003A `16 31 30 04 0B 53`; operands +0x000D Engine.Actor.WorldInfo, +0x0016 Engine.WorldInfo.AllControllers, +0x001B GearGame.GearPC, +0x0020/+0x0029 ProcessGameOver.PC | Yes: an extra's death no longer ends the game |
-| S2A-3 | `GearGame.GearPC.Destroyed` (1080 -> 1288) | +0x0064 00 -> 04, +0x0065 AD -> 37 (the JumpIfNot at +0x0063 now jumps to the tail at 0x0437); keep 0x0437 | +0x0063 `07`, +0x0066 `82 81 2D 01`, +0x00A4 `1C`, +0x00A9 `16 06 04 35 07 01 16 84 19 00`, +0x01B2 `0F 00`, +0x01B8 `01`, +0x01BD `1B`, +0x01C6 `16 0F 00`, +0x01CD `1C`, +0x01D2 `20`, +0x0435 `04 0B 53`; operands +0x006A bCheckpointDummy, +0x00A5 Engine.PlayerController.Destroyed, +0x00B3 Destroyed.Gear, +0x00BC GearPawn.IsDoingSpecialMove, +0x01B4 Destroyed.OldPawn, +0x01B9 Engine.Controller.Pawn, +0x01C9 Destroyed.AI, +0x01CE Engine.Actor.Spawn, +0x01D3 GearGame.GearAI_Dom | Yes: an extra leaving takes his body with him |
+| S2A-3 | `GearGame.GearPC.Destroyed` (1080 -> 1275) | +0x0064 00 -> 04, +0x0065 AD -> 37 (the JumpIfNot at +0x0063 now jumps to the tail at 0x0437); keep 0x0437 | +0x0063 `07`, +0x0066 `82 81 2D 01`, +0x00A4 `1C`, +0x00A9 `16 06 04 35 07 01 16 84 19 00`, +0x01B2 `0F 00`, +0x01B8 `01`, +0x01BD `1B`, +0x01C6 `16 0F 00`, +0x01CD `1C`, +0x01D2 `20`, +0x0435 `04 0B 53`; operands +0x006A bCheckpointDummy, +0x00A5 Engine.PlayerController.Destroyed, +0x00B3 Destroyed.Gear, +0x00BC GearPawn.IsDoingSpecialMove, +0x01B4 Destroyed.OldPawn, +0x01B9 Engine.Controller.Pawn, +0x01C9 Destroyed.AI, +0x01CE Engine.Actor.Spawn, +0x01D3 GearGame.GearAI_Dom | Yes: an extra leaving takes his body with him |
 | S2A-5 | `GearGame.GearPC.SaveCheckpoint` (392 -> 496) | +0x00D7..+0x00D9 `30 04 0B` -> `06 01 87` (the refusal jumps to the tail); keep 0x0187 | +0x0065 `2F 19 01`, +0x006C `00 6B 00 00 1C`, +0x0075 `20`, +0x007A `00`, +0x007F `16 00 DB 07 00 DA 84 19 00`, +0x00DA `31 30 0F 00`, +0x0185 `04 0B 53`; operands +0x0068 WorldInfo, +0x0071 AllControllers, +0x0076 GearGame.GearPC, +0x007B/+0x0088 SaveCheckpoint.PC, +0x0091 Engine.Actor.IsTimerActive | Should: checkpoints are not skipped while an extra waits to respawn |
 | S2A-4 | `GearGame.GearGame.TeamHasAnyChanceOfSurvival` (664 -> 854) | +0x025A 88 -> 97; keep 0x0297 | +0x0248 `0F 00`, +0x024E `2E`, +0x0253 `00`, +0x0258 `07 02`, +0x025B `82 82 77 00`, +0x0263 `2A 16 18 00 09 81 2D 01`, +0x026F `16 16 18 00 09 81 2D 01`, +0x027B `16 16 14 2D 00`, +0x0284 `27 06 02 89 31 30 04 2D 00`, +0x0291 `04 3A`, +0x0297 `53`; operands +0x024A/+0x025F PC, +0x024F GearGame.GearPC, +0x0254 C, +0x026B bInCoopSplit, +0x0277 bInSoloSplit, +0x0280/+0x028D bFoundReviver, +0x0293 ReturnValue | Optional (off): needs group B's squad handling in splits |
 
@@ -188,24 +189,35 @@ DPC = `GearGame.GearPC.DefaultPawnClass`.
 ### S2A-3 tail at +0x0437
 
 ```
-+0x0437 07 00 AD (condition: !bCheckpointDummy && DPC != None && DPC != Marcus && DPC != Dom && Gear.Class != Marcus && Gear.Class != Dom)   ; else goto 0x00AD, the retail branch
-+0x04A7 07 05 04 77 2E [GearPawn] 01 [Engine.Controller.Pawn] 2A 16   ; if !(GearPawn(Pawn) != None) goto 0x0504 (vehicle or turret: plain leave)
-+0x04B7 07 04 E6 84 (Gear.IsDoingSpecialMove(42)) 18 00 13 (Gear.IsDoingSpecialMove(43)) 16   ; if !(SM 42 || SM 43) goto 0x04E6
-+0x04E3 06 00 AD   ; mid special move: retail gib
-+0x04E6 0F 00 [Destroyed.OldPawn] 01 [Engine.Controller.Pawn]   ; OldPawn = Pawn
-+0x04F1 1C [GearPC.UnPossess] 16   ; UnPossess()
-+0x04F7 19 00 [OldPawn] 00 03 00 04 61 17 16   ; OldPawn.Destroy() (native 279)
-+0x0504 06 00 A4   ; plain leave: Super(PlayerController).Destroyed(); return
-+0x0507 53
+0437: if !((((((DefaultPawnClass != None) && (DefaultPawnClass != obj'GearPawn_COGMarcus')) && (DefaultPawnClass != obj'GearPawn_COGDom')) && (Gear.Class != obj'GearPawn_COGMarcus')) && (Gear.Class != obj'GearPawn_COGDom'))) goto 0xAD
+049A: if !((GearPawn(Pawn) != None)) goto 0x4F7
+04AA: if !((Gear.IsDoingSpecialMove(42) || Gear.IsDoingSpecialMove(43))) goto 0x4D9
+04D6: goto 0xAD
+04D9: OldPawn = Pawn
+04E4: UnPossess()
+04EA: OldPawn.Destroy()
+04F7: goto 0xA4
+04FA: <EndOfScript>
 ```
 
-- Heroes and dummies take the retail branch unchanged.
+- Heroes and Dom dummies take the retail branch unchanged.
 - An extra on foot is unpossessed and his pawn destroyed, then the plain leave
   runs. A vehicle or turret driver takes the plain leave directly
   (PlayerController.Destroyed kills the driver and S2A-2 swallows the resulting
   ProcessGameOver).
 - Mid special move 42/43 keeps the retail gib.
 - No AI Dom and no SeqEvent_CoopPlayerLeft for extras.
+
+Checkpoint dummies take the extras' branch now: after a player 3+ leaves or
+rejoins, the next checkpoint load restores his record as a dummy GearPC
+(`GearPC.ApplyCheckpointRecord+0x00CC` sets DefaultPawnClass from the record,
+`+0x026D` RestartPlayer spawns a GearPawn_COGGear body, `+0x0C3F` destroys the
+dummy). With the old `!bCheckpointDummy` term that dummy took retail's branch
+at 0x00AD, which spawns a GearAI_Dom on the body (+0x01C7) and fires every
+SeqEvent_CoopPlayerLeft (+0x031A/+0x034C), whose handlers act on the real Dom
+in 5 maps (SP_Intervention_10_S, SP_Nexis_7_SB, SP_Palace_BF, SP_Riftworm_4_S,
+SP_Sinkhole_03_S). A Dom dummy still gets the retail AI takeover (its
+DefaultPawnClass is Dom).
 
 ### S2A-5 tail at +0x0187
 
@@ -294,7 +306,11 @@ release build's flags. The game itself was not built or run for this group.
      new Dom pawn, player 2 keeps Dom, no game over. (b) rejoin: a fresh Ben and
      no orphan. (c) abrupt Stop-Process: the same after the host's connection
      timeout. (d) leave while driving/on a turret, if reachable. (e) control:
-     Dom leaves -> retail AI takeover.
+     Dom leaves -> retail AI takeover. (f) leave, then checkpoint reload: with 4
+     players, SaveCheckpoint on instance 1, stopone instance 4, wait for
+     XGISessionLeaveRemote on the host, kill the host, LOAD CHECKPOINT: no
+     GearAI_Dom on a GearPawn_COGGear and no orphan extra body in the census;
+     then rejoin.
    - S2A-5 best effort: instance 3 dies just before a Kismet checkpoint trigger,
      the host's HUD shows the saving icon, a forced wipe reloads there with all
      four.
@@ -319,6 +335,7 @@ release build's flags. The game itself was not built or run for this group.
 | 4 S2A-3 (c) | pass: host logged XGISessionLeaveRemote 45 s after the kill; leaver's pawn left the census 10 s after the leave | `out/stage2-test/3-leave-rejoin` |
 | 4 S2A-3 (d) | not run | - |
 | 4 S2A-3 (e) | not run | - |
+| 4 S2A-3 (f) | not run yet | - |
 | 4 S2A-5 | pass: with P4 Dead (pawn None) SaveCheckpoint wrote the save 0.1 s later | Stage 2 results item 2 |
 | 5 | not run | - |
 

@@ -15,7 +15,7 @@ The group holds 6 rows of server-side GearGame script. The rows live in
 
 It applies only when `gow2_coop_players` is 3..255 AND `gow2_coop_scenes` is true
 (default true). With the default `gow2_coop_players=2` the hook returns before any group,
-so the game stays byte-for-byte retail and v0.1.1 two-player peers are unaffected.
+so the game stays byte-for-byte retail. Every player must still run the same build: a v0.1.1 peer lacks the d074c0d codegen fix and is expected to crash at the chapter 2 -> 3 map commit even in two-player co-op [I].
 
 `gow2_coop_scene_probe` (default false) is a read-only diagnostic for test runs. Every 2 s it
 logs, when a line changes, each GearPC's DefaultPawnClass, `bCinematicMode`, `bInvisible`,
