@@ -35,6 +35,9 @@ set(GOW2_SOURCES
     src/gow2_engine_tick_hook.cpp
     src/gow2_dev_commands.cpp
     src/gow2_dev_guest_calls.cpp
+    src/gow2_dev_commands_hook.cpp
+    src/gow2_dev_host_verbs.cpp
+    src/gow2_dev_map_change.cpp
     src/gow2_dev_cheats.cpp
     src/gow2_dev_cheats_table.cpp
 )
