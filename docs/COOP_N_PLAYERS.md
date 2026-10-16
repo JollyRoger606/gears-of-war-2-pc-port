@@ -273,7 +273,11 @@ Decision: change UnrealScript bytecode and default objects in guest memory, from
      failed check leaks that one block; nothing, the new buffer included, is written before the
      whole group has passed. An edit after the kept prefix would be lost, so it is a table error:
      the group is skipped with `+0x0007 is past the kept prefix +0x0006`, and
-     `tools/script_patch.py` refuses to print such a row.
+     `tools/script_patch.py` refuses to print such a row. Rows may also keep
+     everything but the final EndOfScript and append code reached by redirecting a
+     literal jump word in the prefix (Stage 2), or replace a whole function (keep 0);
+     name and object operand bytes are never edited because their in-memory values are
+     only known at run time.
 - **Guest addresses.** Every read, write and copy goes through `src/gow2_guest.h`, which places a
   guest address where the runtime does. On Windows the heap at 0xE0000000 and above sits 0x1000
   higher in host memory (`PhysicalHostOffset` in the SDK's `xmemory.h`; a `static_assert` in the
@@ -607,17 +611,24 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
 
    [V chain; outcome I]
 
-   Fix: clear the flag on player pawns at spawn (in `SpawnDefaultPawnFor`, after the `Spawn` at
-   +0x0061). Do not clear it on the `COGGear` default object: AI squadmate classes loaded later
+   Fix: clear the flag on player pawns at spawn (in `SpawnDefaultPawnFor`, through the empty `if` at
+   +0x008A). Do not clear it on the `COGGear` default object: AI squadmate classes loaded later
    from map packages would inherit the change and survive transitions they are meant to die in.
-   [I]
+   [I] Clients never destroy a replicated pawn here: `DestroyActor` refuses non-authority actors
+   without `bNetForce`. [V]
+
+   Group A: rows S2A-1 and S2A-5 (checkpoints while an extra is dead), written and
+   checked offline; see [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md). Not yet run in game.
 2. **Game-over rules.**
    - In SP, any human PC that enters `Dead` arms `ProcessGameOver` (5 s, or 2 s in a crate section;
      `GearPC.Dead.BeginState`, DG:35009), which sends `ClientGameOver` to everyone.
    - `Dead.EndState` (DG:35040) calls `ProcessGameOver` at once when a remote PC is destroyed while
      the timer is armed.
-   - `EndGameCondition` (DG:64261) also ends the game when an AI-controlled pawn in the player squad
-     dies, on difficulties with `bAllowAICOGDeathWhenDBNO`.
+   - `EndGameCondition` (DG:64261) also ends the game when the AI-controlled Dom dies (any
+     difficulty) or, with `bAllowAICOGDeathWhenDBNO`, any AI pawn of the player squad; it arms a 2 s
+     `ProcessGameOver` on every GearPC.
+   - `CheckSurvivalChance` (+0x009F) and `Reviving.BeginState` (+0x011E) arm a 3 s
+     `ProcessGameOver` when a downed player can no longer be saved.
    - During co-op splits a human never counts as a reviver (`TeamHasAnyChanceOfSurvival+0x0258`).
 
    [V]
@@ -625,9 +636,13 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    Fix: extra players respawn near a teammate with a timed `RestartPlayer` instead of ending the
    game, while the heroes keep the original rule. During splits, allow a human of the same squad to
    revive.
+
+   Group A: row S2A-2 (and S2A-4 for split revives, off by default), written and checked
+   offline; see [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md). Not yet run in game.
 3. **Leaving.**
    - `GearPC.Destroyed` (DG:31254) hands the pawn of any leaving `COGGear`-derived player to a new
-     `GearAI_Dom` (+0x01C7) and fires every `SeqEvent_CoopPlayerLeft` (+0x031A).
+     `GearAI_Dom` (+0x01C7) and fires every `SeqEvent_CoopPlayerLeft` (searched at +0x031A,
+     activated at +0x034C).
    - The 14 handlers, in 5 maps, all act on the real Dom: teleport, god mode, map state.
    - A rejoining extra player spawns a fresh pawn, and the old AI-driven one stays in the world.
 
@@ -636,6 +651,9 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    Fix: keep the AI takeover and the event for Dom only. For an extra player, `UnPossess` first and
    then `Destroy` the pawn. A gib, or a `Destroy` while still possessed, goes through `PawnDied` and
    ends the game.
+
+   Group A: row S2A-3, written and checked offline; see
+   [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md). Not yet run in game.
 4. **Teleports.** 371 `SeqAct_Teleport` target links move only Marcus and/or Dom (213 + 157 + 1);
    48 target Player. [V counts]
 
