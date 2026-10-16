@@ -6,6 +6,7 @@
 #include "gow2_script_patches.h"
 #include "gow2_script_patch_groups.h"
 #include "gow2_script_patch_survival.h"
+#include "gow2_script_patch_body.h"
 #include "gow2_coop_census.h"
 #include "gow2_coop_network.h"
 
@@ -45,6 +46,17 @@ REXCVAR_DEFINE_BOOL(gow2_coop_survival, true, "Coop",
 REXCVAR_DEFINE_BOOL(gow2_coop_split_revive, false, "Coop",
                     "Debug, row S2A-4: in co-op splits a standing player 3+ of the downed "
                     "player's squad counts as a reviver");
+REXCVAR_DEFINE_BOOL(gow2_coop_extra_carmine, false, "Coop",
+                    "Players 3+ are Ben Carmine where his class is loaded (chapters 2, 5-11) and "
+                    "GearPawn_COGGear elsewhere; off makes them always GearPawn_COGGear with Dom's "
+                    "body, which exists in every chapter on every peer");
+REXCVAR_DEFINE_BOOL(gow2_coop_vehicle_ride, true, "Coop",
+                    "While Marcus or Dom rides a vehicle, players 3+ on foot cannot be hurt, and they "
+                    "are brought to him when he gets out (rows CR-1 and CR-2)");
+REXCVAR_DEFINE_BOOL(gow2_coop_body, true, "Coop",
+                    "Players 3+ get Dom's body on GearPawn_COGGear, the pistol and Gnasher at every "
+                    "spawn, and spawn without Right Trigger (rows CB-1 to CB-5); off keeps the "
+                    "Stage 1 behaviour");
 
 namespace rex::glue {
 
@@ -187,6 +199,35 @@ void ApplyRegisteredGroups(uint8_t* base, const script_patch::GuestAlloc& alloc,
   }
 }
 
+constexpr std::string_view kBodyFallback = "players 3+ keep the Stage 1 behaviour";
+constexpr std::string_view kRideFallback = "vehicles stay retail";
+
+void ApplyCoopBody(uint8_t* base, int players, const script_patch::GuestAlloc& alloc) {
+  if (!REXCVAR_GET(gow2_coop_body)) {
+    REXLOG_INFO("SCRIPTPATCH coop-body: off (gow2_coop_body=false)");
+    return;
+  }
+  const PatchGroup body =
+      script_patch::CoopBodyGroup(REXCVAR_GET(gow2_coop_extra_carmine),
+                                  REXCVAR_GET(gow2_coop_marcus_clones));
+  ApplyAndLogGroup(base, body, players, alloc, kBodyFallback);
+}
+
+void ApplyCoopFollowUps(uint8_t* base, bool coop_applied, int players,
+                        const script_patch::GuestAlloc& alloc) {
+  if (!coop_applied) {
+    REXLOG_INFO("SCRIPTPATCH coop-body: off (the coop group was not applied)");
+    REXLOG_INFO("SCRIPTPATCH coop-ride: off (the coop group was not applied)");
+    return;
+  }
+  ApplyCoopBody(base, players, alloc);
+  if (!REXCVAR_GET(gow2_coop_vehicle_ride)) {
+    REXLOG_INFO("SCRIPTPATCH coop-ride: off (gow2_coop_vehicle_ride=false)");
+    return;
+  }
+  ApplyAndLogGroup(base, script_patch::CoopRideGroup(), players, alloc, kRideFallback);
+}
+
 void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   REXLOG_INFO("SCRIPTPATCH startup script packages loaded");
   StartCoopCensus(base);
@@ -202,6 +243,7 @@ void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
   };
   const bool coop_applied = ApplyAndLogGroup(base, group, players, alloc, "the game stays retail");
   ApplySurvivalGroups(base, alloc, coop_applied, players);
+  ApplyCoopFollowUps(base, coop_applied, players, alloc);
   ApplyRegisteredGroups(base, alloc, coop_applied, players);
 }
 

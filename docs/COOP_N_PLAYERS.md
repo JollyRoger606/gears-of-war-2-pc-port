@@ -706,25 +706,129 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
 
    Fix: treat the extra classes as matching `TeleportClasses`.
 8. **Vehicles.** [V]
-   - The Centaur has 2 seats, and script checks `Centaur.Seats.Length == 2` (DG:108043).
-   - Each of the two Ride-Reavers has 2 seats.
-   - The Brumak has a single `HumanGunner`.
+   - `GearEnterVehicle` links target only the heroes, never Player: 6 Marcus, 6 Dom, 1 both.
+   - The Centaur has no free seat. Marcus drives and Dom rides in seat 1. Script checks
+     `Centaur.Seats.Length == 2` (DG:108043).
+   - Each Ride-Reaver has seat 1 free. The Crane has one seat. The Brumak has one `HumanGunner`.
+   - `SeqAct_GearExitVehicle` has no script. A hero exit ejects only the main driver.
+   - `PreCommitMapChange` makes every PC leave its vehicle.
+
+   [V, `out/c-body-re/vehicles-kismet.md`, `vehicles-script.md` in the worktree, not in the repo]
 
    Fix: put extras into free seats via `TryToDrive`; when none is free, use a hidden rider mode
    bound to the vehicle.
+
+   Status (2026-10-16, `stage2-c-body`): implemented as rows CR-1 and CR-2 of group `coop-ride`;
+   not run in the game yet. When a hero rides, each extra on foot gets god mode. When the hero
+   gets out, each extra loses it and appears next to him.
+
+   - The groups, their logs and the offline check are described under item 9.
+     `gow2_coop_vehicle_ride=false` turns `coop-ride` off. Success logs
+     `SCRIPTPATCH coop-ride: 2 rows applied for 4 players, set hash ...`; a failed check logs
+     `SCRIPTPATCH coop-ride: skipped (<row>: <reason>); vehicles stay retail`. Both patched
+     functions decode to their end (`OnGearEnterVehicle` 0x171, `OnGearExitVehicle` 0x1C3).
+     [V offline]
+   - CR-1 grows `GearPawn.OnGearEnterVehicle` (169 -> 369). When Marcus or Dom enters a
+     `GearVehicle`, every `GearPC` whose `DefaultPawnClass` is neither hero and whose pawn is a
+     `GearPawn` (an extra on foot) gets `bGodMode = true`. `GameInfo.ReduceDamage` zeroes damage
+     under god mode (DE:21463). `FellOutOfWorld` and `CurrentLevelUnloaded` pull such pawns back
+     without killing them.
+   - CR-2 grows `GearPawn.OnGearExitVehicle` (216 -> 451). When a hero gets out, every extra in
+     god mode loses it. Each is placed next to that hero with
+     `GearPC(Controller).FindAvailableTeleportSpot`.
+   - No seating. No driver-seat theft, no `KickOutBot`, no camera risk. All calls are final.
+   - Limits: the extras miss the ride (no seat, no Reaver gun) but cannot die. An extra who joins
+     mid-ride is not covered. A god mode left on when a map change ejects the heroes without a
+     Kismet exit stays until the next hero exit. [I] The Brumak (chapter 29) and the Act 1 Derrick
+     convoy are not covered. The Derrick has no seats and needs item 4's teleport mirroring.
+     Dormant before chapter 16 (Centaur). Ride-Reavers chapter 25. Crane chapters 27-28.
+   - Next (P2, design only): seat extras in a free Reaver seat 1 with `TryToDrive` when
+     `Driver != None` and `AnySeatAvailable()`. Eject them with `DriverLeave(true)` on the hero
+     exit.
 9. **Loadout and look.** [V]
    - `SeqEvent_ChapterPoint` gives `MarcusInventory` only to Marcus pawns.
    - 25 `GiveInventory` links target heroes only.
    - Extra players start with a Lancer.
 
    Chapters without Carmine or RedShirt in the persistent map (1, 3-4 and Acts 3-5) need a class
-   that is always loaded and is not Marcus or Dom. Candidates: assign a mesh to `COGGear` instances
-   at spawn (the Marcus mesh is always loaded), or load the class from a sub-level and manage its
-   lifetime. Open.
+   that is always loaded and is not Marcus or Dom. A body that exists in every chapter must be
+   Marcus's or Dom's. The only skeletal meshes in the always-loaded `GearGame.upk` are
+   `COG_MarcusFenix.COG_Marcus_Fenix_CamSkel`, `COG_Dom.Game.COG_Dom_Game_CamSkel` (plus their gore
+   meshes) and `Locust_Grunt_CamSkel`. [V]
+
+   Status (2026-10-16, `stage2-c-body`): implemented as rows CB-1 to CB-4 of group `coop-body`;
+   not run in the game yet. Players 3+ are `GearPawn_COGGear` with Dom's body in every chapter.
+   They also get the pistol and the Gnasher at spawn.
+
+   - Two follow-up groups, `coop-body` (CB-1..CB-5) and `coop-ride` (CR-1, CR-2), live in
+     `src/gow2_script_patch_body_table.cpp`. `tools/script_patch_body.py` prints them (`--cpp`)
+     and checks them (`--check <folder>`). The check plans the Stage 1 rows first and checks
+     these rows on top of them.
+   - The hook applies each group fail-closed on its own, right after the `coop` group and only
+     when that group applied. `gow2_coop_players=2` runs and logs nothing new.
+     `gow2_coop_body=false` turns `coop-body` off (players 3+ keep the Stage 1 behaviour).
+   - Success logs `SCRIPTPATCH coop-body: 5 rows applied for 4 players, set hash ...`. A failed
+     check logs `SCRIPTPATCH coop-body: skipped (<row>: <reason>); players 3+ keep the Stage 1
+     behaviour`. For `coop-ride` the tail is `...; vehicles stay retail`.
+   - New edit kind: the object field (`ObjectFieldRow`). A 4-byte object pointer in a default
+     subobject template goes from None to an object's address. Anchor fields on other templates
+     must already hold known objects. That proves the native offset on the running build.
+   - `--check` on the retail packages validates every check and operand. Each patched function
+     decodes to its end (`PostLogin` 0x69A, `SuggestPawnClassFor` 0x13E, `GearGame.RestartPlayer`
+     0x224, `OnGearEnterVehicle` 0x171, `OnGearExitVehicle` 0x1C3). [V offline]
+   - `Default__GearPawn_COGGear.GearPawnMesh` sets neither `SkeletalMesh` nor `PhysicsAsset`. Its
+     archetypes (Infantry, GearPawn) set neither either. The Dom and Marcus templates differ
+     from it only in those two fields. Their archetype is the COGGear template. [V]
+   - CB-1 and CB-2 write Dom's mesh (+468, 0x1D4) and physics asset (+496, 0x1F0) into the COGGear
+     mesh template at startup. They anchor on the Dom and Marcus templates (`layout.py` chain:
+     `MeshComponent` ends at 468). Every peer instances new COGGear pawns from that template.
+     Content subclasses that set their own mesh are unaffected (Ben, RedShirt, Tai and A. Carmine
+     checked). Baird, Gus and Hoffman were not checked. [I]
+   - CB-3 makes players 3+ always `GearPawn_COGGear`. It reuses the 318-byte script S1-2 grows
+     with same-size edits: `goto 0x0100`, then `return class'GearPawn_COGGear'`. The class is
+     always loaded, never garbage-collected and resolvable on every peer. There are no Marcus
+     clones in chapter 1, chapters 3-4 or Acts 3-5. `gow2_coop_extra_carmine=true` uses CB-3c
+     instead: Ben Carmine where `FindObject` finds him, `GearPawn_COGGear` elsewhere. RedShirt is
+     dropped: it lives only in sub-levels. `gow2_coop_marcus_clones` drops CB-3 and CB-3c (D-1
+     leaves the script at 145 bytes).
+   - §1.2's crash worry does not apply. `GearPawn_COGGear` inherits `SoundGroup` GSG_Empty (not
+     None) and has no gore mesh, the same as Ben in retail. The extras look like Dom, have no
+     voice and an empty `CharacterName`. [V data; cosmetic]
+   - Every peer must run the same `gow2_coop_players` (for example 4). CB-1 and CB-2 must also run
+     on the clients. A client left at 2 sees players 3 and 4 invisible. Gameplay is not affected.
+     [I]
+   - Loadout: `GearPawn_COGGear.DefaultInventory` is only the Lancer. Marcus and Dom also carry
+     `GearWeap_COGPistol` and `GearWeap_Shotgun`. Changing the COGGear default would arm every AI
+     COG content class. CB-4 instead grows `GearGame.GearGame.RestartPlayer` (387 -> 548 bytes).
+     Only player spawns reach it: `GearGameSP_Base.RestartPlayer+0x077D` calls it for every
+     non-Dom player and the Dom checkpoint path. After the spawn, `FindInventoryType` and
+     `CreateInventory` add the pistol and the Gnasher when missing. Heroes already own both, so
+     nothing changes for them. Checkpoint loads still restore the saved loadout
+     (`ApplyInventoryRecords` discards the inventory first). [V]
+   - Open: `SeqEvent_ChapterPoint` still gives `MarcusInventory` (frag grenades, chapter loadouts)
+     only to Marcus. A map with `WorldInfo.bNoDefaultInventoryForPlayer` would also hand heroes
+     the pair (no map scanned yet).
 10. **Join wait.** A remote joiner whose class already has a pawn in the world (here the AI Ben)
     waits in `PlayerWaiting` until he presses Right Trigger (`PostLogin+0x03A4`,
     `GearPlayerInput.HandleButtonInput_RightTrigger+0x0060`). Optional fix: spawn non-Dom joiners
-    immediately.
+    immediately. `PostLogin+0x01D2` also sets `bFoundPawn` when a vehicle's driver has the game's
+    `DefaultPawnClass` (Marcus), because the script compares the game's class, not the joiner's.
+    The Right Trigger wait also happens while Marcus drives. With `GearPawn_COGGear` as the class,
+    the first extra spawns at once and the second waits, because he finds the first extra's pawn.
+    [V]
+
+    Status (2026-10-16, `stage2-c-body`): implemented as row CB-5 of group `coop-body` (see item
+    9 for the group, its logs and the offline check); not run in the game yet. Every joiner who is
+    not Dom spawns at once. A remote Dom keeps the retail wait.
+
+    - CB-5 is same size: 2 byte and 2 operand edits at +0x03B3..+0x03C7. The condition
+      `LocalPlayer(PC.Player) != None` becomes
+      `class<GearPawn_COGDom>(PC.DefaultPawnClass) == None`. Every joiner who is not Dom is
+      restarted at once. A remote Dom keeps retail's Right Trigger takeover. `PostLogin` still
+      decodes to its end (0x69A). [V offline]
+    - With 3+ players a local split-screen player 2 (Dom) now also waits for Right Trigger
+      (network co-op has no split-screen). `CANCELCINE` on remote joins after 15 s is unchanged
+      (item 5).
 
 #### Stage 2 test
 

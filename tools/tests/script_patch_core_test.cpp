@@ -1,6 +1,7 @@
 // Tests for the script patcher core (src/gow2_script_patches.cpp) on a synthetic guest memory built
 // from the rows themselves; no game files needed. Build target gow2_script_patch_test.
 #include "gow2_script_patches.h"
+#include "gow2_script_patch_body.h"
 
 #include "gow2_guest.h"
 
@@ -383,7 +384,21 @@ void BuildDefaultObjects(FakeGuest& guest, const DefaultRow& row) {
   guest.Put32(obj + row.offset, row.old_value);
 }
 
+constexpr uint32_t kFieldObjectSize = 1024u;  // room for field offsets up to ~1000
+
+void BuildObjectFieldObjects(FakeGuest& guest, const ObjectFieldRow& row) {
+  uint32_t object = guest.Path(row.object.path, row.object.cls, kFieldObjectSize);
+  guest.Put32(object + row.offset, 0u);
+  guest.Path(row.value.path, row.value.cls);
+  for (const FieldAnchor& anchor : row.anchors) {
+    uint32_t holder = guest.Path(anchor.object.path, anchor.object.cls, kFieldObjectSize);
+    guest.Put32(holder + anchor.offset, guest.Path(anchor.value.path, anchor.value.cls));
+  }
+}
+
 void BuildGroupObjects(FakeGuest& guest, const PatchGroup& group) {
+  // First so field objects get the large size before anything else creates them small.
+  for (const ObjectFieldRow& row : group.object_fields) BuildObjectFieldObjects(guest, row);
   for (const ScriptRow& row : group.scripts) BuildScriptObjects(guest, row);
   for (const DefaultRow& row : group.defaults) BuildDefaultObjects(guest, row);
 }
@@ -798,6 +813,343 @@ void TestGrowEditPastKeptPrefixSkips() {
   Expect(PrefixMatches(guest, data, bytes, 10u), "past-prefix edit bytes unchanged");
 }
 
+ObjectFieldRow MakeObjectFieldRow() {
+  ObjectFieldRow row;
+  row.id = "OF-1";
+  row.object = {"Pkg.Default__Thing.Mesh", "SkeletalMeshComponent"};
+  row.offset = 468u;
+  row.value = {"Assets.Body", "SkeletalMesh"};
+  FieldAnchor anchor;
+  anchor.object = {"Pkg.Default__Hero.Mesh", "SkeletalMeshComponent"};
+  anchor.offset = 468u;
+  anchor.value = {"Assets.HeroBody", "SkeletalMesh"};
+  row.anchors.push_back(anchor);
+  return row;
+}
+
+PatchGroup MakeObjectFieldGroup() {
+  PatchGroup group;
+  group.name = "test";
+  group.object_fields.push_back(MakeObjectFieldRow());
+  return group;
+}
+
+ScriptRow MakeT1Row() {
+  ScriptRow row;
+  row.id = "T-1";
+  row.function = {"Pkg.ClassA.FuncA", "Function"};
+  row.script_size = 16u;
+  row.byte_edits.push_back({0x02, 0x9A, kPlayers});
+  return row;
+}
+
+void TestObjectFieldWritesBigEndian() {
+  PatchGroup group = MakeObjectFieldGroup();
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "object field applies");
+  Expect(result.lines.size() == 1u &&
+             result.lines[0] == "OF-1 Pkg.Default__Thing.Mesh: 1 write(s)",
+         "object field line");
+  uint32_t object = guest.Path("Pkg.Default__Thing.Mesh", "SkeletalMeshComponent");
+  uint32_t value = guest.Path("Assets.Body", "SkeletalMesh");
+  Expect(guest.U32(object + 468u) == value, "object field holds value address");
+  Expect(guest.U8(object + 468u) == static_cast<uint8_t>(value >> 24u), "object field big-endian");
+}
+
+void TestObjectFieldSecondApplyIsAlreadyApplied() {
+  PatchGroup group = MakeObjectFieldGroup();
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult first = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(first.applied, "object field first applies");
+  GroupResult second = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(second.applied, "object field second applies");
+  Expect(second.lines.size() == 1u && EndsWithApplied(second.lines[0]),
+         "object field second already applied");
+}
+
+void TestObjectFieldUnrelatedValueSkipsGroup() {
+  PatchGroup group;
+  group.name = "test";
+  group.scripts.push_back(MakeT1Row());
+  group.object_fields.push_back(MakeObjectFieldRow());
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  uint32_t object = guest.Path("Pkg.Default__Thing.Mesh", "SkeletalMeshComponent");
+  guest.Put32(object + 468u, 0x12345678u);
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(!result.applied, "unrelated value skips");
+  Expect(result.failed_row == "OF-1", "unrelated value failed_row");
+  Expect(result.reason == "+0x01D4 points at 0x12345678, expected None or Assets.Body (SkeletalMesh)",
+         "unrelated value reason");
+  uint32_t func = guest.Path("Pkg.ClassA.FuncA", "Function");
+  Expect(guest.U8(guest.U32(func + 84u) + 0x02u) == 0x9A, "unrelated value script unchanged");
+}
+
+void TestObjectFieldAnchorMismatchSkips() {
+  PatchGroup group = MakeObjectFieldGroup();
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  uint32_t anchor = guest.Path("Pkg.Default__Hero.Mesh", "SkeletalMeshComponent");
+  guest.Put32(anchor + 468u, 0u);
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(!result.applied, "anchor mismatch skips");
+  Expect(result.failed_row == "OF-1", "anchor mismatch failed_row");
+  Expect(result.reason ==
+             "anchor Pkg.Default__Hero.Mesh (SkeletalMeshComponent) +0x01D4 points at 0x00000000, "
+             "expected Assets.HeroBody (SkeletalMesh)",
+         "anchor mismatch reason");
+  uint32_t object = guest.Path("Pkg.Default__Thing.Mesh", "SkeletalMeshComponent");
+  Expect(guest.U32(object + 468u) == 0u, "anchor mismatch field still None");
+}
+
+void TestObjectFieldMissingValueSkips() {
+  PatchGroup built = MakeObjectFieldGroup();
+  FakeGuest guest = BuildForGroup(built);
+  GuestTables tables = guest.tables();
+  PatchGroup group = MakeObjectFieldGroup();
+  group.object_fields[0].value = {"Assets.Missing", "SkeletalMesh"};
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(!result.applied, "missing value skips");
+  Expect(result.failed_row == "OF-1", "missing value failed_row");
+  Expect(result.reason.find("found 0 times") != std::string::npos, "missing value reason");
+  uint32_t object = guest.Path("Pkg.Default__Thing.Mesh", "SkeletalMeshComponent");
+  Expect(guest.U32(object + 468u) == 0u, "missing value field still None");
+}
+
+void TestStage1HashUnchanged() {
+  Expect(GroupHash(CoopStage1Group(false), 4) == 0x937c35f80cb274b7ull, "stage1 hash unchanged");
+}
+
+void TestObjectFieldsChangeHash() {
+  PatchGroup full = MakeObjectFieldGroup();
+  PatchGroup cleared = full;
+  cleared.object_fields.clear();
+  Expect(GroupHash(full, 4) != GroupHash(cleared, 4), "object fields change hash");
+}
+
+void TestObjectFieldLinesComeLast() {
+  PatchGroup group;
+  group.name = "test";
+  group.scripts.push_back(MakeT1Row());
+  group.object_fields.push_back(MakeObjectFieldRow());
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "script plus field applies");
+  Expect(result.lines.size() == 2u, "script plus field 2 lines");
+  bool ordered = result.lines.size() == 2u && result.lines[0].rfind("T-1 ", 0) == 0 &&
+                 result.lines[1].rfind("OF-1 ", 0) == 0;
+  Expect(ordered, "object field lines come last");
+}
+
+bool EndsWith(std::string_view line, std::string_view suffix) {
+  return line.size() >= suffix.size() && line.substr(line.size() - suffix.size()) == suffix;
+}
+
+void TestCoopBodyGroupApplies() {
+  PatchGroup group = CoopBodyGroup(false, false);
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "coop-body applies");
+  Expect(result.lines.size() == 5u, "coop-body 5 lines");
+  bool ordered = result.lines.size() == 5u && result.lines[0].rfind("CB-3 ", 0) == 0 &&
+                 result.lines[1].rfind("CB-4 ", 0) == 0 && result.lines[2].rfind("CB-5 ", 0) == 0 &&
+                 result.lines[3].rfind("CB-1 ", 0) == 0 && result.lines[4].rfind("CB-2 ", 0) == 0;
+  Expect(ordered, "coop-body lines in order");
+  Expect(result.lines.size() > 1u && EndsWith(result.lines[1], "script grown to 548 bytes"),
+         "coop-body CB-4 grown to 548");
+  Expect(group.name == "coop-body", "coop-body name");
+  uint32_t suggest = guest.Path("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function");
+  uint32_t suggest_data = guest.U32(suggest + 84u);
+  Expect(guest.U8(suggest_data + 0x84u) == 0x06, "coop-body Suggest +0x84 Gear branch");
+  Expect(guest.U8(suggest_data + 0x101u) == 0x20, "coop-body Suggest +0x101 class context");
+  Expect(guest.U32(suggest_data + 0x102u) == guest.Path("GearGame.GearPawn_COGGear", "Class"),
+         "coop-body Suggest +0x102 COGGear");
+  uint32_t login = guest.Path("GearGame.GearGameSP_Base.PostLogin", "Function");
+  uint32_t login_data = guest.U32(login + 84u);
+  Expect(guest.U8(login_data + 0x3B3u) == 0x72, "coop-body PostLogin +0x3B3");
+  Expect(guest.U8(login_data + 0x3B4u) == 0x13, "coop-body PostLogin +0x3B4");
+  Expect(guest.U32(login_data + 0x3B5u) == guest.Path("GearGame.GearPawn_COGDom", "Class"),
+         "coop-body PostLogin +0x3B5 Dom");
+  Expect(guest.U32(login_data + 0x3C4u) == guest.Path("GearGame.GearPC.DefaultPawnClass", "ClassProperty"),
+         "coop-body PostLogin +0x3C4 DefaultPawnClass");
+  uint32_t restart = guest.Path("GearGame.GearGame.RestartPlayer", "Function");
+  Expect(guest.U32(restart + 88u) == 548u && guest.U32(restart + 92u) == 548u,
+         "coop-body RestartPlayer Num==Max==548");
+  uint32_t mesh = guest.Path("GearGame.Default__GearPawn_COGGear.GearPawnMesh", "SkeletalMeshComponent");
+  Expect(guest.U32(mesh + 468u) == guest.Path("COG_Dom.Game.COG_Dom_Game_CamSkel", "SkeletalMesh"),
+         "coop-body mesh SkeletalMesh");
+  Expect(guest.U32(mesh + 496u) == guest.Path("COG_Dom.COG_Dom_CamSkel_Physics", "PhysicsAsset"),
+         "coop-body mesh PhysicsAsset");
+}
+
+void TestCoopBodyGroupSecondApplyIsAlreadyApplied() {
+  PatchGroup group = CoopBodyGroup(false, false);
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult first = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(first.applied, "coop-body first applies");
+  uint32_t top = guest.Top();
+  GroupResult second = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(second.applied, "coop-body second applies");
+  bool all = second.lines.size() == 5u;
+  for (const std::string& line : second.lines) {
+    if (!EndsWithApplied(line)) {
+      all = false;
+      break;
+    }
+  }
+  Expect(all, "coop-body second all already applied");
+  Expect(guest.Top() == top, "coop-body second no allocation");
+}
+
+void TestCoopBodyCarmineKeepsBenBranch() {
+  PatchGroup group = CoopBodyGroup(true, false);
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "coop-body carmine applies");
+  uint32_t suggest = guest.Path("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function");
+  uint32_t data = guest.U32(suggest + 84u);
+  Expect(guest.U8(data + 0x84u) == 0x07, "coop-body carmine +0x84 keeps Ben branch");
+  Expect(guest.U8(data + 0x101u) == 0x20, "coop-body carmine +0x101 class context");
+  Expect(!result.lines.empty() && result.lines[0].rfind("CB-3c ", 0) == 0,
+         "coop-body carmine first line CB-3c");
+}
+
+void TestCoopBodyMarcusClonesSkipsClassRow() {
+  PatchGroup group = CoopBodyGroup(false, true);
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "coop-body marcus clones applies");
+  Expect(result.lines.size() == 4u, "coop-body marcus clones 4 lines");
+  Expect(!result.lines.empty() && result.lines[0].rfind("CB-4 ", 0) == 0,
+         "coop-body marcus clones first line CB-4");
+}
+
+void TestCoopBodySkipsOnUngrownSuggest() {
+  PatchGroup group = CoopBodyGroup(false, false);
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  uint32_t suggest = guest.Path("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function");
+  guest.Put32(suggest + 88u, 145u);
+  uint32_t restart = guest.Path("GearGame.GearGame.RestartPlayer", "Function");
+  uint32_t restart_data = guest.U32(restart + 84u);
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(!result.applied, "coop-body ungrown suggest skips");
+  Expect(result.failed_row == "CB-3", "coop-body ungrown suggest failed_row CB-3");
+  Expect(result.reason == "Script.Num is 145, expected 318", "coop-body ungrown suggest reason");
+  uint32_t mesh = guest.Path("GearGame.Default__GearPawn_COGGear.GearPawnMesh", "SkeletalMeshComponent");
+  Expect(guest.U32(mesh + 468u) == 0u, "coop-body ungrown suggest mesh still None");
+  Expect(guest.U32(restart + 88u) == 387u, "coop-body ungrown suggest RestartPlayer Num still 387");
+  Expect(guest.U32(restart + 84u) == restart_data, "coop-body ungrown suggest RestartPlayer data unchanged");
+}
+
+void TestCoopBodyAfterStage1OnOneGuest() {
+  FakeGuest guest;
+  BuildGroupObjects(guest, CoopStage1Group(false));
+  PatchGroup partial = CoopBodyGroup(false, false);
+  partial.scripts.erase(partial.scripts.begin());
+  BuildGroupObjects(guest, partial);
+  GuestTables tables = guest.Finish();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult stage1 = ApplyGroup(guest.base(), tables, CoopStage1Group(false), 4, alloc);
+  Expect(stage1.applied, "stage1 then coop-body stage1 applies");
+  Expect(stage1.lines.size() == 6u, "stage1 then coop-body stage1 6 lines");
+  GroupResult body = ApplyGroup(guest.base(), tables, CoopBodyGroup(false, false), 4, alloc);
+  Expect(body.applied, "stage1 then coop-body body applies");
+  Expect(body.lines.size() == 5u, "stage1 then coop-body body 5 lines");
+  uint32_t suggest = guest.Path("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function");
+  Expect(guest.U32(suggest + 88u) == 318u, "stage1 then coop-body Suggest Num 318");
+  uint32_t data = guest.U32(suggest + 84u);
+  Expect(guest.U8(data + 0x84u) == 0x06, "stage1 then coop-body Suggest +0x84 Gear branch");
+  Expect(guest.U8(data + 0x101u) == 0x20, "stage1 then coop-body Suggest +0x101 class context");
+  Expect(guest.U32(data + 0x102u) == guest.Path("GearGame.GearPawn_COGGear", "Class"),
+         "stage1 then coop-body Suggest +0x102 COGGear");
+  Expect(guest.U8(data + 0x100u) == 0x04, "stage1 then coop-body Suggest +0x100 return");
+}
+
+void TestCoopBodyCarmineAfterStage1OnOneGuest() {
+  FakeGuest guest;
+  BuildGroupObjects(guest, CoopStage1Group(false));
+  PatchGroup partial = CoopBodyGroup(true, false);
+  partial.scripts.erase(partial.scripts.begin());
+  BuildGroupObjects(guest, partial);
+  GuestTables tables = guest.Finish();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult stage1 = ApplyGroup(guest.base(), tables, CoopStage1Group(false), 4, alloc);
+  Expect(stage1.applied, "stage1 then carmine stage1 applies");
+  Expect(stage1.lines.size() == 6u, "stage1 then carmine stage1 6 lines");
+  GroupResult body = ApplyGroup(guest.base(), tables, CoopBodyGroup(true, false), 4, alloc);
+  Expect(body.applied, "stage1 then carmine body applies");
+  Expect(body.lines.size() == 5u, "stage1 then carmine body 5 lines");
+  uint32_t suggest = guest.Path("GearGame.GearGameSP_Base.SuggestPawnClassFor", "Function");
+  Expect(guest.U8(guest.U32(suggest + 84u) + 0x84u) == 0x07, "stage1 then carmine +0x84 keeps Ben branch");
+}
+
+void TestCoopRideGroupApplies() {
+  PatchGroup group = CoopRideGroup();
+  FakeGuest guest = BuildForGroup(group);
+  GuestTables tables = guest.tables();
+  GuestAlloc alloc = [&guest](uint32_t size) { return guest.Alloc(size); };
+  GroupResult result = ApplyGroup(guest.base(), tables, group, 4, alloc);
+  Expect(result.applied, "coop-ride applies");
+  Expect(group.name == "coop-ride", "coop-ride name");
+  Expect(result.lines.size() == 2u, "coop-ride 2 lines");
+  Expect(result.lines.size() == 2u && EndsWith(result.lines[0], "script grown to 369 bytes") &&
+             EndsWith(result.lines[1], "script grown to 451 bytes"),
+         "coop-ride lines grown to 369 and 451");
+  uint32_t enter = guest.Path("GearGame.GearPawn.OnGearEnterVehicle", "Function");
+  uint32_t enter_data = guest.U32(enter + 84u);
+  Expect(guest.U8(enter_data + 0xA6u) == 0x07 && guest.U8(enter_data + 0xA7u) == 0x01 &&
+             guest.U8(enter_data + 0xA8u) == 0x6E,
+         "coop-ride enter tail head");
+  Expect(guest.U8(enter_data + 0x16Bu) == 0x27 && guest.U8(enter_data + 0x16Cu) == 0x31 &&
+             guest.U8(enter_data + 0x16Du) == 0x30 && guest.U8(enter_data + 0x16Eu) == 0x04 &&
+             guest.U8(enter_data + 0x16Fu) == 0x0B && guest.U8(enter_data + 0x170u) == 0x53,
+         "coop-ride enter tail end");
+  Expect(guest.U32(enter_data + 0xFCu) == guest.Path("GearGame.GearPC", "Class"),
+         "coop-ride enter +0xFC GearPC");
+  uint32_t leave = guest.Path("GearGame.GearPawn.OnGearExitVehicle", "Function");
+  uint32_t leave_data = guest.U32(leave + 84u);
+  Expect(guest.U8(leave_data + 0xD5u) == 0x07 && guest.U8(leave_data + 0xD6u) == 0x01 &&
+             guest.U8(leave_data + 0xD7u) == 0xC0,
+         "coop-ride exit tail head");
+  Expect(guest.U8(leave_data + 0x1BBu) == 0x4A && guest.U8(leave_data + 0x1BCu) == 0x4A &&
+             guest.U8(leave_data + 0x1BDu) == 0x16 && guest.U8(leave_data + 0x1BEu) == 0x31 &&
+             guest.U8(leave_data + 0x1BFu) == 0x30 && guest.U8(leave_data + 0x1C0u) == 0x04 &&
+             guest.U8(leave_data + 0x1C1u) == 0x0B && guest.U8(leave_data + 0x1C2u) == 0x53,
+         "coop-ride exit tail end");
+  Expect(guest.U32(leave_data + 0x1A8u) == guest.Path("GearGame.GearPC.FindAvailableTeleportSpot", "Function"),
+         "coop-ride exit +0x1A8 FindAvailableTeleportSpot");
+}
+
+void TestFollowUpHashes() {
+  Expect(GroupHash(CoopBodyGroup(false, false), 4) != GroupHash(CoopBodyGroup(true, false), 4),
+         "follow-up body hash differs by carmine");
+  Expect(GroupHash(CoopBodyGroup(false, false), 4) == GroupHash(CoopBodyGroup(false, false), 4),
+         "follow-up body hash stable across builds");
+  Expect(GroupHash(CoopRideGroup(), 4) != 0u, "follow-up ride hash nonzero");
+  Expect(GroupHash(CoopStage1Group(false), 4) == 0x937c35f80cb274b7ull,
+         "follow-up stage1 hash unchanged");
+}
+
 }  // namespace
 
 int main() {
@@ -819,6 +1171,23 @@ int main() {
   TestGrowIntoPhysicalHeap();
   TestGrowWithPrefixEditUsesEditedPrefix();
   TestGrowEditPastKeptPrefixSkips();
+  TestObjectFieldWritesBigEndian();
+  TestObjectFieldSecondApplyIsAlreadyApplied();
+  TestObjectFieldUnrelatedValueSkipsGroup();
+  TestObjectFieldAnchorMismatchSkips();
+  TestObjectFieldMissingValueSkips();
+  TestStage1HashUnchanged();
+  TestObjectFieldsChangeHash();
+  TestObjectFieldLinesComeLast();
+  TestCoopBodyGroupApplies();
+  TestCoopBodyGroupSecondApplyIsAlreadyApplied();
+  TestCoopBodyCarmineKeepsBenBranch();
+  TestCoopBodyMarcusClonesSkipsClassRow();
+  TestCoopBodySkipsOnUngrownSuggest();
+  TestCoopBodyAfterStage1OnOneGuest();
+  TestCoopBodyCarmineAfterStage1OnOneGuest();
+  TestCoopRideGroupApplies();
+  TestFollowUpHashes();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return (g_failures == 0) ? 0 : 1;
 }
