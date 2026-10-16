@@ -3,8 +3,9 @@
   Runs the tests that need no game data, phone or second PC, on this Windows PC.
 
 .DESCRIPTION
-  1. The port's host test targets gow2_test_input_test, gow2_script_patch_test and
-     gow2_save_dir_test in out\build\<config> (configure it with scripts\build.ps1 first).
+  1. The port's host test targets gow2_test_input_test, gow2_script_patch_test,
+     gow2_script_patch_survival_test, gow2_save_dir_test and gow2_dev_commands_test in
+     out\build\<config> (configure it with scripts\build.ps1 first).
   2. android\gamelibs\tests\touch_model_test.cpp: pure C++, so it also runs on the PC.
   3. The SDK's System Link and session unit tests of 0010 and 0011
      (tests\unit\system\system_link_test.cpp, tests\unit\kernel\xsession_test.cpp) in the tree
@@ -93,7 +94,8 @@ function Test-HostTargets([string]$build) {
         Write-Host "  $build is not configured; run scripts\build.ps1 first."
         return $false
     }
-    $targets = 'gow2_test_input_test', 'gow2_script_patch_test', 'gow2_save_dir_test'
+    $targets = 'gow2_test_input_test', 'gow2_script_patch_test', 'gow2_script_patch_survival_test',
+        'gow2_save_dir_test', 'gow2_dev_commands_test'
     if ((Invoke-Native { cmake --build $build --target $targets }) -ne 0) { return $false }
     $ok = $true
     foreach ($t in $targets) {
