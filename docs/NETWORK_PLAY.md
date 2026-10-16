@@ -61,6 +61,13 @@ settings.
   session shows NO CAMPAIGNS FOUND.
 - After chapter travel the human Dom waits at PRESS RT TO BEGIN and presses
   Right Trigger.
+- After a checkpoint load the human Dom also presses Right Trigger at once. In
+  one chapter 16 reload in the tests Marcus fell at the map origin for about
+  three minutes, while Dom waited, until the chapter-start cinematic ran.
+- A chapter loaded by travel (the dev `chapter` command, servertravel) can give
+  the Dom role to another friend; the player who was Dom then plays as a player
+  3+ until the next travel. Chapter changes by playing through were not checked
+  for this.
 - Players 3+ who fall far behind are moved next to Marcus or Dom by the host
   (`gow2_coop_leash`, on by default on Windows, off by default on Android
   because the fail-closed fault handling of these patches exists only on

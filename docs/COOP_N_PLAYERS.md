@@ -8,7 +8,11 @@ players 3+ became Marcus clones; and `--user_data_root` never reached the runtim
 instance shared one save folder. Not done yet: ten minutes of real combat with four players, a
 desync check, and co-op beyond two players on Android. The merged tree builds and links every
 patch and `src/` file for Android (below), but nobody has run `gow2_coop_players` 3+, the census or
-the traffic log on a phone. Stages 2 and 3 are design only; Stage 4's networking (patch 0011) is
+the traffic log on a phone. Stage 2 is implemented on branch `stage2` and was run with four
+instances on one PC on 2026-10-16 (Stage 2 results below). Not covered: co-op splits, vehicle
+exit (CR-2), the Ride-Reaver section, a join during a cinematic, a combat soak, 4 PCs over LAN
+or the internet, Android with 3+ players. The F2 codegen fix (d074c0d) makes chapter commits
+past Act 1 chapter 2 work. Stage 3 stays design only. Stage 4's networking (patch 0011) is
 built and has joined two players, PC with PC and PC with phone.
 
 Merged on the `integration` branch (2026-10-15): master, then `saves`, `coop-stage1` and
@@ -720,29 +724,43 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    Fix: put extras into free seats via `TryToDrive`; when none is free, use a hidden rider mode
    bound to the vehicle.
 
-   Status (2026-10-16, `stage2-c-body`): implemented as rows CR-1 and CR-2 of group `coop-ride`;
+   Status (2026-10-16, `stage2-c-body`, review fix 09fd5d7): implemented as rows CR-1 to CR-3 of group `coop-ride`;
    run in game on 2026-10-16, see Stage 2 results (CR-1 seen, CR-2 not reached). When a hero
    rides, each extra on foot gets god mode. When the hero gets out, each extra loses it and
    appears next to him.
 
    - The groups, their logs and the offline check are described under item 9.
      `gow2_coop_vehicle_ride=false` turns `coop-ride` off. Success logs
-     `SCRIPTPATCH coop-ride: 2 rows applied for 4 players, set hash ...`; a failed check logs
-     `SCRIPTPATCH coop-ride: skipped (<row>: <reason>); vehicles stay retail`. Both patched
-     functions decode to their end (`OnGearEnterVehicle` 0x171, `OnGearExitVehicle` 0x1C3).
+     `SCRIPTPATCH coop-ride: 3 rows applied for 4 players, set hash ...`; a failed check logs
+     `SCRIPTPATCH coop-ride: skipped (<row>: <reason>); vehicles stay retail`. All three patched
+     functions decode to their end (`OnGearEnterVehicle` 0x171, `OnGearExitVehicle` 0x1C3,
+     `SyncKismetSetProperties` 0x214).
      [V offline]
    - CR-1 grows `GearPawn.OnGearEnterVehicle` (169 -> 369). When Marcus or Dom enters a
      `GearVehicle`, every `GearPC` whose `DefaultPawnClass` is neither hero and whose pawn is a
      `GearPawn` (an extra on foot) gets `bGodMode = true`. `GameInfo.ReduceDamage` zeroes damage
      under god mode (DE:21463). `FellOutOfWorld` and `CurrentLevelUnloaded` pull such pawns back
-     without killing them.
+     without killing them. The host leash (item 11) now keeps this god mode: every second it is
+     granted, or CR-1's flag adopted, while a hero drives a `GearVehicle` or sits in a
+     `GearWeaponPawn`; revoked only on the PCs it granted or adopted once no hero rides. Kismet
+     alone misses cases: `CheckpointLoadComplete+0x0155` resets `bGodMode` on every PC,
+     `ApplyCheckpointRecord` puts the hero back with `TryToDrive` (no Kismet, so no CR-1), an extra
+     who respawns mid-ride never got it, and `PreCommitMapChange+0x005C` ejects with `DriverLeave`
+     (no CR-2). [V]
    - CR-2 grows `GearPawn.OnGearExitVehicle` (216 -> 451). When a hero gets out, every extra in
      god mode loses it. Each is placed next to that hero with
      `GearPC(Controller).FindAvailableTeleportSpot`.
+   - CR-3 grows `GearGameSP_Base.SyncKismetSetProperties` (460 -> 532). +0x001D becomes
+     `goto 0x1CB`; the tail tests `(OtherPC != PC) && (OtherPC.DefaultPawnClass == COGMarcus || ==
+     COGDom)` and jumps back to 0x002C or 0x01C7. A joiner copies `bCinematicMode`, `bInvisible`,
+     the `bCinemaDisableInput*` flags and `bGodMode` from a hero, not from the newest extra
+     (retail's source with two players). Evidence: `SyncKismetSetProperties` +0x0000/+0x001D/+0x00D1,
+     called from `PostLogin+0x0395` and `RestartPlayer+0x0088`. [V]
    - No seating. No driver-seat theft, no `KickOutBot`, no camera risk. All calls are final.
    - Limits: the extras miss the ride (no seat, no Reaver gun) but cannot die. An extra who joins
-     mid-ride is not covered. A god mode left on when a map change ejects the heroes without a
-     Kismet exit stays until the next hero exit. [I] The Brumak (chapter 29) and the Act 1 Derrick
+     mid-ride gets it from the leash within a second. A god mode left on when a map change ejects
+     the heroes without a Kismet exit is revoked by the leash within a second (the leash is on by
+     default on Windows only). The Brumak (chapter 29) and the Act 1 Derrick
      convoy are not covered. The Derrick has no seats and needs item 4's teleport mirroring.
      Dormant before chapter 16 (Centaur). Ride-Reavers chapter 25. Crane chapters 27-28.
    - Next (P2, design only): seat extras in a free Reaver seat 1 with `TryToDrive` when
@@ -763,7 +781,7 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    run in game on 2026-10-16, see Stage 2 results. Players 3+ are `GearPawn_COGGear` with Dom's
    body in every chapter. They also get the pistol and the Gnasher at spawn.
 
-   - Two follow-up groups, `coop-body` (CB-1..CB-5) and `coop-ride` (CR-1, CR-2), live in
+   - Two follow-up groups, `coop-body` (CB-1..CB-5) and `coop-ride` (CR-1..CR-3), live in
      `src/gow2_script_patch_body_table.cpp`. `tools/script_patch_body.py` prints them (`--cpp`)
      and checks them (`--check <folder>`). The check plans the Stage 1 rows first and checks
      these rows on top of them.
@@ -779,7 +797,8 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
      must already hold known objects. That proves the native offset on the running build.
    - `--check` on the retail packages validates every check and operand. Each patched function
      decodes to its end (`PostLogin` 0x69A, `SuggestPawnClassFor` 0x13E, `GearGame.RestartPlayer`
-     0x224, `OnGearEnterVehicle` 0x171, `OnGearExitVehicle` 0x1C3). [V offline]
+     0x292, `OnGearEnterVehicle` 0x171, `OnGearExitVehicle` 0x1C3, `SyncKismetSetProperties`
+     0x214). [V offline]
    - `Default__GearPawn_COGGear.GearPawnMesh` sets neither `SkeletalMesh` nor `PhysicsAsset`. Its
      archetypes (Infantry, GearPawn) set neither either. The Dom and Marcus templates differ
      from it only in those two fields. Their archetype is the COGGear template. [V]
@@ -804,15 +823,17 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
      [I]
    - Loadout: `GearPawn_COGGear.DefaultInventory` is only the Lancer. Marcus and Dom also carry
      `GearWeap_COGPistol` and `GearWeap_Shotgun`. Changing the COGGear default would arm every AI
-     COG content class. CB-4 instead grows `GearGame.GearGame.RestartPlayer` (387 -> 548 bytes).
-     Only player spawns reach it: `GearGameSP_Base.RestartPlayer+0x077D` calls it for every
-     non-Dom player and the Dom checkpoint path. After the spawn, `FindInventoryType` and
-     `CreateInventory` add the pistol and the Gnasher when missing. Heroes already own both, so
-     nothing changes for them. Checkpoint loads still restore the saved loadout
-     (`ApplyInventoryRecords` discards the inventory first). [V]
+     COG content class. CB-4 instead grows `GearGame.GearGame.RestartPlayer` (387 -> 658 bytes).
+     The tail starts with `GearPC(NewPlayer) != None && DefaultPawnClass != None && != COGMarcus && != COGDom && NewPlayer.Pawn != None`,
+     so heroes, AI and versus respawns are untouched: `GearGameAnnex_Base.MatchInProgress.RestartPlayer`
+     and `GearGameCTM_Base.MatchInProgress.RestartPlayer` call `Super(GearGame).RestartPlayer`;
+     `DefaultPawnClass` stays None in multiplayer. In SP, `GearGameSP_Base.RestartPlayer+0x077D` calls
+     it for every non-Dom player and the Dom checkpoint path. After the spawn, `FindInventoryType` and
+     `CreateInventory` add the pistol and the Gnasher when missing. Checkpoint loads still restore
+     the saved loadout (`ApplyInventoryRecords` discards the inventory first). [V]
    - Open: `SeqEvent_ChapterPoint` still gives `MarcusInventory` (frag grenades, chapter loadouts)
-     only to Marcus. A map with `WorldInfo.bNoDefaultInventoryForPlayer` would also hand heroes
-     the pair (no map scanned yet).
+     only to Marcus. A map with `WorldInfo.bNoDefaultInventoryForPlayer` no longer hands heroes
+     the pair: the CB-4 tail skips them (no map scanned yet).
 10. **Join wait.** A remote joiner whose class already has a pawn in the world (here the AI Ben)
     waits in `PlayerWaiting` until he presses Right Trigger (`PostLogin+0x03A4`,
     `GearPlayerInput.HandleButtonInput_RightTrigger+0x0060`). Optional fix: spawn non-Dom joiners
@@ -845,18 +866,36 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
       from Marcus. [V]
 
     Fix: `gow2_coop_leash` (64b1c49, `src/gow2_coop_leash.cpp`), host only, only with
-    `gow2_coop_players` 3+. Settings: `gow2_coop_leash` (true), `gow2_coop_leash_distance`
-    (4000), `gow2_coop_leash_seconds` (8). An extra who stays more than the distance from
-    the nearest human Marcus or Dom for the seconds is moved next to him. Log lines:
-    `COOPLEASH on: ...`, `COOPLEASH GearPC_SP_3 moved next to GearPC_SP_1 (was 5731 units
-    away)`, `COOPLEASH GearPC_SP_6 moved next to GearPC_SP_7 near GearPC_SP_5 (was 17517 units
-    away)`. [V] In s3 both extras moved onto Dom's Derrick 8 s after arriving and rode the
-    convoy. In s4 the stranded extra moved next to the extra standing beside the tank. [V]
+    `gow2_coop_players` 3+. Settings: `gow2_coop_leash` (true on Windows, false elsewhere),
+    `gow2_coop_leash_distance` (4000), `gow2_coop_leash_seconds` (8). An extra who stays more
+    than the distance from the nearest human Marcus or Dom for the seconds is moved next to him.
+    Log lines: `COOPLEASH on: ...`, `COOPLEASH GearPC_SP_3 moved next to GearPC_SP_1 (was
+    5731 units away)`, `COOPLEASH GearPC_SP_6 moved next to GearPC_SP_7 near GearPC_SP_5 (was
+    17517 units away)`. [V] In s3 both extras moved onto Dom's Derrick 8 s after arriving and
+    rode the convoy. In s4 the stranded extra moved next to the extra standing beside the tank. [V]
     v1 failed in chapter 16 (`no free spot`: the tank's collision covered all 8 spots 120
     units around it); v2 anchors on a player on foot next to the hero and tries 24 spots at
     120/360/600 units. [V] Limits: it never moves a player in cinematic mode, dead, or in a
     vehicle or turret; a downed extra is revived by `FindAvailableTeleportSpot`; extras
     inside a vehicle section only keep up in hops every 8 s.
+
+    Review fixes (6ad7234): the leash runs only when the coop group applied (else it logs
+    `COOPLEASH off (the coop group was not applied)`) and only for `GearPC_SP` controllers, so a
+    failed check or a versus/Horde game never sees it. It pulls at once, with no 8 s wait (cooldown
+    `gow2_coop_leash_seconds`), an extra within 60 units of another player's pawn or more than 2000
+    units below every hero: after chapter travel an extra spawned inside Marcus (dMarcus=0 for 26 s),
+    because `SpawnDefaultPawnFor+0x0061` spawns with bNoCollisionFail at one PlayerStart, and an
+    extra fell from (0,0,-1). Log lines: `... (was N units away; overlapped GearPC_SP_5)` and
+    `... fell N units below every hero)`. [V]
+    The leash also keeps CR-1's god mode (item 8): every second it grants it to, or adopts it on,
+    extras on foot while a hero drives a `GearVehicle` or sits in a `GearWeaponPawn`, and revokes it
+    on those PCs once no hero rides. Log lines: `COOPLEASH GearPC_SP_6: god mode on (GearPC_SP_5 rides
+    Vehicle_Centaur)` / `... god mode off (no hero rides)`. [V]
+    `gow2_coop_leash` defaults to true only on Windows; it is off by default on Android and Linux,
+    because the fail-closed fault handling (`__try`/`__except` in `GuardedRun`, `GuardedApply` and
+    `GuardedProbeSweep`) exists only on Windows: elsewhere a stale guest pointer is a SIGSEGV. A real
+    POSIX guard is still open: the SDK's own SIGSEGV/SIGBUS handler from patch 0007 chains unclaimed
+    faults, so a scoped sigsetjmp guard has to cooperate with it. [I]
 
 #### Stage 2 integration (branch `stage2`, 2026-10-16)
 
@@ -873,8 +912,10 @@ applied), `coop-body`, `coop-ride`, then the self-registered groups by name (tod
 - `gow2_coop_leash` (`src/gow2_coop_leash.cpp`) is not a patch group: an engine tick listener
   on the host, see the settings table.
 
-With `gow2_coop_players=2` (the default) the hook returns before Stage 1, so no Stage 2 code
-runs and two-player co-op with a v0.1.1 peer is unchanged. The devcheats group (dev only) is
+With `gow2_coop_players=2` (the default) the hook still returns before Stage 1, so the game stays
+retail. But every player must run the same build: a v0.1.1 peer lacks d074c0d and is expected to
+crash about 0.5 s after the chapter 2 -> 3 map commit even in two-player co-op. [I] The devcheats
+group (dev only) is
 separate: it applies once on the engine tick when `gow2_dev_cheats=true`.
 
 | Setting | Default | Effect |
@@ -886,9 +927,10 @@ separate: it applies once on the engine tick when `gow2_dev_cheats=true`.
 | gow2_coop_vehicle_ride | true | false: no CR rows; vehicles stay retail |
 | gow2_coop_scenes | true | false: no SC rows (cinematics, teleports, checkpoints, splits stay as in Stage 1) |
 | gow2_coop_scene_probe | false | debug: logs each player controller's cinematic state every 2 s |
-| gow2_coop_leash | true | false: no leash. true: on the host, a player 3+ who stays more than gow2_coop_leash_distance from the nearest human Marcus or Dom for gow2_coop_leash_seconds is moved next to him (FindAvailableTeleportSpot near him, or near a player on foot next to him when he is in a vehicle; else one of 24 spots 120, 360 or 600 units around that player); log lines COOPLEASH |
+| gow2_coop_leash | true on Windows, false elsewhere | false: no leash. true: on the host, a player 3+ who stays more than gow2_coop_leash_distance from the nearest human Marcus or Dom for gow2_coop_leash_seconds is moved next to him (FindAvailableTeleportSpot near him, or near a player on foot next to him when he is in a vehicle; else one of 24 spots 120, 360 or 600 units around that player); the leash also keeps god mode for extras on foot while a hero rides; log lines COOPLEASH |
 | gow2_coop_leash_distance | 4000 | game units |
 | gow2_coop_leash_seconds | 8 | seconds |
+| net_beacon_gate | true | with gow2_coop_players 3+, System Link lists and answers only peers whose co-op hash matches (SDK patch 0012); false turns the check off |
 | gow2_dev_command_file / gow2_dev_cheats | empty / false | dev only, see TEST_TOOLING.md |
 
 Every peer must use the same gow2_coop_players and the same group settings (coop-body's
@@ -906,18 +948,19 @@ SCRIPTPATCH coop S1-4 GearGame.Default__GearCoopGameSettings: 1 write(s)
 SCRIPTPATCH coop: 6 rows applied for 4 players
 SCRIPTPATCH survival S2A-1 GearGame.GearGameSP_Base.SpawnDefaultPawnFor: script grown to 183 bytes, with 1 write(s)
 SCRIPTPATCH survival S2A-2 GearGame.GearPC.ProcessGameOver: script grown to 159 bytes
-SCRIPTPATCH survival S2A-3 GearGame.GearPC.Destroyed: script grown to 1288 bytes, with 2 write(s)
+SCRIPTPATCH survival S2A-3 GearGame.GearPC.Destroyed: script grown to 1275 bytes, with 2 write(s)
 SCRIPTPATCH survival S2A-5 GearGame.GearPC.SaveCheckpoint: script grown to 496 bytes, with 3 write(s)
 SCRIPTPATCH survival: 4 rows applied for 4 players
 SCRIPTPATCH coop-body CB-3 GearGame.GearGameSP_Base.SuggestPawnClassFor: 3 write(s)
-SCRIPTPATCH coop-body CB-4 GearGame.GearGame.RestartPlayer: script grown to 548 bytes
+SCRIPTPATCH coop-body CB-4 GearGame.GearGame.RestartPlayer: script grown to 658 bytes
 SCRIPTPATCH coop-body CB-5 GearGame.GearGameSP_Base.PostLogin: 4 write(s)
 SCRIPTPATCH coop-body CB-1 GearGame.Default__GearPawn_COGGear.GearPawnMesh: 1 write(s)
 SCRIPTPATCH coop-body CB-2 GearGame.Default__GearPawn_COGGear.GearPawnMesh: 1 write(s)
 SCRIPTPATCH coop-body: 5 rows applied for 4 players
 SCRIPTPATCH coop-ride CR-1 GearGame.GearPawn.OnGearEnterVehicle: script grown to 369 bytes
 SCRIPTPATCH coop-ride CR-2 GearGame.GearPawn.OnGearExitVehicle: script grown to 451 bytes
-SCRIPTPATCH coop-ride: 2 rows applied for 4 players
+SCRIPTPATCH coop-ride CR-3 GearGame.GearGameSP_Base.SyncKismetSetProperties: script grown to 532 bytes, with 2 write(s)
+SCRIPTPATCH coop-ride: 3 rows applied for 4 players
 SCRIPTPATCH coop-scenes SC-1 GearGame.GearPC.SetCinematicMode: script grown to 679 bytes
 SCRIPTPATCH coop-scenes SC-2 GearGame.GearGameSP_Base.RestartPlayer: script grown to 2403 bytes
 SCRIPTPATCH coop-scenes SC-3 GearGame.GearPC.OnCheckpoint: script grown to 1029 bytes, with 1 write(s)
@@ -925,11 +968,17 @@ SCRIPTPATCH coop-scenes SC-4 GearGame.GearPawn.OnTeleport: script grown to 607 b
 SCRIPTPATCH coop-scenes SC-5 GearGame.GearPC.SetSquadName: script grown to 371 bytes
 SCRIPTPATCH coop-scenes SC-6 GearGame.GearGameSP_Base.PostLogin: 1 write(s)
 SCRIPTPATCH coop-scenes: 6 rows applied for 4 players
+SCRIPTPATCH stack: players=4 coop=937c35f80cb274b7 survival=321b36117af31c35 split-revive=off coop-body=b62ed993f8c3fe5e coop-ride=9381496b16a09620 coop-scenes=cddd0eadc988a154 combined=e52feaafc39b3f26
+[netlink] beacon gate on: co-op hash e52feaafc39b3f26
 ```
 
-The game appends ", set hash <16 hex>" to each "rows applied" line; the hashes known so
-far are coop 937c35f80cb274b7 (Stage 1 results) and coop-scenes cddd0eadc988a154
-(COOP_STAGE2_SCENES.md).
+The game appends ", set hash <16 hex>" to each "rows applied" line. For 4 players with the
+default settings the five groups' set hashes are: coop 937c35f80cb274b7 (Stage 1 results),
+survival 321b36117af31c35, coop-body b62ed993f8c3fe5e, coop-ride 9381496b16a09620 and coop-scenes
+cddd0eadc988a154 (COOP_STAGE2_SCENES.md), with combined=e52feaafc39b3f26. The stack line's
+`combined=` is FNV-1a 64 over the text before it. Hashes depend on the player count and the
+group settings. The game gives this value to System Link (`net_coop_hash`) for the beacon gate
+(SDK patch 0012). The `[netlink] beacon gate on` line is logged at the first beacon datagram.
 
 Functions two groups change:
 
@@ -940,8 +989,9 @@ Functions two groups change:
 - Function ownership for later rows (no other group may grow these): group A (survival and
   split-revive) owns SpawnDefaultPawnFor, ProcessGameOver, GearPC.Destroyed, SaveCheckpoint,
   TeamHasAnyChanceOfSurvival; coop-body owns GearGame.RestartPlayer, OnGearEnterVehicle,
-  OnGearExitVehicle (coop-ride rows) and PostLogin; coop-scenes owns GearPC.SetCinematicMode,
-  GearGameSP_Base.RestartPlayer, GearPC.OnCheckpoint, GearPawn.OnTeleport, GearPC.SetSquadName.
+  OnGearExitVehicle, SyncKismetSetProperties (coop-ride rows) and PostLogin; coop-scenes owns
+  GearPC.SetCinematicMode, GearGameSP_Base.RestartPlayer, GearPC.OnCheckpoint, GearPawn.OnTeleport,
+  GearPC.SetSquadName.
 
 Offline check: `python -I tools/script_patch.py --check <folder with the decompressed
 packages>` checks the Stage 1 rows and then `tools/script_patch_stage2.py`'s stack: every group
@@ -1039,6 +1089,7 @@ Problems found and fixed in this run (each now committed):
 | 8. Vehicles | Chapter 16 (Centaur): Marcus drives (Vehicle_Centaur), Dom in the gun (GearWeaponPawn), both extras on foot with god=1 (CR-1). [V] Hero exit (CR-2) not reached. Ride-Reaver not reached. | `8-vehicle` |
 | Soak | s5: the four players moved, turned and fired in turn for 5 minutes in chapter 2; all four processes alive at every minute, no death, no leash move, about 1.6 GB RAM and 0.8 GB VRAM per instance. Real combat was not played. [V] | `soak-5min` |
 | Control (2 players) | gow2_coop_players=2, two instances: logs show only SCRIPTPATCH startup script packages loaded and SCRIPTPATCH coop: off (gow2_coop_players=2) (no survival, coop-body, coop-ride, coop-scenes or COOPLEASH line); slots_pub=2; Marcus and Dom spawn; the chapter 2 -> 3 commit passes with both pawns kept and no FATAL. [V] Two-player co-op against a v0.1.1 peer was not run (by construction nothing new runs at 2). | `control-coop2` |
+| Bandwidth | Host `[nettraffic]` lines (`net_traffic_log_sec=10`, 1709 host-to-client 10 s windows on the game port): per-client peak 5327 B/s (76 % of the 7000 B/s cap, `MaxDynamicBandwidth` unchanged) at about 30 packets/s in the s1 transition; 15 windows above 5000 and none above 6500. Host upload peak 15.8 KB/s with 3 clients (s3 transition). Two-player control peak 5235 B/s. Scripted play only, on loopback. [V] | `1-transition`, `control-coop2` |
 
 Not covered:
 - Co-op split (SC-4 pairing, SC-5). Not reached.
@@ -1049,8 +1100,43 @@ Not covered:
 - A 10-minute soak with real combat (only the 5-minute scripted soak above ran).
 - Android: the APK builds with every Stage 2 source, the leash included
   (`scripts/build-android.ps1`, 2026-10-16), but was not run on a phone.
-- Two-player play against a v0.1.1 peer.
+- Two-player play against a v0.1.1 peer (expected to crash at the chapter 2 -> 3 commit, F2) [I].
 - Internet play with 4 PCs.
+
+#### Review fixes (2026-10-16)
+
+Run on 2026-10-16 with the review fixes (commits 09fd5d7..9b8507e): `scripts/build-sdk.ps1`
+(series 0002-0012), `scripts/build.ps1 -SkipCodegen`, `scripts/test-host.ps1 -LowPriority` (all
+5 steps passed: leash 109 checks, SDK System Link and session tests "All tests passed (2177
+assertions in 86 test cases)", 247 Python tests), and `python -I tools/script_patch.py --check`
+on the player's packages (exit 0; CB-4 decodes to its end at 0x292, CR-3 at 0x214, S2A-3 at
+0x4FB). [V] Three game sessions on one PC, four instances on 127.0.0.1-.4 unless noted, seeded
+from a copy of an Act 1 chapter 2 save; the folders are `out/review-test/r1`, `r1c`, `r3-*`
+(gitignored: logs and screenshots from the player's own game). [V]
+
+| Check | Result |
+|---|---|
+| Stack line and gate | All four logs: the same `SCRIPTPATCH stack: players=4 coop=937c35f80cb274b7 survival=321b36117af31c35 split-revive=off coop-body=b62ed993f8c3fe5e coop-ride=9381496b16a09620 coop-scenes=cddd0eadc988a154 combined=e52feaafc39b3f26`, `[netlink] beacon gate on: co-op hash e52feaafc39b3f26`, no `skipped`. The three clients found the host through the gate and joined. [V] |
+| CB-4 | P3 `suicide`: respawned with GearWeap_AssaultRifle, GearWeap_COGPistol, GearWeap_Shotgun (both extras). Marcus and Dom kept AssaultRifle, COGPistol, FragGrenade: no Gnasher added. [V] |
+| S2A-3 dummy | SaveCheckpoint with four players (the save holds two GearPawn_COGGear records), P4 left (`XGISessionLeaveRemote` on the host), LoadCheckpoint: no GearAI on a GearPawn_COGGear, exactly one extra body (P3's), the four GearAI_Dom drive the RedShirts as before, no CoopPlayerLeft line. [V] P4's record had no player, so the loader made it a dummy [I]. |
+| Beacon gate (Stage 4 test 3, loopback) | P4 restarted with `--gow2_coop_body=false` (combined 6751fc7ecf3d6eec): NO CAMPAIGNS FOUND; host `[netlink] beacon from 127.0.0.4:14001 dropped: co-op hash 6751fc7ecf3d6eec differs from ours e52feaafc39b3f26`; P4 `[netlink] co-op hash from 127.0.0.1:14001 is e52feaafc39b3f26, ours is 6751fc7ecf3d6eec: different build or co-op settings; its campaigns stay hidden`. P4 at `--gow2_coop_players=2` (no hash, as a v0.1.1 copy): NO CAMPAIGNS FOUND, host `... dropped: no co-op hello (ours e52feaafc39b3f26)`. P4 with the same settings again: listed, joined, spawned without Right Trigger, no AI-driven extra. [V] |
+| God mode while riding | Chapter 16: Marcus in Vehicle_Centaur, the human Dom in GearWeaponPawn, both extras on foot god=1. SaveCheckpoint inside the ride, LoadCheckpoint: `COOPLEASH GearPC_SP_7: god mode on (GearPC_SP_5 rides GearWeaponPawn)` and the same for GearPC_SP_6; both extras god=1 again with the heroes back in their seats. Travel to chapter 13: both extras god=0. [V] |
+| CR-3 | Chapter 16 with both extras at god=1: the human Dom (P4) left and rejoined: god=0 in PlayerWaiting and god=0 after Right Trigger put him back in the gun. A rejoining extra got god mode from the leash in the second it joined. [V] |
+| Overlap | Travel to chapter 13: `COOPLEASH GearPC_SP_14 moved next to GearPC_SP_11 (was 0 units away; overlapped GearPC_SP_11)`; after the chapter cinematic the extras stood 240 and 115 units from Marcus. [V] |
+| Coop not applied | One instance with `gow2_coop_players=4 --gow2_coop_patch_fail_test=true`: `SCRIPTPATCH coop: skipped (S1-1: +0x0000 expected FB, found 04); the game stays retail`, `COOPLEASH off (the coop group was not applied)`, no `COOPLEASH on`, `SCRIPTPATCH stack: players=4 coop=skipped survival=off split-revive=off coop-body=off coop-ride=off coop-scenes=off combined=28d1693acdf0ba83`. [V] |
+| Control (2 players) | Two instances at the default `gow2_coop_players=2`: `SCRIPTPATCH coop: off (gow2_coop_players=2)`, no stack, gate or COOPLEASH line, `slots_pub=2`, the client joined with no gate, Marcus and Dom spawned. [V] |
+
+New observations, not fixed:
+- Roles move after servertravel. In both sessions P2 was Dom at launch, and after chapter travel
+  by servertravel P4 was Dom and P2 an extra. [V] SuggestPawnClassFor gives Dom to the first
+  non-Marcus player restarted after the travel. [I] Chapter changes by map commit were not
+  checked for this.
+- LoadCheckpoint of the chapter 16 start checkpoint (saved by the travel, before the ride) put
+  Marcus at (0,0,0), falling, for 3 min 15 s while the remote Dom sat in PlayerWaiting; it ended
+  when the chapter-start cinematic ran. Meanwhile the leash logged `no free spot next to
+  GearPC_SP_6` for both extras every 8 s and did not move them. [V] Cause not traced.
+- `COOPLEASH on` is logged on clients too; they never act (TakeSnapshot returns nothing on a
+  client). [V code]
 
 ### Stage 3: 8-10 players and bandwidth
 
@@ -1170,7 +1256,9 @@ Decisions taken while implementing:
   192.168.10.10/24 (default-route adapter), ..., LAN broadcast 192.168.10.255,
   255.255.255.255, port offset 40000".
 
-Still open: the version gate; the 30 minutes of Stage 4 test 1 and tests 2 to 4.
+Patch 0012 adds a co-op hash gate on the beacon for 3+ players (see sdk/patches/README.md).
+Still open: a build-id check for two-player co-op; the 30 minutes of Stage 4 test 1 and tests 2
+to 4. Stage 4 test 3 is the mismatch join test (to be run).
 
 **Wire compatibility.** Guest code builds every packet byte in big-endian guest memory, and the
 runtime passes the bytes through raw, so both platforms put the same bytes on the wire. [I,
@@ -1211,8 +1299,9 @@ server corrections, because UE3 is server-authoritative. [I]
   today.
 - **SDK tree.** The Android SDK tree must carry 0003 and 0010. Patches 0005 and 0006 are not there
   yet (see `docs/ANDROID.md`).
-- **Version gate.** Both ends run the same game version. The patch-set hash goes in the session
-  data, and a join is refused on mismatch.
+- **Version gate.** Patch 0012 adds a co-op hash gate on the beacon for 3+ players (see
+  sdk/patches/README.md): System Link lists and answers only peers whose co-op hash matches. A
+  build-id check for two-player co-op is still open.
 
 #### Stage 4 test
 
@@ -1340,8 +1429,11 @@ Network and SDK:
   `NumOpenPublicConnections` is 0. Whether the client also filters was not separated.
 - Is a 7000 bytes/s cap per client enough for 4 players? In the opening of chapter 2, yes. The
   host sent each client 3.0-3.5 KB/s on average, with a peak of 5.3 KB/s at about 29 packets/s,
-  and received about 0.7 KB/s from each (Stage 1 results, step 12). Heavy fights were not
-  measured.
+  and received about 0.7 KB/s from each (Stage 1 results, step 12). In Stage 2 (1709 host-to-client
+  10 s windows) the per-client peak was 5327 B/s at about 30 packets/s, 15 windows were above 5000
+  and none above 6500, and host upload peaked at 15.8 KB/s with 3 clients. Heavy real combat was
+  not measured; log traffic in the real session with `--net_traffic_log_sec=10 --system_link_trace=true`
+  on the host: windows pinned near 7000 B/s mean the cap binds (Stage 3's MaxDynamicBandwidth edit).
 
 Running four instances on one PC:
 
