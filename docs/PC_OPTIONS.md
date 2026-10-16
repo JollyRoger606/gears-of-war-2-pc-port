@@ -7,7 +7,10 @@ On Android, the menu and its entry on the game's Options screen are called
 "Device Options" ("Opciones del dispositivo" in Spanish). Windows keeps
 "PC Options" ("Opciones de PC" in Spanish). Everything else is the same menu.
 
-Verified in game on a PC on 2026-10-16. Verified on a Galaxy S25 Ultra
+Verified in game on a PC on 2026-10-16, including Back + Start, which opened
+the menu, and the B that closed it, which did not reach the game. With the
+menu's 0.2.0 build a phone found a PC host's System Link campaign and joined
+its lobby (both logs: `XGISessionJoinRemote ... members=2`). Verified on a Galaxy S25 Ultra
 on 2026-10-16: the gear and the game's Options > Device Options open
 the menu (log `PCOPTIONS open (gear)` / `(game-menu)`); tabs and
 arrows work by touch; Save wrote `gow2_touch_opacity` into

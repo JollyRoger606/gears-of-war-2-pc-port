@@ -38,7 +38,7 @@ Read in English: [README.md](README.md)
 - [x] Reescalado temporal FSR 4 y FSR 3.1 (`gow2_temporal`, `gow2_upscaler`; apagado por defecto). La versión publicada no trae DLSS
 - [ ] Teclas que el juego reciba como en un PC (todavía pasan por un mando emulado)
 - [ ] Campaña completa de principio a fin
-- [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15; Etapa 2 (cambios de capítulo, muertes, salida y reingreso, puntos de control y cinemáticas) verificada con cuatro copias en un mismo PC el 2026-10-16
+- [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15; Etapa 2 (cambios de capítulo, muertes, salida y reingreso, puntos de control y cinemáticas) verificada con cuatro copias en un mismo PC el 2026-10-16; un teléfono y un PC con 0.2.0 entraron al mismo lobby de System Link el 2026-10-16
 - [x] Juego por internet, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): un teléfono con datos móviles se unió a una campaña alojada en un PC a través de puertos abiertos por UPnP, verificado el 2026-10-15; todavía no se probó con un amigo en otro PC fuera de la red
 - [x] Menú de opciones en el juego (Opciones de PC; Opciones del dispositivo en Android) ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): verificado en un PC y en un Galaxy S25 Ultra el 2026-10-16
 - [ ] Horda y Versus por System Link
