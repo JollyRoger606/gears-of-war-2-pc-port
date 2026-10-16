@@ -205,7 +205,7 @@ The result must end in the host's current public address (https://api.ipify.org)
 ### Game settings
 On PC, pass settings on the command line. Every build copies `config/gow2.toml` over
 `out\build\release\gow2.toml`, so edits to the latter are lost, and the command line outranks
-`gow2.toml`. See [NETWORK_PLAY.md](NETWORK_PLAY.md), "Settings". `host-online.ps1 -Start` prints
+`gow2.toml`. See [NETWORK_PLAY.md](NETWORK_PLAY.md), "Settings". The same settings can be set in game under PC Options > Multiplayer (restart to apply), and on Windows the in-game "Host over the internet" page runs `host-online.ps1` for you; the command line and the script still work ([PC_OPTIONS.md](PC_OPTIONS.md)). `host-online.ps1 -Start` prints
 this line with the name it checked:
 ```
 gow2.exe --net_link_active=true --net_public_address=gow2.example.com --net_allow_peers=198.51.100.20,friend2.example.net --system_link_trace=true

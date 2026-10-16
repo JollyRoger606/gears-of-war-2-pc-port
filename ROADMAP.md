@@ -20,7 +20,7 @@ Each phase keeps the previous one working.
       the keyboard, Xbox or generic controller glyphs otherwise), including the button
       pictures inside hints, through input-aware texture variants.
 - [ ] Full control mapping for Xbox controllers, keyboard and mouse, and generic controllers
-      (anything SDL knows), editable in game.
+      (anything SDL knows), editable in game. Keyboard bindings are editable in game now (PC Options > Controls); controller remapping is still the game's own layouts.
 - [ ] Title Update 6 support (`patch_file_path` for the `.xexp`), which Road to Ruin and
       later multiplayer fixes need.
 - [ ] Horde and versus over System Link (LAN). A friend of the project reports he already
@@ -79,9 +79,9 @@ port reached more platforms and added features.
 - [ ] Higher quality textures (4K packs) through a texture replacement path that loads
       user-supplied files; no original assets are redistributed.
 - [ ] Graphics options (shadows, anisotropic filtering, AA, film grain, motion blur).
-- [ ] The new options inside the game: graphics (render resolution, upscaler, texture packs)
+- [x] The new options inside the game: graphics (render resolution, upscaler, texture packs)
       and controls (mapping, sensitivity), from the game's Options screen or the runtime's
-      overlay, instead of only `gow2.toml`.
+      overlay, instead of only `gow2.toml`. Done: the PC Options menu opens from Options > PC Options, F10 or Back+Start ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)).
 
 ## Rules that apply to every phase
 

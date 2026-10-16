@@ -39,6 +39,7 @@ Read in English: [README.md](README.md)
 - [ ] Campaña completa de principio a fin
 - [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15; Etapa 2 (cambios de capítulo, muertes, salida y reingreso, puntos de control y cinemáticas) verificada con cuatro copias en un mismo PC el 2026-10-16
 - [x] Juego por internet, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): un teléfono con datos móviles se unió a una campaña alojada en un PC a través de puertos abiertos por UPnP, verificado el 2026-10-15; todavía no se probó con un amigo en otro PC fuera de la red
+- [x] Menú de opciones en el juego ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): PC verificado el 2026-10-16; Android: see docs/PC_OPTIONS.md
 - [ ] Horda y Versus por System Link
 - [ ] Android: una compilación del repositorio llega a jugar y se une a la campaña de un PC por System Link, pero todavía no está terminado; la release v0.1.2 trae un APK experimental. Toda la escena se dibuja desde el 15 de octubre; corre a unos 30 fps durante los primeros minutos desde un arranque en frío y baja a unos 10-12,5 fps cuando el teléfono está caliente ([docs/ANDROID.md](docs/ANDROID.md))
 
@@ -84,18 +85,21 @@ La versión no incluye nada del juego. No piratees el juego.
 | Armas | 1–4 |
 | Pausa | Enter o Esc |
 | Atrás | Tab |
+| Menú de opciones de PC | F10 |
 
 Un mando funciona al mismo tiempo. Todas las asignaciones están en `gow2.toml`.
 
 ## Ajustes
 
-`gow2.toml` se encuentra junto al exe. Se lee al arrancar; las opciones de línea de comandos (`--nombre=valor`) tienen prioridad sobre él. Claves principales:
+Todo esto se puede cambiar en el juego desde Opciones > Opciones de PC (o F10, o Back+Start); ver [docs/PC_OPTIONS.md](docs/PC_OPTIONS.md). `gow2.toml` se encuentra junto al exe. Se lee al arrancar; las opciones de línea de comandos (`--nombre=valor`) tienen prioridad sobre él. Claves principales:
 
 - `fullscreen` — pantalla completa o ventana.
 - `resolution_scale` — resolución interna de renderizado como múltiplo de 720p: 1 = 720p, 2 = 1440p, 3 = 4K.
 - `present_effect` — escalado de la imagen final: `bilinear` con el runtime estándar; `fsr`, `cas` y rutas temporales experimentales con un runtime compilado desde el código fuente (ver abajo).
 - `vsync` — sincronización vertical.
 - `gow2_unlock_fps` — elimina el límite de 30 fps del juego.
+- `gow2_fps_cap` — límite de FPS con el juego desbloqueado (0 = sin límite).
+- `gow2_audio_volume` — volumen general en por ciento.
 - `gow2_black_shading_fix` — iluminación correcta de los personajes.
 - `gow2_texture_streaming_fix` — reserva de texturas más grande, menos apariciones repentinas.
 - `gow2_aniso16` — filtrado anisotrópico 16x.

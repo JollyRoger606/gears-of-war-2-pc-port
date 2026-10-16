@@ -1,5 +1,9 @@
 # Android shell
 
+On Android, the settings menu and its entry on the game's Options screen are
+called "Device Options" ("Opciones del dispositivo" in Spanish). Windows keeps
+"PC Options" ("Opciones de PC" in Spanish); everything else is the same menu.
+
 The Android application of the port (step 3 of [docs/ANDROID.md](../docs/ANDROID.md)): an SDL3
 activity, the game-folder setup and either a placeholder native library (the default) or the
 game's own libraries, built by `scripts/build-android.ps1` (see [Game build](#game-build)).
@@ -122,8 +126,8 @@ With `gow2_touch_log` the game thread read the pad 135 to 660 ms apart in that a
 thread read it every 16 ms. Five quick taps of the D-pad, one of R3 and one of X each reached the
 game thread; a steady 4 s drag across the look area gave the game thread 13 reads of 15226 to 21346
 (about 21100 while the finger moved at a constant speed, none of them 0); a drag that started on
-RT kept firing and turned the camera on every read. The gear opens the settings overlay, a quick
-tap selects in it, and "Save to config" wrote `gow2.toml` beside the logs.
+RT kept firing and turned the camera on every read. The gear opens the Device Options menu, a quick
+tap selects in it, and saving wrote `gow2.toml` beside the logs.
 
 Frame rate in that first gameplay area: 2.6 to 5.2 game frames per second (`gow2_frame_log`), with
 the GPU held at 160 to 222 MHz of its 1.2 GHz by the phone's thermal limit (thermal status 2 to 3,
@@ -365,7 +369,7 @@ same time.
 | Top left | LB (Tac/Com) |
 | Left, above the stick | D-pad (weapons, menus) |
 | Top centre | Back, Start |
-| Top right corner (gear) | Opens and closes the runtime's settings overlay (`bind_settings`, F4 on a keyboard) |
+| Top right corner (gear) | Opens and closes the Device Options menu (the runtime's raw settings are in Device Options > System > All runtime settings, F4 on a keyboard) |
 
 Each finger owns the control it touched first until it lifts. A tap stays pressed until the game has
 read it, and for at least 100 ms. Every thread that reads the pad (`XamInputGetState`) and the
@@ -385,14 +389,14 @@ axis past about a quarter) hides them until the next touch; unplugging the last 
 them at once (not yet tried with a real controller on the phone). A key or a mouse hides them for
 `gow2_touch_hide_seconds` (10). The first touch on hidden controls only shows them.
 
-The gear opens the settings overlay, where the `gow2_touch_*` settings are (category `input`, or
-type `gow2_touch` in the search field, which opens the phone's keyboard). ImGui takes touches like a
-mouse there (patch 0007 turns a quick tap into a click), and the game's pad reads neutral while the
-overlay is open. The window is taller than the phone's screen: drag an empty part of it up to reach
-"Save to config", which writes `gow2.toml` in `Android/data/com.santiquiroz.gow2recomp/files`,
-beside the `logs` folder. A keyboard or mouse found at launch makes `mnk_mode` / `mnk_mouse` that
-launch's default value instead of a changed one, so saving does not keep them for a later launch
-without the device.
+The gear opens the Device Options menu, whose Touch tab holds
+the `gow2_touch_*` settings. ImGui takes touches like a mouse there
+(patch 0007 turns a quick tap into a click), and the game's pad reads
+neutral while the menu is open. Saving writes `gow2.toml` in
+`Android/data/com.santiquiroz.gow2recomp/files`, beside the `logs` folder.
+A keyboard or mouse found at launch makes `mnk_mode` / `mnk_mouse` that
+launch's default value instead of a changed one, so saving does not keep
+them for a later launch without the device.
 
 Patch 0007 makes the SDK's window deliver Android finger events to its listeners and drop the mouse
 events SDL makes up from fingers and pens. On Windows the SDK does not deliver finger events, the

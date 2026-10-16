@@ -39,6 +39,7 @@ Leer en español: [README.es.md](README.es.md)
 - [ ] Full campaign play-through
 - [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four copies on one PC (loopback), and a PC with an Android phone on one LAN for two players, verified 2026-10-14 and 2026-10-15; Stage 2 (chapter changes, deaths, leave/rejoin, checkpoints, cinematics) verified with four copies on one PC on 2026-10-16
 - [x] Internet play, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): a phone on mobile data joined a PC-hosted campaign through ports opened by UPnP, verified 2026-10-15; a PC friend outside the network has not been tried yet
+- [x] In-game options menu ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): PC verified 2026-10-16; Android: see docs/PC_OPTIONS.md
 - [ ] System Link Horde and Versus
 - [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but is not finished yet; an experimental APK is attached to the v0.1.2 release. The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm ([docs/ANDROID.md](docs/ANDROID.md))
 
@@ -84,18 +85,21 @@ Nothing of the game is included in the release. Do not pirate the game.
 | Weapons | 1–4 |
 | Pause | Enter or Esc |
 | Back | Tab |
+| PC Options menu | F10 |
 
 A controller works at the same time. All bindings are in `gow2.toml`.
 
 ## Settings
 
-`gow2.toml` sits next to the exe. It is read at start-up; command-line flags (`--name=value`) override it. Main keys:
+Everything here can be changed in game from Options > PC Options (or F10, or Back+Start); see [docs/PC_OPTIONS.md](docs/PC_OPTIONS.md). `gow2.toml` sits next to the exe. It is read at start-up; command-line flags (`--name=value`) override it. Main keys:
 
 - `fullscreen` — run fullscreen or windowed.
 - `resolution_scale` — internal render resolution as a multiple of 720p: 1 = 720p, 2 = 1440p, 3 = 4K.
 - `present_effect` — final image scaling: `bilinear` with the stock runtime; `fsr`, `cas` and experimental temporal paths with a source-built runtime (see below).
 - `vsync` — vertical sync.
 - `gow2_unlock_fps` — lifts the game's 30 fps cap.
+- `gow2_fps_cap` — frame rate limit while unlocked (0 = no limit).
+- `gow2_audio_volume` — master volume in percent.
 - `gow2_black_shading_fix` — correct character lighting.
 - `gow2_texture_streaming_fix` — bigger texture pool, less pop-in.
 - `gow2_aniso16` — 16x anisotropic filtering.

@@ -83,6 +83,8 @@ gow2_save_dir = 'saves'                             # portable: a folder next to
 
 Single quotes keep backslashes as typed (a TOML literal string); forward slashes work as well.
 
+PC Options > Saves picks the save folder in game: the default, portable `saves`, detected OneDrive / Google Drive / Dropbox folders, or Choose a folder for any other folder. It also opens the folder. Restart to apply. See [PC_OPTIONS.md](PC_OPTIONS.md).
+
 What happens at start-up (`src/gow2_save_dir.cpp`, applied in `Gow2App::OnFinalizePaths`, which runs
 after `gow2.toml` is loaded and before the runtime is built):
 

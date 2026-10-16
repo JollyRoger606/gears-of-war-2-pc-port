@@ -101,11 +101,11 @@ Stage 2 results.
 
 ## Settings
 
-On PC, pass them on the command line as `--name=value`, from a shortcut or
+On PC, `user_name`, `net_link_active`, `gow2_coop_players`, `net_peers`, `net_public_address` and `net_allow_peers` can be set in game under PC Options > Multiplayer (restart to apply; [PC_OPTIONS.md](PC_OPTIONS.md)). They can also be passed on the command line as `--name=value`, from a shortcut or
 a small launch script. `gow2.toml` next to `gow2.exe` also works, but every
-build of the game copies `config/gow2.toml` over that file (a CMake
+build from source copies `config/gow2.toml` over that file (a CMake
 post-build step, `copy_if_different`), so settings edited there vanish at
-the next build without a warning. The command line also outranks
+the next build without a warning; the release zip is not affected. The command line also outranks
 `gow2.toml`.
 
 On Android, put a `gow2.toml` in the app's files folder,
