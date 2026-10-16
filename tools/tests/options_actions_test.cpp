@@ -1,0 +1,164 @@
+// Host-side test of the GOW2HOST result-line reader (no game data, no SDK).
+#include "gow2_host_line.h"
+
+#include <cstdio>
+#include <optional>
+#include <string>
+#include <string_view>
+
+using rex::glue::host_line::ParseHostLine;
+using rex::glue::options_actions::HostResult;
+
+int g_checks = 0;
+int g_failures = 0;
+void Expect(bool ok, std::string_view what) { ++g_checks; if (ok) return; ++g_failures; std::printf("FAIL: %.*s\n", int(what.size()), what.data()); }
+
+void TestExample() {
+  const std::string line =
+      "GOW2HOST {\"mode\":\"Start\",\"ok\":true,\"error\":\"\",\"public_address\":\"203.0.113.7\","
+      "\"peer_name\":\"gow2.example.com\",\"ports\":[14001,41000],\"lease_hours\":6,"
+      "\"lease_end\":\"2026-10-16T22:40:00\",\"stop_scheduled_at\":\"2026-10-16T22:41:00\","
+      "\"routers\":[{\"address\":\"192.168.10.1\",\"closing\":\"the lease ends at 2026-10-16 22:40\"}],"
+      "\"open_ports\":0,\"warnings\":[\"a \\\"quoted\\\" note\"]}";
+  const std::optional<HostResult> parsed = ParseHostLine(line);
+  Expect(parsed.has_value(), "example parses");
+  if (!parsed) return;
+  Expect(parsed->mode == "Start", "example mode");
+  Expect(parsed->ok, "example ok");
+  Expect(parsed->error.empty(), "example error");
+  Expect(parsed->public_address == "203.0.113.7", "example public_address");
+  Expect(parsed->peer_name == "gow2.example.com", "example peer_name");
+  Expect(parsed->ports.size() == 2u, "example ports size");
+  if (parsed->ports.size() == 2u) {
+    Expect(parsed->ports[0] == 14001 && parsed->ports[1] == 41000, "example ports values");
+  }
+  Expect(parsed->lease_hours == 6, "example lease_hours");
+  Expect(parsed->lease_end == "2026-10-16T22:40:00", "example lease_end");
+  Expect(parsed->stop_scheduled_at == "2026-10-16T22:41:00", "example stop_scheduled_at");
+  Expect(parsed->routers.size() == 1u, "example routers size");
+  if (parsed->routers.size() == 1u) {
+    Expect(parsed->routers[0].address == "192.168.10.1", "example router address");
+    Expect(parsed->routers[0].closing == "the lease ends at 2026-10-16 22:40",
+           "example router closing");
+  }
+  Expect(parsed->open_ports == 0, "example open_ports");
+  Expect(parsed->warnings.size() == 1u, "example warnings size");
+  if (parsed->warnings.size() == 1u) {
+    Expect(parsed->warnings[0] == "a \"quoted\" note", "example warning text");
+  }
+}
+
+void TestStatusNullsAndEmptyArrays() {
+  const std::string line =
+      "GOW2HOST {\"mode\":\"Status\",\"ok\":true,\"error\":\"\",\"public_address\":\"\",\"peer_name\":\"\","
+      "\"ports\":[14001,41000],\"lease_hours\":null,\"lease_end\":\"\",\"stop_scheduled_at\":\"\","
+      "\"routers\":[],\"open_ports\":2,\"warnings\":[]}";
+  const std::optional<HostResult> parsed = ParseHostLine(line);
+  Expect(parsed.has_value(), "status parses");
+  if (!parsed) return;
+  Expect(parsed->mode == "Status", "status mode");
+  Expect(parsed->ok, "status ok");
+  Expect(parsed->lease_hours == 0, "status null lease_hours reads 0");
+  Expect(parsed->routers.empty(), "status empty routers");
+  Expect(parsed->warnings.empty(), "status empty warnings");
+  Expect(parsed->open_ports == 2, "status open_ports");
+  Expect(parsed->ports.size() == 2u, "status ports size");
+}
+
+void TestOneRouterUnknownFieldsAndNulls() {
+  const std::string line =
+      "GOW2HOST {\"mode\":\"Start\",\"ok\":true,\"error\":null,\"public_address\":\"198.51.100.9\","
+      "\"peer_name\":null,\"ports\":[14001],\"lease_hours\":0.5,\"lease_end\":\"\",\"stop_scheduled_at\":\"\","
+      "\"routers\":[{\"address\":\"10.0.0.1\",\"closing\":null,\"extra\":[1,2]}],\"open_ports\":1,"
+      "\"warnings\":[],\"future\":{\"deep\":[true,null]},\"spare\":42}";
+  const std::optional<HostResult> parsed = ParseHostLine(line);
+  Expect(parsed.has_value(), "one-router parses");
+  if (!parsed) return;
+  Expect(parsed->routers.size() == 1u, "one-router size");
+  if (parsed->routers.size() == 1u) {
+    Expect(parsed->routers[0].address == "10.0.0.1", "one-router address");
+    Expect(parsed->routers[0].closing.empty(), "one-router null closing reads empty");
+  }
+  Expect(parsed->lease_hours == 0.5, "one-router fractional lease_hours");
+  Expect(parsed->error.empty(), "one-router null error reads empty");
+  Expect(parsed->peer_name.empty(), "one-router null peer_name reads empty");
+  Expect(parsed->ports.size() == 1u && parsed->ports[0] == 14001, "one-router ports");
+}
+
+void TestEscapes() {
+  const std::string line =
+      "GOW2HOST {\"mode\":\"Stop\",\"ok\":false,\"error\":\"caf\\u00e9 \\uD83D\\uDE00\\t\\n\\\"\\\\\\/"
+      "\\b\\f\\r\",\"public_address\":\"\",\"peer_name\":\"\",\"ports\":[],\"lease_hours\":0,\"lease_end\":\"\","
+      "\"stop_scheduled_at\":\"\",\"routers\":[],\"open_ports\":0,\"warnings\":[\"tab\\there\"]}";
+  const std::optional<HostResult> parsed = ParseHostLine(line);
+  Expect(parsed.has_value(), "escapes parse");
+  if (!parsed) return;
+  const std::string want = "caf\xC3\xA9 \xF0\x9F\x98\x80\t\n\"\\/\b\f\r";
+  Expect(parsed->error == want, "escapes decode incl \\u00e9 and a surrogate pair");
+  Expect(parsed->warnings.size() == 1u && parsed->warnings[0] == "tab\there",
+         "escapes warning tab");
+  Expect(!parsed->ok, "escapes ok false");
+}
+
+void TestBadStrings() {
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"x\",\"error\":\"\\uD83D\"}"), "lone high surrogate fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"x\",\"error\":\"\\uDE00\"}"), "lone low surrogate fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"x\",\"error\":\"\\uD83D\\u0041\"}"),
+         "high surrogate plus non-low fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"x\",\"error\":\"\\u12GZ\"}"), "bad hex fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"x\",\"error\":\"\\x\"}"), "bad escape fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"x\",\"error\":\"unclosed}"), "unclosed string fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"x\",\"error\":\"a\x01" "b\"}"), "control char fails");
+}
+
+void TestMissingPrefix() {
+  Expect(!ParseHostLine("{\"mode\":\"Start\",\"ok\":true}"), "no prefix fails");
+  Expect(!ParseHostLine("GOW2HOST{\"mode\":\"Start\"}"), "prefix without space fails");
+  Expect(!ParseHostLine("GOW2HOST"), "bare prefix fails");
+  Expect(!ParseHostLine(""), "empty line fails");
+  Expect(!ParseHostLine("  GOW2HOST {\"mode\":\"Start\"}"), "leading spaces fail");
+}
+
+void TestMalformed() {
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"Start\",\"ok\":tr"), "truncated fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"Start\",}"), "trailing comma fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":\"Start\"} trailing"), "trailing text fails");
+  Expect(!ParseHostLine("GOW2HOST [1,2]"), "top-level array fails");
+  Expect(!ParseHostLine("GOW2HOST "), "prefix only fails");
+  Expect(!ParseHostLine("GOW2HOST {\"ports\":[01]}"), "leading zero fails");
+  Expect(!ParseHostLine("GOW2HOST {\"mode\":}"), "missing value fails");
+  Expect(!ParseHostLine("GOW2HOST {'mode':'Start'}"), "single quotes fail");
+  Expect(!ParseHostLine("GOW2HOST {\"ok\":\"yes\"}"), "wrong ok type fails");
+  Expect(!ParseHostLine("GOW2HOST {\"ports\":{}}"), "wrong ports type fails");
+  Expect(!ParseHostLine("GOW2HOST {\"open_ports\":1.5}"), "fractional open_ports fails");
+}
+
+void TestTrailingSpaceAndDefaults() {
+  const std::optional<HostResult> spaced =
+      ParseHostLine("GOW2HOST {\"mode\":\"Status\",\"ok\":true}  \r");
+  Expect(spaced.has_value(), "trailing spaces and CR parse");
+  if (spaced) {
+    Expect(spaced->mode == "Status", "trailing spaces mode");
+    Expect(spaced->ok, "trailing spaces ok");
+  }
+  const std::optional<HostResult> empty = ParseHostLine("GOW2HOST {}");
+  Expect(empty.has_value(), "empty object parses");
+  if (empty) {
+    Expect(empty->mode.empty() && !empty->ok && empty->lease_hours == 0, "empty object defaults");
+    Expect(empty->ports.empty() && empty->routers.empty() && empty->warnings.empty(),
+           "empty object empty lists");
+  }
+}
+
+int main() {
+  TestExample();
+  TestStatusNullsAndEmptyArrays();
+  TestOneRouterUnknownFieldsAndNulls();
+  TestEscapes();
+  TestBadStrings();
+  TestMissingPrefix();
+  TestMalformed();
+  TestTrailingSpaceAndDefaults();
+  std::printf("options_actions_test: %d checks, %d failures\n", g_checks, g_failures);
+  return g_failures == 0 ? 0 : 1;
+}

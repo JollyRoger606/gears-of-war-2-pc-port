@@ -5,6 +5,7 @@
 // through the client's InputAxis as MouseX/MouseY before the original runs.
 
 #include "gow2_mouse_aim.h"
+#include "gow2_host_ui.h"
 
 #if !defined(__ANDROID__)
 #include <windows.h>
@@ -117,12 +118,17 @@ bool MouseLookedLast() {
 class MouseBankListener : public rex::ui::WindowInputListener {
  public:
   void OnMouseMove(rex::ui::MouseEvent& e) override {
+    if (HostUiOpen()) {
+      DiscardNativeMouseInput();
+      return;
+    }
     rex::ui::Window* window = e.target();
     if (!window || !window->IsMouseCaptureRequested()) return;
     if (!rex::input::mnk::IsMouseLookActive()) return;
     if (e.dx() == 0 && e.dy() == 0) return;
     {
       std::lock_guard<std::mutex> lock(g_bank_mutex);
+      if (HostUiOpen()) return;
       g_bank_dx += e.dx();
       g_bank_dy += e.dy();
     }
@@ -256,7 +262,7 @@ void ProcessInputHook(PPCContext& ctx, uint8_t* base) {
   const uint32_t viewport = ctx.r3.u32;
   const MouseCounts counts = DrainMouseBank();
   AxisSent sent;
-  if ((counts.dx != 0 || counts.dy != 0) && viewport != 0)
+  if (!HostUiOpen() && (counts.dx != 0 || counts.dy != 0) && viewport != 0)
     sent = InjectMouseLook(ctx, base, viewport, counts, delta_time);
   MaybeLogMouseAim(sent);
   g_process_input_orig(ctx, base);
@@ -290,8 +296,17 @@ void AxisAccumulateHook(PPCContext& ctx, uint8_t* base) {
 }
 
 std::atomic<bool> g_installed{false};
+std::atomic<bool> g_hooks_installed{false};
 
 }  // namespace
+
+bool NativeMouseAimInstalled() {
+  return g_hooks_installed.load(std::memory_order_acquire);
+}
+
+void DiscardNativeMouseInput() {
+  DrainMouseBank();
+}
 
 bool NativeMouseAimWanted() {
   if (!REXCVAR_GET(gow2_mouse_aim)) return false;
@@ -353,6 +368,7 @@ void InstallNativeMouseAim(rex::ui::Window* window) {
     return;
   }
   window->AddInputListener(&g_mouse_listener, 1);
+  g_hooks_installed.store(true, std::memory_order_release);
   REXLOG_INFO("MOUSEAIM native mouse look on (ProcessInput, friction target, axis hooks installed)");
 }
 

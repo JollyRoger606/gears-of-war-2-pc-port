@@ -46,6 +46,19 @@ set(GOW2_SOURCES
     src/gow2_dev_map_change.cpp
     src/gow2_dev_cheats.cpp
     src/gow2_dev_cheats_table.cpp
+    # In-game PC Options menu (src/gow2_options_*), its saving, actions and the settings it adds.
+    src/gow2_toml_edit.cpp
+    src/gow2_options_catalog.cpp
+    src/gow2_options_model.cpp
+    src/gow2_options_input.cpp
+    src/gow2_options_values.cpp
+    src/gow2_options_values_text.cpp
+    src/gow2_options_actions.cpp
+    src/gow2_host_line.cpp
+    src/gow2_options_overlay.cpp
+    src/gow2_host_ui.cpp
+    src/gow2_fps_cap.cpp
+    src/gow2_audio_volume.cpp
 )
 
 # The exe icon. CMake already turns on RC for clang on Windows; enable_language makes it explicit.
@@ -60,6 +73,10 @@ endif()
 add_executable(gow2 WIN32 ${GOW2_SOURCES})
 
 rexglue_setup_target(gow2 GPU_PLUGINS xenos)
+
+# Shown in the PC Options menu; scripts/package.ps1 names the release zip with the same version.
+set(GOW2_VERSION "0.2.0" CACHE STRING "Port version shown in game")
+target_compile_definitions(gow2 PRIVATE GOW2_VERSION="${GOW2_VERSION}")
 
 # Host-side test of the script patcher on synthetic guest memory (no game data). Not part of the
 # default build: cmake --build <dir> --target gow2_script_patch_test, then run the exe.
@@ -112,6 +129,27 @@ add_executable(gow2_coop_leash_test EXCLUDE_FROM_ALL
     src/gow2_coop_leash_plan.cpp
 )
 target_include_directories(gow2_coop_leash_test PRIVATE src)
+
+# Host-side tests of the PC Options menu's pure parts (no game data, no SDK).
+add_executable(gow2_toml_edit_test EXCLUDE_FROM_ALL tools/tests/toml_edit_test.cpp src/gow2_toml_edit.cpp)
+add_executable(gow2_options_catalog_test EXCLUDE_FROM_ALL
+    tools/tests/options_catalog_test.cpp src/gow2_options_catalog.cpp)
+add_executable(gow2_options_model_test EXCLUDE_FROM_ALL
+    tools/tests/options_model_test.cpp src/gow2_options_model.cpp src/gow2_options_catalog.cpp)
+add_executable(gow2_options_input_test EXCLUDE_FROM_ALL
+    tools/tests/options_input_test.cpp src/gow2_options_input.cpp)
+add_executable(gow2_options_values_test EXCLUDE_FROM_ALL
+    tools/tests/options_values_test.cpp src/gow2_options_values_text.cpp)
+add_executable(gow2_options_actions_test EXCLUDE_FROM_ALL
+    tools/tests/options_actions_test.cpp src/gow2_host_line.cpp)
+add_executable(gow2_fps_cap_test EXCLUDE_FROM_ALL tools/tests/fps_cap_test.cpp)
+add_executable(gow2_audio_volume_test EXCLUDE_FROM_ALL tools/tests/audio_volume_test.cpp)
+add_executable(gow2_coalesced_text_test EXCLUDE_FROM_ALL tools/tests/coalesced_text_test.cpp)
+foreach(_options_test gow2_toml_edit_test gow2_options_catalog_test gow2_options_model_test
+        gow2_options_input_test gow2_options_values_test gow2_options_actions_test gow2_fps_cap_test
+        gow2_audio_volume_test gow2_coalesced_text_test)
+    target_include_directories(${_options_test} PRIVATE src)
+endforeach()
 
 # SDL's gamepad mapping database; the input driver looks for it in the working directory.
 add_custom_command(TARGET gow2 POST_BUILD

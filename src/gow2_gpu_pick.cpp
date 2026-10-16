@@ -188,6 +188,18 @@ GpuChoice ChooseRenderGpu() {
   return choice;
 }
 
+std::vector<GpuAdapterInfo> ListRenderGpus() {
+  IDXGIFactory1* factory = CreateFactory();
+  if (!factory) return {};
+  const std::vector<Adapter> adapters = ListHardwareAdapters(factory);
+  factory->Release();
+  std::vector<GpuAdapterInfo> out;
+  for (const Adapter& adapter : adapters) {
+    out.push_back({adapter.index, adapter.name, uint64_t(adapter.dedicated)});
+  }
+  return out;
+}
+
 }  // namespace rex::glue
 
 #else
@@ -195,6 +207,8 @@ GpuChoice ChooseRenderGpu() {
 namespace rex::glue {
 
 GpuChoice ChooseRenderGpu() { return {}; }
+
+std::vector<GpuAdapterInfo> ListRenderGpus() { return {}; }
 
 }  // namespace rex::glue
 

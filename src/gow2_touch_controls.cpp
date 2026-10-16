@@ -3,6 +3,8 @@
 
 #include "gow2_touch_controls.h"
 #include "gow2_touch_model.h"
+#include "gow2_host_ui.h"
+#include "gow2_options_overlay.h"
 
 #include <algorithm>
 #include <atomic>
@@ -217,6 +219,7 @@ class TouchControls {
   void HandleFinger(rex::ui::TouchEvent::Action action, uint32_t pointer, float x, float y,
                     int64_t ms) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (IgnoreHostUiFinger(action, pointer)) return;
     model_.SetSettings(SettingsFromCvars());
     const float px = x * viewport_.width;
     const float py = y * viewport_.height;
@@ -237,6 +240,10 @@ class TouchControls {
 
   touch::PadState PollState(int64_t now, bool active) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (HostUiOpen()) {
+      ClearHostUiInput();
+      return {};
+    }
     if (!active) {
       model_.DropPendingInput();
       return {};
@@ -251,6 +258,10 @@ class TouchControls {
 
   bool PollKeystroke(int64_t now, bool active, X_INPUT_KEYSTROKE* out) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (HostUiOpen()) {
+      ClearHostUiInput();
+      return false;
+    }
     if (!active) {
       model_.DropPendingInput();
       return NextKeystroke(0, keystroke_bits_, out);
@@ -300,12 +311,33 @@ class TouchControls {
   }
 
   bool OverlayVisible(int64_t now) const {
+    if (HostUiOpen()) return false;
     const int64_t touch = last_touch_ms_.load(std::memory_order_relaxed);
     if (GamepadInUse(touch)) return false;
     return !KeyboardMouseHides(now, touch);
   }
 
  private:
+  void ClearHostUiInput() {
+    model_.ReleaseAll();
+    keystroke_bits_ = 0;
+  }
+
+  bool IgnoreHostUiFinger(rex::ui::TouchEvent::Action action, uint32_t pointer) {
+    const bool open = HostUiOpen();
+    const bool ignored = ignored_fingers_.contains(pointer);
+    if (!open && !ignored) return false;
+    if (open) ClearHostUiInput();
+    const bool lifted = action == rex::ui::TouchEvent::Action::kUp ||
+                        action == rex::ui::TouchEvent::Action::kCancel;
+    if (lifted) {
+      ignored_fingers_.erase(pointer);
+    } else {
+      ignored_fingers_.insert(pointer);
+    }
+    return true;
+  }
+
   void PointerDown(uint32_t pointer, float x, float y, int64_t ms) {
     if (OverlayVisible(ms)) {
       model_.PointerDown(pointer, x, y, ms);
@@ -338,6 +370,7 @@ class TouchControls {
   touch::TouchModel model_;
   TouchViewport viewport_;
   uint32_t keystroke_bits_ = 0;
+  std::set<uint32_t> ignored_fingers_;
   mutable std::mutex gamepads_mutex_;
   std::set<uint32_t> gamepads_;
   std::atomic<int64_t> last_touch_ms_{kNeverMs};
@@ -382,22 +415,6 @@ void FillGamepadCapabilities(X_INPUT_CAPABILITIES* caps) {
   caps->gamepad.thumb_ly = static_cast<int16_t>(0x7FFF);
   caps->gamepad.thumb_rx = static_cast<int16_t>(0x7FFF);
   caps->gamepad.thumb_ry = static_cast<int16_t>(0x7FFF);
-}
-
-// Runs the settings overlay's key bind (F4 by default), which a touch-only phone cannot press.
-void ToggleSettingsOverlay(rex::ui::Window* window) {
-  const std::string key = rex::cvar::Query<std::string>("bind_settings");
-  const VirtualKey virtual_key = rex::ui::ParseVirtualKey(key);
-  if (virtual_key == VirtualKey::kNone) {
-    REXLOG_WARN("TOUCH settings: bind_settings '{}' is not a key", key);
-    return;
-  }
-  rex::ui::KeyEvent event(window, virtual_key, 1, false, false, false, false, false);
-  if (rex::ui::ProcessKeyEvent(event)) {
-    REXLOG_INFO("TOUCH settings overlay toggled");
-  } else {
-    REXLOG_WARN("TOUCH settings: no bind answered {}", key);
-  }
 }
 
 #if defined(__ANDROID__)
@@ -547,6 +564,7 @@ class TouchInputDriver final : public rex::input::InputDriver,
   // The fingers already reached the model through the SDL event watch.
   void OnTouchEvent(rex::ui::TouchEvent& e) override {
     if (e.target()) UpdateViewport(e.target());
+    if (HostUiOpen()) return;
     e.set_handled(true);
     if (touch_->TakeSettingsRequest()) RequestSettingsToggle();
   }
@@ -568,11 +586,13 @@ class TouchInputDriver final : public rex::input::InputDriver,
                         static_cast<float>(window->GetActualPhysicalHeight()));
   }
 
-  // Deferred: the bind opens an ImGui dialog, which must not happen inside this event dispatch.
+  // Open after dispatch so the gear's touch cannot also activate a menu row.
   void RequestSettingsToggle() {
     rex::ui::Window* window = window_;
     if (!window) return;
-    window->app_context().CallInUIThreadDeferred([window] { ToggleSettingsOverlay(window); });
+    window->app_context().CallInUIThreadDeferred([] {
+      options::TogglePcOptions(options::OpenSource::kGear);
+    });
   }
 
   void Detach() {

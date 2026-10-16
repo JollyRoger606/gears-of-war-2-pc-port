@@ -60,7 +60,25 @@ void Refresh(PadFile* file, const std::string& path) {
   file->pad = pad;
 }
 
+void RefreshIfDue(PadFile* file, const std::string& path) {
+  const auto now = std::chrono::steady_clock::now();
+  if (now < file->next_read) return;
+  Refresh(file, path);
+  file->next_read = now + kRereadEvery;
+}
+
 }  // namespace
+
+bool test_input::CurrentPad(PadState* out) {
+  const std::string path = REXCVAR_GET(gow2_test_input);
+  if (path.empty()) return false;
+  PadFile& file = TheFile();
+  std::lock_guard<std::mutex> hold(file.lock);
+  RefreshIfDue(&file, path);
+  if (IsNeutral(file.pad)) return false;
+  *out = file.pad;
+  return true;
+}
 
 void ApplyTestInput(uint8_t* base, uint32_t user_index, uint32_t state_addr, uint32_t* result) {
   if (user_index != 0) return;
@@ -68,11 +86,7 @@ void ApplyTestInput(uint8_t* base, uint32_t user_index, uint32_t state_addr, uin
   if (path.empty()) return;
   PadFile& file = TheFile();
   std::lock_guard<std::mutex> hold(file.lock);
-  const auto now = std::chrono::steady_clock::now();
-  if (now >= file.next_read) {
-    Refresh(&file, path);
-    file.next_read = now + kRereadEvery;
-  }
+  RefreshIfDue(&file, path);
   if (test_input::IsNeutral(file.pad)) return;
   test_input::OverlayPad(guest::HostPtr(base, state_addr), file.pad, file.packet_bump, result);
 }

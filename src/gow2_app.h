@@ -20,11 +20,14 @@
 #include <rex/system.h>
 
 #include "gow2_coalesced.h"
+#include "gow2_audio_volume.h"
 #include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
 #include "gow2_gpu_pick.h"
 #include "gow2_machine_xuid.h"
 #include "gow2_mouse_aim.h"
+#include "gow2_options_actions.h"
+#include "gow2_options_overlay.h"
 #include "gow2_save_dir.h"
 #include "gow2_sha_table.h"
 #include "gow2_utf8_guard.h"
@@ -295,6 +298,7 @@ class Gow2App : public rex::ReXApp {
 #endif
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
+    rex::glue::options_actions::WaitForPreviousInstance();
 #if defined(__ANDROID__)
     UseAttachedKeyboardAndMouse();
     AddTouchControls(config);
@@ -317,6 +321,16 @@ class Gow2App : public rex::ReXApp {
     rex::glue::InstallDiscErrorSilencer();
     // Last: it installs the unhandled-exception filter; the others only observe first-chance events.
     rex::glue::InstallCrashWatch();
+    ConfigurePcOptionsEntry();
+  }
+
+  static void ConfigurePcOptionsEntry() {
+    const bool enabled = rex::glue::HostUiHooksAvailable() &&
+                         rex::cvar::Query<bool>("gow2_pc_options_entry");
+    if (enabled) SetIfUnset("xam_device_selector_ui_command", "gow2_pc_options_modal");
+    const bool active = enabled && rex::cvar::GetFlagByName("xam_device_selector_ui_command") ==
+                                      "gow2_pc_options_modal";
+    REXLOG_INFO("PCOPTIONS Options-menu entry {}", active ? "on" : "off");
   }
 
   void OnConfigurePaths(rex::PathConfig& paths) override {
@@ -371,6 +385,7 @@ class Gow2App : public rex::ReXApp {
     rex::PathConfig paths = defaults;
     if (UserDataRootOutranksSaveDir()) {
       ReportSaveDirOutranked(paths.user_data_root);
+      options_paths_ = {paths.config_path, paths.user_data_root};
       return paths;
     }
     const rex::glue::SaveDirChoice saves = rex::glue::ChooseUserDataRoot(
@@ -379,6 +394,7 @@ class Gow2App : public rex::ReXApp {
     ReportSaveDir(saves);
     PinMachineXuid(paths.user_data_root, saves.user_data_root != paths.user_data_root);
     paths.user_data_root = saves.user_data_root;
+    options_paths_ = {paths.config_path, paths.user_data_root};
     return paths;
   }
 
@@ -418,23 +434,43 @@ class Gow2App : public rex::ReXApp {
   // void OnLoadXexImage(std::string& xex_image) override {}
   void OnPostSetup() override {
     rex::glue::InstallNativeMouseAim(window());
+    rex::glue::InstallAudioVolume();
 #if defined(__ANDROID__)
     rex::glue::InstallFrameStats();
     rex::glue::ApplySustainedPerformanceMode();
 #endif
   }
-#if defined(__ANDROID__)
-  void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
-    touch_overlay_ = rex::glue::CreateTouchOverlay(drawer, touch_);
+  void OnConfigureFonts(ImFontAtlas* atlas) override {
+    rex::glue::options::AddOptionsFonts(atlas);
   }
-  void OnShutdown() override { touch_overlay_.reset(); }
+
+  void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
+#if defined(__ANDROID__)
+    touch_overlay_ = rex::glue::CreateTouchOverlay(drawer, touch_);
+    const bool touch_controls = touch_ != nullptr;
+#else
+    const bool touch_controls = false;
 #endif
+    options_overlay_ = rex::glue::options::CreateOptionsOverlay(drawer, options_paths_, touch_controls);
+  }
+
+  void OnShutdown() override {
+    rex::glue::options::ClosePcOptionsForShutdown();
+    if (rex::cvar::Query<bool>("gow2_host_close_on_exit"))
+      rex::glue::options_actions::Host().StopBlocking(15000);
+    options_overlay_.reset();
+#if defined(__ANDROID__)
+    touch_overlay_.reset();
+#endif
+  }
   // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
   // std::unique_ptr<rex::ui::AchievementNotificationDialog>
   // CreateAchievementNotificationDialog() override;
   // void OnShutdown() override {}
 
  private:
+  rex::glue::options::GamePaths options_paths_;
+  std::unique_ptr<rex::ui::ImGuiDialog> options_overlay_;
   std::filesystem::path game_data_root_;
   std::filesystem::path cache_root_;
   std::vector<rex::glue::HashSecEntry> coalesced_hashes_;

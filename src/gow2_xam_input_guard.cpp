@@ -259,6 +259,17 @@ PPCFunc* ResolveThunkBody(uint8_t* thunk) {
 
 namespace rex::glue {
 
+bool WithXamInputLock(const std::function<void()>& fn) {
+  std::unique_lock<std::recursive_timed_mutex> lock(g_call_lock, std::defer_lock);
+  const bool held = g_lock_enabled && lock.try_lock_for(std::chrono::milliseconds(kLockWaitMs));
+  if (g_lock_enabled && !held) {
+    g_timeouts.fetch_add(1, std::memory_order_relaxed);
+    REXLOG_WARN("XAMINPUTGUARD host pad LOCKTIMEOUT after {}ms - calling unlocked", kLockWaitMs);
+  }
+  fn();
+  return held;
+}
+
 void InstallXamInputGuard() {
   static bool installed = false;
   if (installed) {

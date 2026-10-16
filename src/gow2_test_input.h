@@ -32,6 +32,8 @@ PadState ParsePadLine(std::string_view line);
 
 bool IsNeutral(const PadState& pad);
 
+bool CurrentPad(PadState* out);
+
 // state: a 16-byte big-endian XINPUT_STATE in host memory. A failed call (result != 0) is turned
 // into a connected pad that holds only what the file says.
 void OverlayPad(uint8_t* state, const PadState& pad, uint32_t packet_bump, uint32_t* result);

@@ -5,7 +5,9 @@
 // so an integrated GPU with a large shared-memory reservation no longer wins over the graphics card.
 #pragma once
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace rex::glue {
 
@@ -17,5 +19,14 @@ struct GpuChoice {
 
 // Reads the gow2_gpu cvar: "auto", part of an adapter's name (e.g. "7800") or an adapter index.
 GpuChoice ChooseRenderGpu();
+
+struct GpuAdapterInfo {
+  int index;
+  std::string name;
+  uint64_t dedicated_bytes;
+};
+
+// Every hardware adapter in DXGI order. Empty outside Windows.
+std::vector<GpuAdapterInfo> ListRenderGpus();
 
 }  // namespace rex::glue

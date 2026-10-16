@@ -12,6 +12,8 @@ class Window;
 namespace rex::glue {
 
 bool NativeMouseAimWanted();
+bool NativeMouseAimInstalled();
+void DiscardNativeMouseInput();
 void PrepareNativeMouseAim();
 void InstallNativeMouseAim(rex::ui::Window* window);
 
