@@ -8,7 +8,7 @@ default, and needs a restart to take effect.
 
 Status: built and checked offline (unit tests, -fsyntax-only with the release
 flags, the offline package check of DEV-1, coop-instances actions run against a
-fake game). NOT yet run in the game: see "In-game test plan" below.
+fake game). Used in game on 2026-10-16: see COOP_N_PLAYERS.md, Stage 2 results.
 
 No game data is in the repository: offsets and byte strings only. The evidence
 files under out/ come from the player's own game and are not committed.
@@ -255,7 +255,7 @@ Guest calls (console commands, FName, FindFunction, ProcessEvent, allocator)
 go through `src/gow2_dev_guest_calls.h`. Reads that may touch bad guest
 memory go through its `Guarded` wrapper.
 
-## In-game test plan (not run yet)
+## In-game test plan
 
 1. Four instances with `-Coop` at Act 1 chapter 2 (seeded save). Each log
    has `DEVCMD on`.
@@ -272,6 +272,13 @@ memory go through its `Guarded` wrapper.
 12. A control instance without the setting logs no DEVCMD line.
 13. 200 x `@all ToggleDropDetail` with no memory growth in
     coop-instances `stats`.
+
+Steps 1, 2 (with Dom's body: Marcus, Dom, GearPawn_COGGear x2), 3
+(4/4 routes ok), 5, 6, 8, 9 (chapter 13, 16, 27) and 10 ran and
+passed on 2026-10-16. [V] Step 4: with !god on, P1 lived in chapter 2,
+but in a chapter 27 combat area P1 died with god=1 (cause not traced). [V] Step 7 ran: TeleportToPlayer teleports to
+the newest other player. [V] Step 11 ran: CE and TeleportToLocation
+work with -DevCheats. [V] Steps 12 and 13 not run.
 
 ## Evidence
 
@@ -301,3 +308,7 @@ checked by the first `!list` / `!selftest` in game.
 - WorldInfo NetMode +796. ControllerList +864. [V]
 - GearGRI.bDropDetail_Test word +604, mask 0x00200000. [I]
 - Engine.GameInfo.AllowCheats bytes (DEV-1). [V on the player's Engine.upk]
+
+The [I] offsets for PRI.PlayerName (+464), Pawn.Health (+692) and
+bGodMode (+460, mask 0x40000000) were confirmed by !list in game on
+2026-10-16 (names, Health 1410/2100/900, god flag). [V]

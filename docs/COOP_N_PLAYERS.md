@@ -618,7 +618,8 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    without `bNetForce`. [V]
 
    Group A: rows S2A-1 and S2A-5 (checkpoints while an extra is dead), written and
-   checked offline; see [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md). Not yet run in game.
+   checked offline; see [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md).
+   In-game results: Stage 2 results below.
 2. **Game-over rules.**
    - In SP, any human PC that enters `Dead` arms `ProcessGameOver` (5 s, or 2 s in a crate section;
      `GearPC.Dead.BeginState`, DG:35009), which sends `ClientGameOver` to everyone.
@@ -638,7 +639,8 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    revive.
 
    Group A: row S2A-2 (and S2A-4 for split revives, off by default), written and checked
-   offline; see [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md). Not yet run in game.
+   offline; see [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md). In-game results: Stage 2
+   results below.
 3. **Leaving.**
    - `GearPC.Destroyed` (DG:31254) hands the pawn of any leaving `COGGear`-derived player to a new
      `GearAI_Dom` (+0x01C7) and fires every `SeqEvent_CoopPlayerLeft` (searched at +0x031A,
@@ -653,7 +655,7 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    ends the game.
 
    Group A: row S2A-3, written and checked offline; see
-   [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md). Not yet run in game.
+   [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md). In-game results: Stage 2 results below.
 4. **Teleports.** 371 `SeqAct_Teleport` target links move only Marcus and/or Dom (213 + 157 + 1);
    48 target Player. [V counts]
 
@@ -663,7 +665,7 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    `SetLocation` and silently does nothing when it fails.
 
    Status (2026-10-15): implemented by coop-scenes row SC-4. It passes the offline check
-   against the retail packages and is not yet tested in game. Details:
+   against the retail packages; in-game results: Stage 2 results below. Details:
    [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
 5. **Cinematics.**
    - 151 of 254 `SeqAct_ToggleCinematicMode` targets are hero-only.
@@ -680,7 +682,7 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    after an extra spawns.
 
    Status (2026-10-15): implemented by coop-scenes rows SC-1, SC-2 and SC-6. They pass the
-   offline check against the retail packages and are not yet tested in game. Details:
+   offline check against the retail packages; in-game results: Stage 2 results below. Details:
    [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
 6. **Co-op splits.** `SeqAct_NotifyCoopSplit`, 19 objects in 12 packages, teleports Marcus and
    Dom onto separate paths and strands the extra players. [V]
@@ -689,8 +691,8 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    `ChangeSquad` on him.
 
    Status (2026-10-15): implemented by coop-scenes rows SC-4 and SC-5. They pass the
-   offline check against the retail packages and are not yet tested in game. Details:
-   [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
+   offline check against the retail packages; the split was not reached in game, see Stage 2
+   results below. Details: [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
 7. **Checkpoints.**
    - `GearPC.OnCheckpoint` (DG:32633) pulls far players to the host, except at 29 checkpoints whose
      `TeleportClasses` lists only Marcus and Dom (plus `Vehicle_Jack`).
@@ -701,7 +703,7 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    order, or by class) and who sets `bCheckpointDummy`.
 
    Status (2026-10-15): implemented by coop-scenes rows SC-3 and SC-2. They pass the
-   offline check against the retail packages and are not yet tested in game. Details:
+   offline check against the retail packages; in-game results: Stage 2 results below. Details:
    [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md).
 
    Fix: treat the extra classes as matching `TeleportClasses`.
@@ -719,8 +721,9 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    bound to the vehicle.
 
    Status (2026-10-16, `stage2-c-body`): implemented as rows CR-1 and CR-2 of group `coop-ride`;
-   not run in the game yet. When a hero rides, each extra on foot gets god mode. When the hero
-   gets out, each extra loses it and appears next to him.
+   run in game on 2026-10-16, see Stage 2 results (CR-1 seen, CR-2 not reached). When a hero
+   rides, each extra on foot gets god mode. When the hero gets out, each extra loses it and
+   appears next to him.
 
    - The groups, their logs and the offline check are described under item 9.
      `gow2_coop_vehicle_ride=false` turns `coop-ride` off. Success logs
@@ -757,8 +760,8 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
    meshes) and `Locust_Grunt_CamSkel`. [V]
 
    Status (2026-10-16, `stage2-c-body`): implemented as rows CB-1 to CB-4 of group `coop-body`;
-   not run in the game yet. Players 3+ are `GearPawn_COGGear` with Dom's body in every chapter.
-   They also get the pistol and the Gnasher at spawn.
+   run in game on 2026-10-16, see Stage 2 results. Players 3+ are `GearPawn_COGGear` with Dom's
+   body in every chapter. They also get the pistol and the Gnasher at spawn.
 
    - Two follow-up groups, `coop-body` (CB-1..CB-5) and `coop-ride` (CR-1, CR-2), live in
      `src/gow2_script_patch_body_table.cpp`. `tools/script_patch_body.py` prints them (`--cpp`)
@@ -793,9 +796,9 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
      instead: Ben Carmine where `FindObject` finds him, `GearPawn_COGGear` elsewhere. RedShirt is
      dropped: it lives only in sub-levels. `gow2_coop_marcus_clones` drops CB-3 and CB-3c (D-1
      leaves the script at 145 bytes).
-   - §1.2's crash worry does not apply. `GearPawn_COGGear` inherits `SoundGroup` GSG_Empty (not
-     None) and has no gore mesh, the same as Ben in retail. The extras look like Dom, have no
-     voice and an empty `CharacterName`. [V data; cosmetic]
+   - section 1.2's crash worry does not apply. `GearPawn_COGGear` inherits `SoundGroup`
+     GSG_Empty (not None) and has no gore mesh, the same as Ben in retail. The extras look
+     like Dom, have no voice and an empty `CharacterName`. [V data; cosmetic]
    - Every peer must run the same `gow2_coop_players` (for example 4). CB-1 and CB-2 must also run
      on the clients. A client left at 2 sees players 3 and 4 invisible. Gameplay is not affected.
      [I]
@@ -820,8 +823,8 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
     [V]
 
     Status (2026-10-16, `stage2-c-body`): implemented as row CB-5 of group `coop-body` (see item
-    9 for the group, its logs and the offline check); not run in the game yet. Every joiner who is
-    not Dom spawns at once. A remote Dom keeps the retail wait.
+    9 for the group, its logs and the offline check); run in game on 2026-10-16, see Stage 2
+    results. Every joiner who is not Dom spawns at once. A remote Dom keeps the retail wait.
 
     - CB-5 is same size: 2 byte and 2 operand edits at +0x03B3..+0x03C7. The condition
       `LocalPlayer(PC.Player) != None` becomes
@@ -831,6 +834,29 @@ Each item gives the evidence and then a candidate fix. Script changes are sized 
     - With 3+ players a local split-screen player 2 (Dom) now also waits for Right Trigger
       (network co-op has no split-screen). `CANCELCINE` on remote joins after 15 s is unchanged
       (item 5).
+11. **Left-behind extras (leash).**
+    - At the start of the Derrick convoy (`sp_assault_p`) Kismet teleports every player to
+      `PlayerStart_1` on the road, then teleports and attaches only Marcus and Dom onto the
+      trucks. 60 s later the extras were 37000 units behind. [V]
+    - After chapter travel to 16 one extra stood on a roof 17517 units from the Centaur. [V]
+    - A Kismet teleport of Marcus into a level that is not loaded yet also leaves extras
+      behind: SC-4's `FindAvailableTeleportSpot` finds no navigation point there. The same
+      teleport a second time, with the level loaded, brought both extras to 213-220 units
+      from Marcus. [V]
+
+    Fix: `gow2_coop_leash` (64b1c49, `src/gow2_coop_leash.cpp`), host only, only with
+    `gow2_coop_players` 3+. Settings: `gow2_coop_leash` (true), `gow2_coop_leash_distance`
+    (4000), `gow2_coop_leash_seconds` (8). An extra who stays more than the distance from
+    the nearest human Marcus or Dom for the seconds is moved next to him. Log lines:
+    `COOPLEASH on: ...`, `COOPLEASH GearPC_SP_3 moved next to GearPC_SP_1 (was 5731 units
+    away)`, `COOPLEASH GearPC_SP_6 moved next to GearPC_SP_7 near GearPC_SP_5 (was 17517 units
+    away)`. [V] In s3 both extras moved onto Dom's Derrick 8 s after arriving and rode the
+    convoy. In s4 the stranded extra moved next to the extra standing beside the tank. [V]
+    v1 failed in chapter 16 (`no free spot`: the tank's collision covered all 8 spots 120
+    units around it); v2 anchors on a player on foot next to the hero and tries 24 spots at
+    120/360/600 units. [V] Limits: it never moves a player in cinematic mode, dead, or in a
+    vehicle or turret; a downed extra is revived by `FindAvailableTeleportSpot`; extras
+    inside a vehicle section only keep up in hops every 8 s.
 
 #### Stage 2 integration (branch `stage2`, 2026-10-16)
 
@@ -844,6 +870,8 @@ applied), `coop-body`, `coop-ride`, then the self-registered groups by name (tod
   `SCRIPTPATCH <group>: skipped (<row>: <reason>); <what stays>` and the others still apply.
 - Every Stage 2 group runs only when `coop` applied; otherwise each logs
   `SCRIPTPATCH <group>: off (the coop group was not applied)`.
+- `gow2_coop_leash` (`src/gow2_coop_leash.cpp`) is not a patch group: an engine tick listener
+  on the host, see the settings table.
 
 With `gow2_coop_players=2` (the default) the hook returns before Stage 1, so no Stage 2 code
 runs and two-player co-op with a v0.1.1 peer is unchanged. The devcheats group (dev only) is
@@ -924,7 +952,7 @@ groups change is decoded to its end with every jump on a statement start; and th
 [V offline] Each group's own tool (`script_patch_survival.py`, `script_patch_scenes.py`,
 `script_patch_body.py`, `dev_cheats_patch.py`) still prints its C++ table with `--cpp`.
 
-Not yet run in the game.
+Run in game on 2026-10-16, see Stage 2 results below.
 
 Test plans are in [COOP_STAGE2_SURVIVAL.md](COOP_STAGE2_SURVIVAL.md),
 [COOP_STAGE2_SCENES.md](COOP_STAGE2_SCENES.md), items 8-10 above and
@@ -957,8 +985,72 @@ Tooling (group d, 2026-10-16): the scenarios can be driven with `scripts/coop-st
 (setup, transition, kill-extra, kill-host, checkpoint, leave-rejoin, travel) and the command file.
 `!mapchange`/`!mapcommit` run the retail map change natives to reproduce item 1 without playing
 to the chapter end. `!kill`, `suicide`, `LoadCheckpoint` and `chapter -Chapter <n>` cover items 2,
-4 and chapter travel. Status: built and checked offline only, not yet run in the game. See
+4 and chapter travel. Status: used for the Stage 2 results below. See
 [TEST_TOOLING.md](TEST_TOOLING.md).
+
+#### Stage 2 results (2026-10-16)
+
+Four `gow2.exe` instances on 127.0.0.1-.4 with `gow2_coop_players=4`, windowed 800x450,
+`resolution_scale=1`, each with its own `--user_data_root` seeded from a save at Act 1 chapter
+2. [V] `scripts/coop-stage2.ps1` and `scripts/coop-instances.ps1` drove them through the dev
+command file and pad files. [V] Checks read `!list`, the SCENEPROBE and COOPCENSUS log lines
+and a read-only reader of the game's memory (pawn class, mesh, weapons, position). [V] Five
+sessions s1..s5 plus a two-player control, all on 2026-10-16, Windows, RX 7800 XT. [V] Builds:
+s1 is integration build 27b9560; s2 adds the coop-body offset fix and the sub_82ADBEF0 hint;
+s3 adds leash v1; s4 and s5 add leash v2 (commits ab364f6, d074c0d, 64b1c49 on branch
+`stage2`). [V]
+The evidence folders below sit under `out/stage2-test/` (one per item, with the logs and
+screenshots of all four instances; `README.txt` there lists the sessions). That folder is
+gitignored: its files come from the player's own game and are not committed.
+
+Problems found and fixed in this run (each now committed):
+- F1. coop-body did not apply on any of the four: `SCRIPTPATCH coop-body: skipped (CB-1:
+  anchor GearGame.Default__GearPawn_COGDom.GearPawnMesh (SkeletalMeshComponent) +0x01D4 points
+  at 0x00000000, expected COG_Dom.Game.COG_Dom_Game_CamSkel (SkeletalMesh)); players 3+ keep
+  the Stage 1 behaviour`. [V] The memory read puts SkeletalMesh at +0x1E0 and PhysicsAsset at
+  +0x1FC: `tools/ue3/layout.py` is 12 bytes short. [V] Fixed in ab364f6 (480/508). After the
+  fix every instance logs `SCRIPTPATCH coop-body: 5 rows applied for 4 players, set hash
+  dadb8145442fe83f`. [V]
+- F2. All four instances died about 0.5 s after the chapter 2 -> 3 map commit: `[FATAL] Call
+  to invalid or unregistered function at guest address 0x82ADBEF0`. [V] That is a leaf right
+  after the noreturn rethrow that ends sub_82ADBED8, reached by an indirect call during the
+  commit. [I] It is not specific to co-op patches: it is a codegen gap. [I] Fixed in d074c0d
+  (`hints/runtime.toml`). After the fix the same commit plays the Act 2 intro movie (about 4
+  min) and the AssaultIntro Kismet commits on to `sp_assault_p`, with all four keeping their
+  pawns; also with 2 players. [V]
+- F3. Players 3-4 left behind at the start of the Derrick convoy, after chapter travel to
+  16 and after a Kismet teleport into a level that is not loaded yet: new host leash
+  `gow2_coop_leash` (64b1c49), item 11. With it both extras rode the convoy on Dom's Derrick
+  (s3) and the extra stranded in chapter 16 joined the tank (s4). [V]
+- F4. Runner fixes (6b3afbd). Session waits missed lines written during the menu macro (false
+  FAILs `host session created`, `client 2 joined`). [V] The host notices a killed client after
+  its connection timeout, 45 s, while leave-rejoin checked after 10 s. [V] Screenshots go into
+  the scenario folder.
+
+| Item | Result | Evidence |
+|---|---|---|
+| 1. Chapter 2 -> 3 transition | s1 crashed (F2). s2/s3 pass: nobody Dead, all four keep pawns, SCENEPROBE shows all four in cinematic mode during the movie (cine=1 hidden=1), then in sp_assault_p; no game over. [V] Chapter travel by servertravel (chapters 13, 16, 27) passed too: every player got a pawn with body and loadout; extras sometimes spawn at (0,0,0) and fall until the chapter-start Kismet teleport or the leash moves them. [V] | `1-transition` |
+| 2. Deaths | Suicide on P3 (s1 with Ben, s2 with GearPawn_COGGear) and !kill P4 (s2): each extra respawned within 15 s next to a teammate (237-463 units away), with the Lancer, pistol and Gnasher, no game over; P1 not Dead. [V] !kill P1 on foot (s3): OBJECTIVE FAILED on all four, as in retail; LOAD CHECKPOINT restored all four. [V] Dom's death with four players (s5, suicide on instance 2): OBJECTIVE FAILED on all four, as in retail and in the two-player control. [V] !kill P1 while Marcus drives the Centaur does nothing (Suicide on a vehicle). [V] S2A-5: with P4 Dead (state Dead, pawn None) SaveCheckpoint wrote the save 0.1 s later (file time 02:09:49.97, size 97264 -> 117551). [V] | `2-deaths` |
+| 3. Leave and rejoin | stopone of instance 4: the host logged XGISessionLeaveRemote 45 s after the kill (connection timeout); no GearAI_Dom drove an extra's body; the leaver's GearPawn_COGGear left the census 10 s after the leave (s2); Dom untouched (same GearPC_SP_1 and pawn). [V] Rejoin: P4 got a GearPawn_COGGear with Dom's mesh and all three weapons without pressing Right Trigger (CB-5). [V] With Ben (s1, coop-body broken) the rejoin needed RT. [V] CoopPlayerLeft handlers do not exist in chapter 2 maps, so that part was not observable. [V] | `3-leave-rejoin` |
+| 4. Checkpoint | SaveCheckpoint, walk P3 away, LoadCheckpoint: all four restored with new pawns at the saved places, extras keep Dom's mesh and the three weapons, no orphan COGGear bodies. [V] Also after a game over (OBJECTIVE FAILED -> LOAD CHECKPOINT) in chapter 2 and in the convoy: all four restored; in the convoy the extras were restored on the truck and rode it. [V] | `4-checkpoint` |
+| 5. Cinematics | Hero-only toggle (CE gogo in sp_outpost_p toggles SeqVar_Marcus+SeqVar_Dom only): both extras went cine=1 invis=1 hidden=1 within 1 s (SC-1 mirror). [V] Chapter 13 start (ChapterPoint toggles Marcus+Dom): extras hidden with the heroes and visible again after, 0 and 115 units from Marcus. [V] Act 2 intro movie and convoy in-engine cutscenes: all four hidden, back after. [V] Join during a cinematic (SC-2/SC-6) not checked. The gogo debug event left the screen black (its Kismet waits for a chapter load); not a co-op issue. [V] | `5-cinematic` |
+| 6. Co-op split | Not reached. Splits start from touch volumes and a host path choice (SP_Sinkhole_02_S, SP_Hospital_02_S, SP_Outpost_07a_S). The Sinkhole dev teleport (CE Split) put Marcus in a combat area where he died even with !god. [V] SC-4 pairing and SC-5 not exercised. The leash still applies during a split (nearest human hero). | `6-split` |
+| 7. Body and weapons | With coop-body fixed, players 3-4 are GearPawn_COGGear with mesh COG_Dom.Game.COG_Dom_Game_CamSkel and weapons GearWeap_AssaultRifle, GearWeap_COGPistol, GearWeap_Shotgun in chapter 2 (on the host and on the client's own copy) and in chapter 4 (sp_assault_p, after the transition), and the same plus GearWeap_FragGrenade after chapter travel to chapters 13 and 27 (host reads). [V] Baird and Gus keep their own meshes (COG_Baird.COG_Baird, COG_Gus.COG_Gus). [V] After travel to 27 the human Dom waited in PlayerWaiting with PRESS RT TO BEGIN until Right Trigger (retail rule for a remote Dom, kept by CB-5). [V] | `7-body-weapons` (`memory-reads.txt`) |
+| 8. Vehicles | Chapter 16 (Centaur): Marcus drives (Vehicle_Centaur), Dom in the gun (GearWeaponPawn), both extras on foot with god=1 (CR-1). [V] Hero exit (CR-2) not reached. Ride-Reaver not reached. | `8-vehicle` |
+| Soak | s5: the four players moved, turned and fired in turn for 5 minutes in chapter 2; all four processes alive at every minute, no death, no leash move, about 1.6 GB RAM and 0.8 GB VRAM per instance. Real combat was not played. [V] | `soak-5min` |
+| Control (2 players) | gow2_coop_players=2, two instances: logs show only SCRIPTPATCH startup script packages loaded and SCRIPTPATCH coop: off (gow2_coop_players=2) (no survival, coop-body, coop-ride, coop-scenes or COOPLEASH line); slots_pub=2; Marcus and Dom spawn; the chapter 2 -> 3 commit passes with both pawns kept and no FATAL. [V] Two-player co-op against a v0.1.1 peer was not run (by construction nothing new runs at 2). | `control-coop2` |
+
+Not covered:
+- Co-op split (SC-4 pairing, SC-5). Not reached.
+- CR-2 hero exit from a vehicle. Not reached.
+- Ride-Reaver section. Not reached.
+- Join during a cinematic (SC-2/SC-6).
+- CoopPlayerLeft maps (no handler in chapter 2 maps).
+- A 10-minute soak with real combat (only the 5-minute scripted soak above ran).
+- Android: the APK builds with every Stage 2 source, the leash included
+  (`scripts/build-android.ps1`, 2026-10-16), but was not run on a phone.
+- Two-player play against a v0.1.1 peer.
+- Internet play with 4 PCs.
 
 ### Stage 3: 8-10 players and bandwidth
 

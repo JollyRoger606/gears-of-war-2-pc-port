@@ -5,8 +5,8 @@ chapter travel, game over, leaving. It also covers checkpoint saving while an
 extra player is dead.
 
 Status: rows written and checked offline against the retail packages
-(`tools/script_patch_survival.py --check`) and on synthetic guest memory;
-not yet run in game.
+(`tools/script_patch_survival.py --check`) and on synthetic guest memory.
+Run in game on 2026-10-16: see COOP_N_PLAYERS.md, Stage 2 results.
 
 The group "survival" (rows S2A-1, S2A-2, S2A-3, S2A-5) applies right after the
 Stage 1 "coop" group, only when that group applied. It is gated by
@@ -272,7 +272,7 @@ start, and the four append rows end in EndOfScript.
 `src/gow2_script_patch_survival.cpp` pass `clang++ -fsyntax-only` with the
 release build's flags. The game itself was not built or run for this group.
 
-## In-game test plan (not run yet)
+## In-game test plan
 
 1. Solo `--gow2_coop_players=2`: no `SCRIPTPATCH survival` line, retail.
 2. Solo `--gow2_coop_players=4`: the six coop lines unchanged, then four
@@ -307,19 +307,19 @@ release build's flags. The game itself was not built or run for this group.
 | 1 | not run | - |
 | 2 | not run | - |
 | 3 | not run | - |
-| 4 transition A | not run | - |
-| 4 transition B | not run | - |
-| 4 S2A-2 (a) | not run | - |
+| 4 transition A | pass (same S2A-1 commit path as B; the 2 -> 3 commit and chapter travel passed) | Stage 2 results item 1 |
+| 4 transition B | pass: chapter 2 -> 3 commit keeps all four pawns, nobody Dead, no game over; chapter travel to 13, 16, 27 gives every player a pawn | `out/stage2-test/1-transition` |
+| 4 S2A-2 (a) | pass: extra respawned within 15 s next to a teammate (237-463 units), with Lancer, pistol and Gnasher, no game over | `out/stage2-test/2-deaths` |
 | 4 S2A-2 (b) | not run | - |
-| 4 S2A-2 (c) | not run | - |
+| 4 S2A-2 (c) | pass: !kill P1 on foot is OBJECTIVE FAILED on all four, as in retail; LOAD CHECKPOINT restored all four | `out/stage2-test/2-deaths` |
 | 4 S2A-2 (d) | not run | - |
 | 4 S2A-2 (e) | not run | - |
-| 4 S2A-3 (a) | not run | - |
-| 4 S2A-3 (b) | not run | - |
-| 4 S2A-3 (c) | not run | - |
+| 4 S2A-3 (a) | pass via stopone (abrupt); menu quit not tried separately: no AI Dom, Dom untouched, no game over | `out/stage2-test/3-leave-rejoin` |
+| 4 S2A-3 (b) | pass: P4 rejoined as GearPawn_COGGear with Dom's mesh and all three weapons, no RT needed | `out/stage2-test/3-leave-rejoin` |
+| 4 S2A-3 (c) | pass: host logged XGISessionLeaveRemote 45 s after the kill; leaver's pawn left the census 10 s after the leave | `out/stage2-test/3-leave-rejoin` |
 | 4 S2A-3 (d) | not run | - |
 | 4 S2A-3 (e) | not run | - |
-| 4 S2A-5 | not run | - |
+| 4 S2A-5 | pass: with P4 Dead (pawn None) SaveCheckpoint wrote the save 0.1 s later | Stage 2 results item 2 |
 | 5 | not run | - |
 
 ## Open items

@@ -3,7 +3,8 @@
 This document details the `coop-scenes` script group. It implements Stage 2 items 4-7 of
 [COOP_N_PLAYERS.md](COOP_N_PLAYERS.md): teleports, cinematics, checkpoints and co-op splits.
 Facts tagged [V] were checked offline against the player's own packages; [I] marks an
-inference. The in-game tests in section 5 have not been run yet.
+inference. The in-game tests in section 5 ran on 2026-10-16; details in
+COOP_N_PLAYERS.md, Stage 2 results.
 
 ## 1. What the group does and its switches
 
@@ -174,19 +175,20 @@ With `--gow2_coop_scenes=false`: `SCRIPTPATCH coop-scenes: off (gow2_coop_scenes
 With `gow2_coop_players=2`: only `SCRIPTPATCH coop: off (gow2_coop_players=2)`, no
 coop-scenes line.
 
-In-game tests (not run). Setup S: `scripts/coop-instances.ps1 start -Count 4` with
+In-game tests (2026-10-16; details in COOP_N_PLAYERS.md, Stage 2 results).
+Setup S: `scripts/coop-instances.ps1 start -Count 4` with
 `--gow2_coop_players=4 --gow2_coop_census=true`, a save at Act 1 chapter 2, host HOST
 CO-OP CAMPAIGN -> slot -> LAUNCH, instance 2 joins first (Dom), then 3 and 4 (System Link
 browser, A, then RT).
 
 | Test | Rows | What to do | Result |
 |---|---|---|---|
-| T1 | SC-1 | Tai cinematic or chapter-end cinematic in Act 1 ch2: extras hidden, no HUD, input ignored, visible again after; control --gow2_coop_scenes=false leaves both Bens visible | not run |
+| T1 | SC-1 | Tai cinematic or chapter-end cinematic in Act 1 ch2: extras hidden, no HUD, input ignored, visible again after; control --gow2_coop_scenes=false leaves both Bens visible | pass: hero-only CE gogo toggle hid both extras within 1 s (cine=1 invis=1 hidden=1); chapter 13 start hid and restored them (0 and 115 units from Marcus); Act 2 intro and convoy cutscenes hid all four, back after |
 | T2 | SC-2 | An extra joins during a cinematic: hidden until it ends | not run |
-| T3 | SC-2 | Checkpoint reload with 4 players: census shows GearPawn_COGBenjaminCarmine x3 (NPC Ben + 2 extras), not x4/x5, also after a second reload; the NPC Ben survives | not run |
+| T3 | SC-2 | Checkpoint reload with 4 players: census shows GearPawn_COGBenjaminCarmine x3 (NPC Ben + 2 extras), not x4/x5, also after a second reload; the NPC Ben survives | pass for GearPawn_COGGear bodies: no orphans after reload; Ben census not rechecked with coop-body |
 | T4 | SC-6 | A join more than 15 s into the level while a cinematic runs: the matinee continues to its natural end; a late Dom waits and takes over Dom after the cinematic | not run |
-| T5 | SC-4 | Walk extras more than 1500 uu away before a scripted Marcus teleport in SP_Hospital_01_S: they end beside Marcus; short re-placements (< 10 m) do not move them | not run |
-| T6 | SC-4/SC-5 | A co-op split (SP_Outpost_07a_S, SP_Sinkhole_02_S, SP_Intervention_10_S, SP_Nexis_7_S/SB) or the SP_Hospital_02_S Dom-to-TaiSquad change: one extra on Dom's path / squad, one on Marcus's | not run |
+| T5 | SC-4 | Walk extras more than 1500 uu away before a scripted Marcus teleport in SP_Hospital_01_S: they end beside Marcus; short re-placements (< 10 m) do not move them | pass in sp_hospital_p with a loaded destination (CE TestEndCine twice: extras 213-220 units from Marcus); fail when the destination level is not loaded yet (leash covers it) |
+| T6 | SC-4/SC-5 | A co-op split (SP_Outpost_07a_S, SP_Sinkhole_02_S, SP_Intervention_10_S, SP_Nexis_7_S/SB) or the SP_Hospital_02_S Dom-to-TaiSquad change: one extra on Dom's path / squad, one on Marcus's | not reached |
 | T7 | SC-3 | A restricted checkpoint in a Sinkhole, Riftworm or Palace chapter: straggling extras are pulled; ch2 checkpoints behave as before | not run |
 
 Every test also runs with `gow2_coop_players=2` (no change). Adding
