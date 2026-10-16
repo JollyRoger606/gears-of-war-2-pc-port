@@ -4,9 +4,14 @@
 
 .DESCRIPTION
   1. The port's host test targets gow2_test_input_test, gow2_script_patch_test,
-     gow2_script_patch_survival_test, gow2_save_dir_test, gow2_dev_commands_test and
-     gow2_coop_leash_test in
+     gow2_script_patch_survival_test, gow2_save_dir_test, gow2_dev_commands_test,
+     gow2_coop_leash_test, gow2_toml_edit_test, gow2_options_catalog_test,
+     gow2_options_model_test, gow2_options_input_test, gow2_options_values_test,
+     gow2_options_actions_test, gow2_fps_cap_test, gow2_audio_volume_test and
+     gow2_coalesced_text_test in
      out\build\<config> (configure it with scripts\build.ps1 first).
+     gow2_toml_edit_test takes config\gow2.toml as its first argument; the others
+     take none.
   2. android\gamelibs\tests\touch_model_test.cpp: pure C++, so it also runs on the PC.
   3. The SDK's System Link and session unit tests of 0010 and 0011
      (tests\unit\system\system_link_test.cpp, tests\unit\kernel\xsession_test.cpp) in the tree
@@ -84,8 +89,9 @@ function Invoke-Native([scriptblock]$cmd) {
     return $LASTEXITCODE
 }
 
-function Test-Exe([string]$exe) {
-    $code = Invoke-Native { & $exe }
+function Test-Exe([string]$exe, [string[]]$ExeArgs) {
+    if ($ExeArgs) { $code = Invoke-Native { & $exe @ExeArgs } }
+    else { $code = Invoke-Native { & $exe } }
     Write-Host "  exit $code"
     return $code -eq 0
 }
@@ -96,12 +102,17 @@ function Test-HostTargets([string]$build) {
         return $false
     }
     $targets = 'gow2_test_input_test', 'gow2_script_patch_test', 'gow2_script_patch_survival_test',
-        'gow2_save_dir_test', 'gow2_dev_commands_test', 'gow2_coop_leash_test'
+        'gow2_save_dir_test', 'gow2_dev_commands_test', 'gow2_coop_leash_test',
+        'gow2_toml_edit_test', 'gow2_options_catalog_test', 'gow2_options_model_test',
+        'gow2_options_input_test', 'gow2_options_values_test', 'gow2_options_actions_test',
+        'gow2_fps_cap_test', 'gow2_audio_volume_test', 'gow2_coalesced_text_test'
     if ((Invoke-Native { cmake --build $build --target $targets }) -ne 0) { return $false }
     $ok = $true
     foreach ($t in $targets) {
         Write-Host "  $t"
-        if (-not (Test-Exe (Join-Path $build "$t.exe"))) { $ok = $false }
+        $exeArgs = @()
+        if ($t -eq 'gow2_toml_edit_test') { $exeArgs = @("$root\config\gow2.toml") }
+        if (-not (Test-Exe (Join-Path $build "$t.exe") $exeArgs)) { $ok = $false }
     }
     return $ok
 }

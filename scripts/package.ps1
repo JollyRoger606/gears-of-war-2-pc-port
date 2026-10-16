@@ -3,8 +3,9 @@
   Packages an already-built gow2-recomp tree into a Windows release zip (no game files).
 
 .DESCRIPTION
-  Copies the built binaries, the Visual C++ runtime DLLs, repo docs and a
-  generated QUICKSTART.txt into a staging folder and compresses it to
+  Copies the built binaries, the Visual C++ runtime DLLs, repo docs, the
+  online-host scripts under scripts\ and a generated QUICKSTART.txt into a
+  staging folder, and compresses it to
   <OutDir>\gow2-recomp-<Version>-win64.zip, plus a .sha256 sidecar file.
 
   The zip never contains game data. Packaging is refused (exit 1) if a file
@@ -164,6 +165,14 @@ function Copy-RepoDocs([string]$Root, [string]$StageDir, [string]$ConfigPath) {
     $tools = Join-Path $StageDir 'tools'
     New-Item -ItemType Directory -Force -Path $tools | Out-Null
     Copy-Item -Force (Join-Path (Join-Path $Root 'tools') 'texpack.py') (Join-Path $tools 'texpack.py')
+    # Online-host helpers: the in-game "Host over the internet" option runs
+    # scripts\host-online.ps1 from the folder next to gow2.exe. Copy-Item keeps
+    # the files byte-identical (CRLF or LF as in the repository).
+    $onlineScripts = Join-Path $StageDir 'scripts'
+    New-Item -ItemType Directory -Force -Path $onlineScripts | Out-Null
+    foreach ($scriptName in @('host-online.ps1', 'host-online-upnp.ps1', 'host-online-state.ps1')) {
+        Copy-Item -Force (Join-Path (Join-Path $Root 'scripts') $scriptName) (Join-Path $onlineScripts $scriptName)
+    }
 }
 
 function Write-QuickstartFile([string]$StageDir) {
