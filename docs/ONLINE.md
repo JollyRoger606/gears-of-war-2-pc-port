@@ -330,6 +330,11 @@ phone's `gow2.toml`. Android shows no inbound firewall prompt. Untested.
    14001`, then the same on local port 41000.
 6. Close the game and run `scripts\host-online.ps1 -Stop`.
 
+For three or four players, before the session every player starts the game once and checks the
+log for `SCRIPTPATCH stack: ... combined=e52feaafc39b3f26` (four players, default co-op settings)
+and no `skipped` line; the four `combined=` values must match. The full list is in
+[NETWORK_PLAY.md](NETWORK_PLAY.md), "Pre-session check".
+
 Do not test the internet path from a device on the home Wi-Fi: from inside, the public name leads
 back through the router (hairpin NAT), which proves nothing about access from outside. Carriers
 can change a phone's public address between connections. If the log shows

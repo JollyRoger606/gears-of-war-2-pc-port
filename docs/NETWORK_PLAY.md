@@ -39,11 +39,11 @@ the --log_file path) shows these lines with the same hashes and no `skipped`:
 
 ```
 SCRIPTPATCH coop: 6 rows applied for 4 players, set hash 937c35f80cb274b7
-SCRIPTPATCH survival: 4 rows applied for 4 players, set hash @@HASH_SURVIVAL@@
-SCRIPTPATCH coop-body: 5 rows applied for 4 players, set hash @@HASH_BODY@@
-SCRIPTPATCH coop-ride: 3 rows applied for 4 players, set hash @@HASH_RIDE@@
+SCRIPTPATCH survival: 4 rows applied for 4 players, set hash 321b36117af31c35
+SCRIPTPATCH coop-body: 5 rows applied for 4 players, set hash b62ed993f8c3fe5e
+SCRIPTPATCH coop-ride: 3 rows applied for 4 players, set hash 9381496b16a09620
 SCRIPTPATCH coop-scenes: 6 rows applied for 4 players, set hash cddd0eadc988a154
-SCRIPTPATCH stack: players=4 coop=937c35f80cb274b7 survival=@@HASH_SURVIVAL@@ split-revive=off coop-body=@@HASH_BODY@@ coop-ride=@@HASH_RIDE@@ coop-scenes=cddd0eadc988a154 combined=@@HASH_COMBINED@@
+SCRIPTPATCH stack: players=4 coop=937c35f80cb274b7 survival=321b36117af31c35 split-revive=off coop-body=b62ed993f8c3fe5e coop-ride=9381496b16a09620 coop-scenes=cddd0eadc988a154 combined=e52feaafc39b3f26
 ```
 
 The four players compare the one `combined=` value. The hashes depend on the
