@@ -11,6 +11,10 @@ network or over the internet.
   by default (patch 0010): a solo game shows an unplugged cable and answers
   nobody on the network. `gow2_coop_players` 3 or more turns it on by
   itself; two-player co-op needs the setting.
+- For three or more players, every player (host and clients) sets the same `gow2_coop_players`, for
+  example 4. The host needs it for the join cap; each client needs it so that players 3 and up have a
+  body (a client left at 2 sees them invisible). Two-player co-op with a v0.1.1 peer works only when
+  everyone stays at the default 2.
 - Every player uses the same `net_port_offset`. Leave the default.
 
 ## Settings
