@@ -153,10 +153,15 @@ instead of (4,4,4). No configuration-only switch changed the black regions: the 
 At the same caps, gameplay cost was 23.9 Mcycles per game frame for the reference, 26.0 for bit
 128, 24.8 for bias 16 and 33.8 for bit 256, with noise of about 10 %.
 
-`vulkan_android_color_depth_bias` now defaults to 16 on Android, about one float24 step added to
-the depth bias of color draws with a pixel shader on float24 depth that test GREATER or GEQUAL;
-0 turns it off. It was chosen over skipping the prepass because it keeps the game's frame
-structure: the prepass, early depth rejection and depth for later passes.
+`vulkan_android_color_depth_bias` defaults to 16 on Qualcomm GPUs (Vulkan vendor ID `0x5143`)
+unless set, and to 0 on other GPUs. Sixteen units are 16 float32 ULPs of the D32 host depth
+(float24 is hosted as `D32_SFLOAT_S8_UINT`), about 2 float24 steps; the measured prepass/base-pass
+mismatch is up to about one float24 step. The runtime logs
+`Android: color depth bias 16 (GPU vendor 0x5143, default for this vendor)`.
+`ResolveColorDepthBias` in `include/rex/graphics/vulkan/android_draw_experiments.h` is checked by
+`tests/unit/graphics/android_draw_experiments_test.cpp`. It was chosen over skipping the prepass
+because it keeps the game's frame structure: the prepass, early depth rejection and depth for
+later passes.
 
 Patch 0007 also fixes the Vulkan render target transfer shader's host depth source addressing.
 It used the guest source's sample count (`key.source_msaa_samples`); D3D12 uses the host depth
@@ -247,10 +252,11 @@ are Mcycles per game frame, with fps in parentheses; the repeated baseline shows
 | resolution_scale 2 | 75.4 (2.1) | 73.3 (3.0) | 37.7 |
 
 The first ScreenPercentage 75 run was void because an incoming-call overlay covered the game;
-the later run above was valid. ScreenPercentage 75 saved about 20 % in one run; 50 blurred the
-image heavily for a limited gain. Most of the cost scales with the runtime's render target work,
-shadows and full-resolution passes, not with the game's scene resolution, so ScreenPercentage
-tiers are not a frame-rate lever.
+the later run above was valid. These F2 measurements had light environment shadows on, before the
+F3 default. ScreenPercentage 75 saved about 20 % in one run and gave about 25 % more frames than
+100 at 222 MHz; 50 gave no further gain and blurred the image heavily. Cost fell far less than the
+pixel count (75 % keeps 56 % of the pixels, 50 % keeps 25 %), so most cost does not depend on scene
+resolution (the runtime's render-target work, shadows and full-resolution passes).
 
 The white banner stayed white with bloom and lens flares off. Disabling dynamic lights or
 shadows removed it; the narrower shadow comparison was:
@@ -298,7 +304,8 @@ A3 loaded Vulkan-ValidationLayers 1.4.363.0 for an F2 gameplay run, then removed
 not shipped). One presenter semaphore error, `VUID-vkQueueSubmit-pSignalSemaphores-00067`, was
 reported six times at boot: a signaled semaphore could still be in use by the swapchain. The only
 warnings were fragment outputs without color attachments, capped at 10. Gameplay had no image
-layout, barrier, attachment or depth/stencil errors.
+layout, barrier, attachment or depth/stencil errors. Fixed later that day with one present semaphore
+per swapchain image (see [Review fixes](#review-fixes-october-15-late-session)).
 
 A6-light set the production and prerelease updatable-driver opt-in settings with bias 0. Both
 runs still loaded stock driver `0x80320040`, build `f61dec9117`; neither alternative driver was
@@ -326,10 +333,43 @@ After the title it reached status 1 and pwrlevel 9 (525 MHz), and status 3 by 16
 | 342 MHz | 24 | 15.8 | 21.4 | 12.8 |
 | 222 MHz | 9 | 12.7 | 17.3 | - |
 
-The median of quiet gameplay windows was 19.5 Mcycles/frame (F2 27.0, morning build 24.2).
-After five minutes the cap settled at 342-222 MHz: 15.8-12.7 fps sustained. Frame generation
-(plan E) does not apply: the current build settles at 12.7-15.8 fps, below the roughly 28 fps
-sustained threshold.
+The median of quiet gameplay windows was 19.5 Mcycles/frame (F2 27.0, morning build 24.2). The
+thermal cap was still falling when the F3 run ended about six minutes after launch: 15.8 fps at
+342 MHz, then 12.7 fps at 222 MHz in its last minute. Warm, the same build ran at 10.1 fps at
+160 MHz and 12.5 at 222 MHz (F3 warm run). Frame generation (plan E) does not apply: warm, the
+build runs at about 10-12.5 fps, below the roughly 28 fps sustained threshold.
+
+## Review fixes (October 15, late session)
+
+- Vulkan presenter: one present semaphore per swapchain image is signaled by that image's paint
+  submission and awaited by its present; retired swapchain semaphores are destroyed with it. This
+  fixed `VUID-vkQueueSubmit-pSignalSemaphores-00067`.
+- Vulkan presenter: the final swapchain pipeline records the format it was built for, avoiding a
+  wait for the previous paint submission and a pipeline rebuild on every paint.
+- Android present effects: launch creates only the selected effect's shader modules and pipelines
+  (bilinear is always available). A rejected module or pipeline makes that effect unavailable with
+  one warning; painting falls back to bilinear with one warning. SGSR 1 is never an intermediate
+  pass.
+- `vulkan_android_color_depth_bias` defaults to 16 on Qualcomm GPUs (Vulkan vendor ID `0x5143`)
+  unless set, and to 0 elsewhere. Sixteen units are 16 float32 ULPs of the D32 host depth, about
+  2 float24 steps; the measured prepass/base-pass mismatch is up to about one float24 step. The
+  runtime log and `ResolveColorDepthBias` unit test document the default.
+- Pre-transform check (F3 build, before these fixes; `p3-sf-f3-title-sf.txt`,
+  `p3-sf-f3-game-sf.txt`, `p3-sf-f3-game2-sf.txt`): at the title, during gameplay and after walking, SurfaceFlinger showed
+  the game's SurfaceView as DEVICE with ROT_90 and no CLIENT layers. The display rotated the
+  IDENTITY-preTransform swapchain without GPU composition, so swapchain pre-rotation was not
+  needed on this phone; it may matter on devices whose display processor cannot rotate the layer.
+- Validation (`r-validation-gow2_153.log`, Vulkan-ValidationLayers 1.4.363.0): the review-fix run
+  had 0 validation errors, versus 3 `VUID-vkQueueSubmit-pSignalSemaphores-00067` error messages
+  in A3. The 10 capped `Undefined-Value-ShaderOutputNotConsumed-DynamicRendering` warnings,
+  `WARNING-Swapchain-PreTransform` warning and `WARNING-cache-file-error` info message remained.
+- Title effects (`r-title-bilinear.png`, `r-title-sgsr.png`, `r-title-fsr.png`): bilinear, SGSR and
+  FSR each drew the guest output, with no `unavailable` lines in their logs.
+- Gameplay without the layer (`r-game-gow2_154.log`): the scene was complete (3.7 % black share,
+  including the movement tutorial's black box). A short run measured 27.5-28.1 fps at 607-734 MHz
+  (20.2-21.7 Mcycles/frame), with a quiet-window median of 27.9 fps and 20.2 Mcycles/frame.
+  Thermal status reached 3; walking windows at 443-525 MHz then ran at 15.0-18.3 fps
+  (22.6-26.9 Mcycles/frame). This was not a sustained-rate measurement.
 
 ## What the build adds
 
@@ -399,8 +439,9 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   roughly 500 yield polls before sleeping) and `gow2_android_gpu_wait_yield` to false (the game's
   SDK wait behaviour, without the added yield). Its guest work and time-base timeout stay the same.
   At build time `tools/prepare_android_sources.py` runs `tools/patch_spin_hints.py` on the Android
-  copy of the generated code, adding `__builtin_arm_isb(15)` after Xenon delay hints the
-  recompiler otherwise omits. GoW2 has 12 `db16cyc` sites: eight in `sub_82977688`, the rest in
+  copy of the generated code, adding a guarded `__builtin_arm_isb(15)` (inside
+  `#if defined(__aarch64__)`) after Xenon delay hints the recompiler otherwise omits. GoW2 has 12
+  `db16cyc` sites: eight in `sub_82977688`, the rest in
   wait loops in `sub_829925B0`, `sub_82955768` and `sub_829531F8`. The original `generated/` and
   Windows build are unchanged. The window's sustained performance mode is opt-in where
   `PowerManager.isSustainedPerformanceModeSupported()` allows it; the runtime logs
@@ -430,7 +471,7 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   | `gow2_system_settings` | "LightEnvironmentShadows=0" | Android default removes the white objects; `Key=Value` pairs separated by `;` for the game's own `[SystemSettings]` (`Xe-GearEngine.ini`); setting this key replaces the default, so include `LightEnvironmentShadows=0` to keep it; use `0` for false (restart) |
   | `clear_memory_page_state` | false on Android | true re-uploads every CPU-written page at each frame end (the SDK's default elsewhere); halves the frame rate here |
   | `vulkan_android_depth_experiment` | 0 | Diagnostic bits, each drawing the scene wrongly: 1 color draws without depth writes pass the depth test, 2 skip every depth-only draw on the float24 depth (the prepass and its depth clears), 4 stencil off for color draws, 8 whole-target scissor, 16 scene draws that pass the depth test painted magenta, 32 face culling off, 64 no user clip planes or vertex kill, 128 skip the prepass meshes but keep the depth clears (rectangle lists), 256 every color draw with a pixel shader on the float24 depth passes the depth test (depth writers too), 512 skip the depth clear rectangles drawn after the frame's first prepass mesh (#575-class; #0 stays), 1024 depth-only draws on the float24 depth with color target 0 bound write magenta (restart) |
-  | `vulkan_android_color_depth_bias` | 16 | About one float24 step added to the depth bias of color draws with a pixel shader on float24 depth that test GREATER or GEQUAL; fixes the black regions while keeping the prepass, early depth rejection and depth for later passes; 0 turns it off (restart) |
+  | `vulkan_android_color_depth_bias` | 16 on Qualcomm, 0 otherwise | Unless set, 16 on Qualcomm GPUs (Vulkan vendor ID `0x5143`) and 0 on others, added to the depth bias of color draws with a pixel shader on float24 depth that test GREATER or GEQUAL; 16 units are 16 float32 ULPs of the D32 host depth (float24 is hosted as `D32_SFLOAT_S8_UINT`), about 2 float24 steps, against a measured prepass/base-pass mismatch of up to about one float24 step; fixes the black regions while keeping the prepass, early depth rejection and depth for later passes; 0 turns it off (restart) |
   | `vulkan_android_skip_shader_hashes` | "" | Comma-separated 16-hex ucode hashes (vertex or pixel shader, as `FRAMETRACE` prints them): their draws are skipped (restart) |
   | `vulkan_android_paint_shader_hashes` | "" | The same list format: their draws write magenta (a depth-only draw only where color target 0 is bound) (restart) |
   | `vulkan_android_skip_draw_range` | "" | `first-last` or one number: those draws of every frame are skipped, numbered as `FRAMETRACE` numbers them (restart) |

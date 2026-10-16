@@ -52,7 +52,8 @@ port reached more platforms and added features.
       weapon swap), plus controllers and keyboard with or without a mouse.
 - [x] Cross-play between PC and Android: a PC and a phone joined each other's System Link
       campaign on one LAN on 2026-10-15 (patch 0011, [docs/NETWORK_PLAY.md](docs/NETWORK_PLAY.md));
-      the phone still renders only a few frames per second in game.
+      in game the phone runs at about 30 fps for the first minutes from a cool start, falling to
+      about 10-12.5 fps once warm ([docs/ANDROID.md](docs/ANDROID.md)).
 - [ ] Campaign co-op for more than two players. The cap of two is in the game's script
       (`GearGameSP_Base.InitGame` sets `MaxPlayers = 2`, the co-op menu
       `NumPublicConnections = 2`), while versus already takes 10. Extra players would join

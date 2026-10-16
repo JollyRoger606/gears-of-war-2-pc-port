@@ -40,7 +40,7 @@ Leer en español: [README.es.md](README.es.md)
 - [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four copies on one PC (loopback), and a PC with an Android phone on one LAN for two players, verified 2026-10-14 and 2026-10-15
 - [x] Internet play, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): a phone on mobile data joined a PC-hosted campaign through ports opened by UPnP, verified 2026-10-15; a PC friend outside the network has not been tried yet
 - [ ] System Link Horde and Versus
-- [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but runs at a few fps with parts of the scene black; not playable yet, no APK published ([docs/ANDROID.md](docs/ANDROID.md))
+- [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but is not playable yet and no APK is published. The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm ([docs/ANDROID.md](docs/ANDROID.md))
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 

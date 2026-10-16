@@ -134,11 +134,13 @@ to 16.8 fps for about ten seconds, then fell back to 3 to 6 fps as the cap retur
 at 30 to 50 fps. On October 15, at the same 222 MHz cap, the same place ran at 4.6 fps with the
 SDK's per-frame page invalidation and at 9.4 fps without it (`clear_memory_page_state`, now off on
 Android; see [GPU diagnostics and switches](#gpu-diagnostics-and-switches)). From a cool start it
-now runs at 26-29 fps with the GPU at 734 MHz for the first 40 s, then follows the thermal cap
-down to 9-13 fps at 222 MHz after about four minutes.
+runs at the game's 30 fps cap (29.7 fps at 734 MHz), then follows the falling thermal cap: 15.8 fps
+at 342 MHz and 12.7 at 222 MHz by the end of a six-minute run; warm (GPU capped at 160-222 MHz) it
+runs at about 10-12.5 fps (10.1 at 160 MHz, 12.5 at 222 MHz).
 The black regions were fixed on October 15 with the Android color depth bias default of 16.
-After walking, two lamp posts and a hanging banner still render solid white with a glow; the
-phone's warm colour grade also differs from the PC's teal grade, with the console match unknown.
+The Android default `LightEnvironmentShadows=0` removes the solid-white lamp posts and hanging
+banner that light environment shadows produced. The phone's warm colour grade also differs from
+the PC's teal grade, with the console match unknown.
 
 ## Game build
 
@@ -316,27 +318,31 @@ relaunch, for example:
 present_effect = "sgsr"
 ```
 
-Use `present_effect = "bilinear"` for the old filter. FSR 1 runs EASU from 1280x720 to 2560x1440
-into an intermediate image at that output size, then RCAS into the swapchain. SGSR draws once
-straight into the swapchain, with no intermediate image and no dithering. `present_dither` is
+Use `present_effect = "bilinear"` for the old filter. At launch, only the selected effect's shader
+modules and pipelines are created (bilinear is always available); a driver-rejected module or
+pipeline makes that effect unavailable with one warning, and painting falls back to bilinear with
+one warning. FSR 1 runs EASU from 1280x720 to 2560x1440 into an intermediate image at that output
+size, then RCAS into the swapchain. SGSR draws once straight into the swapchain, with no
+intermediate image and no dithering. `present_dither` is
 true on Android (false elsewhere) for the final pass of the other effects.
 `present_fsr_sharpness_reduction` is 0.3 stops on Android (0.2 elsewhere).
 `present_cas_additional_sharpness` (0) and `present_fsr_max_upsampling_passes` (4) are now available
 on Android too; their defaults are unchanged from elsewhere.
 
 The runtime still renders the game at 1280x720. These upscalers change the presented image, not
-the GPU work of the game. Their cost and look on the phone are to be measured
-([ANDROID_EXPERIMENTS.md](../docs/ANDROID_EXPERIMENTS.md), P7).
+the GPU work of the game. On the phone, FSR 1 and SGSR 1 drew correctly on the Adreno 830 and were
+sharper than bilinear (SGSR a little crisper); their cost was within run-to-run noise (one run
+each). `present_effect` stays `fsr` ([ANDROID_EXPERIMENTS.md](../docs/ANDROID_EXPERIMENTS.md), P7).
 
 Android defaults `vulkan_allow_present_mode_immediate`, `vulkan_allow_present_mode_mailbox` and
 `vulkan_allow_present_mode_fifo_relaxed` to false, selecting plain FIFO (the October 15 logs used
 MAILBOX). With FIFO the presenter paints on the UI thread, never on the GPU command thread.
 `present_android_frame_rate` defaults to 30: the window asks Android 11+ for this rate through
-`ANativeWindow_setFrameRate`, so the panel is expected to be able to leave 120 Hz; it is a request,
-not a forced refresh rate. 0 makes no request. If `gow2_unlock_fps` is on and `gow2.toml` does not
-set the rate, the port uses 0 for that launch (`DISPLAY frame rate hint` in the log). The runtime
-also logs `VulkanPresenter: ANativeWindow_setFrameRate(30 Hz) returned 0` when that call succeeds.
-P8 measures the display pacing. These changes are Android-only; Windows behaviour is unchanged.
+`ANativeWindow_setFrameRate`; P8/C3 confirmed the panel left 120 Hz for 30 Hz with FIFO and the
+30 Hz request. It is a request, not a forced refresh rate. 0 makes no request. If `gow2_unlock_fps` is
+on and `gow2.toml` does not set the rate, the port uses 0 for that launch (`DISPLAY frame rate hint`
+in the log). The runtime also logs `VulkanPresenter: ANativeWindow_setFrameRate(30 Hz) returned 0`
+when that call succeeds. These changes are Android-only; Windows behaviour is unchanged.
 
 ## Controls
 
@@ -433,7 +439,8 @@ game frame.
 
 Patch 0007's Vulkan side has Android-only diagnostics and switches for the black scene and the
 frame rate; the diagnostics keep the default behaviour unless set in `gow2.toml`, while
-`vulkan_android_color_depth_bias` defaults to 16 as described below.
+`vulkan_android_color_depth_bias` defaults to 16 on Qualcomm GPUs (Vulkan vendor ID `0x5143`),
+and 0 on other GPUs unless set, as described below.
 [`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md) lists them and the order to try
 them in. `vulkan_android_stats_log=true` adds a `GPUSTATS` line every five seconds (draws by kind,
 render passes, submissions, waits for the whole GPU, occlusion queries, time the GPU command thread
@@ -454,9 +461,14 @@ the shader hash lists `vulkan_android_skip_shader_hashes` and
 `vulkan_android_trace_frame_after_seconds` (every draw of one frame logged as `FRAMETRACE` with its
 render targets, viewport, scissor and polygon offset, plus the frame's render target transfers,
 resolves and resolve clears as `FRAMETRACE-RT`) remain diagnostics for the black scene.
-`vulkan_android_color_depth_bias` defaults to 16 on Android to cover the prepass/base-pass depth
-mismatch of about one float24 step; it adds bias to color draws with a pixel shader on float24
-depth that test GREATER or GEQUAL, and 0 turns it off. `docs/ANDROID_EXPERIMENTS.md` lists them.
+`vulkan_android_color_depth_bias` defaults to 16 on Qualcomm GPUs (Vulkan vendor ID `0x5143`)
+unless set, and 0 on other GPUs. Sixteen units are 16 float32 ULPs of the D32 host depth (float24
+is hosted as `D32_SFLOAT_S8_UINT`), about 2 float24 steps; the measured prepass/base-pass mismatch
+is up to about one float24 step. It adds bias to color draws with a pixel shader on float24 depth
+that test GREATER or GEQUAL; 0 turns it off. The runtime logs
+`Android: color depth bias 16 (GPU vendor 0x5143, default for this vendor)`.
+`ResolveColorDepthBias` in `include/rex/graphics/vulkan/android_draw_experiments.h` is checked by
+`tests/unit/graphics/android_draw_experiments_test.cpp`. `docs/ANDROID_EXPERIMENTS.md` lists them.
 
 `clear_memory_page_state` is off on Android (patch 0007; the SDK's default, on, stays elsewhere).
 On, it marks every page the CPU uploaded as stale at each frame end, so the whole working set was
@@ -479,8 +491,8 @@ writer saves it after the boot-time pipelines are built, every two minutes while
 appear, and at shutdown, by writing `.tmp` then renaming it. Look for
 `VulkanPipelineCache: pipeline cache file <path>: <status> (<n> bytes of driver data)` and
 `VulkanPipelineCache: saved <n> bytes of driver pipeline cache to <path>`.
-Reusing driver data is expected to avoid repeating compilation of the roughly 1,270 stored
-pipelines (22.6 s at boot in the October 15 log); the launch-time effect is to be measured (P10).
+Reusing driver data avoided repeating compilation in P10: 852 stored pipelines built in 2.7 s with
+the driver cache against 27.5 s without, on a warm phone.
 
 ### CPU waits
 
@@ -493,11 +505,13 @@ keeping the guest work and its time-base timeout. P9 measured no difference on t
 at the same GPU clock, so both defaults returned to the SDK behaviour.
 
 At build time `tools/prepare_android_sources.py` runs `tools/patch_spin_hints.py` on the Android
-copy of the generated code. It adds `__builtin_arm_isb(15)` after Xenon delay hints, which the
-recompiler otherwise emits nothing for: 12 `db16cyc` sites in GoW2, eight in `sub_82977688` and the
-others in the wait loops of `sub_829925B0`, `sub_82955768` and `sub_829531F8`. The original
-`generated/` and the Windows build do not receive these pauses. CPU and power effects are to be
-measured (P9).
+copy of the generated code. It adds a guarded `__builtin_arm_isb(15)` after Xenon delay hints, which
+the recompiler otherwise emits nothing for: `#if defined(__aarch64__)` / `__builtin_arm_isb(15);` /
+`#endif`. The patched text also compiles on x64. The script refuses paths outside `out/android` and
+takes no default path. GoW2 has 12 `db16cyc` sites: eight in `sub_82977688` and the others in the
+wait loops of `sub_829925B0`, `sub_82955768` and `sub_829531F8`. The original `generated/` and the
+Windows build do not receive these pauses. The pauses were present in both P9 arms, so their own
+effect was not isolated; separating it needs a build without them.
 
 `gow2_android_sustained_performance=false` leaves sustained performance mode opt-in. True asks
 for the window's mode where `PowerManager.isSustainedPerformanceModeSupported()` allows it; the
@@ -514,7 +528,8 @@ unchanged: keyboard labels unless an XInput controller is connected at launch.
 
 ## Not done yet
 
-- Speed: about 9 game frames per second on a GPU thermally capped at 222 MHz (see above); the Xenos
+- Speed: about 10-12.5 game frames per second once the phone is warm (GPU capped at 160-222 MHz),
+  about 30 for the first minutes from a cool start (see above); the Xenos
   path's remaining cost on the Adreno 830 is next
   ([`docs/ANDROID_EXPERIMENTS.md`](../docs/ANDROID_EXPERIMENTS.md), steps 1 and P1-P6).
 - Rendering: the black regions were fixed on October 15. The Android default

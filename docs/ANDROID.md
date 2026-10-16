@@ -7,11 +7,12 @@ controllers, and a keyboard and mouse attached at launch): menus, the campaign i
 cutscene and gameplay, where Marcus moves, turns the camera and fires. From a cool start (thermal
 status 0, skin 37.1 C), the current build (commit `373c1e8` and later docs) ran at the game's 30 fps
 cap (29.7 fps at 734 MHz), 27.9 at 607 MHz, 25.0 at 525 MHz and 23.2 at 443 MHz in the first
-minutes, then 15.8-12.7 fps once the phone had settled at a 342-222 MHz cap (after about five
-minutes, on USB power). GPU cost was 19.5 Mcycles per game frame (median of quiet windows), against
-24.2 for the October 15 morning build, which still had the black regions. At the same 222 MHz cap,
-the current build draws 17 % more frames than that build. Boot builds
-852 stored pipelines in 2.7 s instead of 27.5 s, and the panel runs at 30 Hz. On October 15, the
+minutes, then, as the thermal cap kept falling, 15.8 fps at 342 MHz and 12.7 fps at 222 MHz by the
+end of that six-minute run (on USB power); warm (thermal status 3, GPU capped at 160-222 MHz) it
+runs at about 10-12.5 fps (10.1 fps at 160 MHz, 12.5 at 222 MHz). In the cool-start run the GPU
+cost was 19.5 Mcycles per game frame (median of quiet windows), against 24.2 for the October 15
+morning build, which still had the black regions. At the same 222 MHz cap, the current build draws
+17 % more frames than that build. Boot builds 852 stored pipelines in 2.7 s instead of 27.5 s, and the panel runs at 30 Hz. On October 15, the
 black regions were traced to a depth mismatch between the prepass and base-pass vertex shaders on
 Adreno and fixed with the Android color depth bias default of 16 (step 4). Light environment
 shadows caused the white lamp objects and hanging banner; the current build's Android default
@@ -23,10 +24,11 @@ Target device for bring-up: Samsung Galaxy S25 Ultra
 has the experiments, their results and what comes next.
 On October 15 (evening), the current build (commit `d65fe7d`) joined a co-op campaign hosted by
 the v0.1.1 PC build over the home LAN; both lobbies listed both players, both loaded Act 1 chapter 2,
-and each player saw the other in game. As the client in the hospital, the phone ran at 30 fps at
-443-660 MHz for about 70 s, then 27-30 fps at 342-389 MHz (a short run, not a sustained rate, and
-a different scene from the courtyard measurements above). See [NETWORK_PLAY.md](NETWORK_PLAY.md)
-for the setup.
+and each player saw the other in game. As the client in the hospital, the phone ran at about 21-24
+fps with 0.3 s hitches for the first 20 s after the level appeared, at 607-734 MHz; then 30 fps at
+443-660 MHz for about 70 s (one window at 25.4 fps); then 27-30 fps at 342-389 MHz. It was a short
+run, not a sustained rate, and a different scene from the courtyard measurements above. See
+[NETWORK_PLAY.md](NETWORK_PLAY.md) for the setup.
 
 ## Building the APK
 
@@ -157,24 +159,19 @@ copy of the generated code.
    yet tried with a real keyboard or mouse). The `:game` process remains. On Android `gow2_prompts=auto` keeps the controller glyphs unless
    a physical keyboard drives the game.
 4. **Bring-up on the S25 Ultra** with the stock driver first, then Turnip through adrenotools;
-   record `vulkaninfo` for the device. Started in October 2026: with the stock driver the game
-   reaches gameplay in Act 1 once the app may open sockets (`INTERNET`) and patch 0007 maps the
-   guest's privileged port and Winsock socket options and ioctls. Large parts of the scene render
-   black: about a third of the picture at the start of the first checkpoint (buildings and sky
-   behind the first facade). The runtime logs no GPU error. On October 15 every GPU-side candidate
-   was switched off in turn on the phone (fragment-less pipelines, the game's shadows and other
-   effects, position invariance, sparse binding, render passes, float24 depth in the shader,
-   geometry shaders, depth test, depth prepass, stencil, scissor, culling, texture limits, invalid
-   fetch constants) and the black shape stayed the same; pipelines built late and missing or
-   all-zero textures are ruled out too. With every scene draw painted a constant color, the region
-   stays black: no scene draw reaches it, so those objects are either never drawn or drawn
-   off-screen. A frame capture and a comparison with the PC at the same checkpoint come next
-   ([`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md#results-of-the-october-15-session)).
-   The second October 15 session found that some Adreno base-pass meshes produce depth up to about
-   one float24 step farther than their prepass and fail GEQUAL; the earlier switches had not
-   tested the intended draws. `vulkan_android_color_depth_bias` now defaults to 16 on Android,
-   fixing the black regions while keeping the prepass and early depth rejection. The evidence
-   and remaining white objects are in
+   record `vulkaninfo` for the device. In October 2026, the stock driver reached gameplay in Act 1
+   once the app could open sockets (`INTERNET`) and patch 0007 mapped the privileged port and
+   Winsock options. Until October 15, about a third of the picture rendered black at the first
+   checkpoint (buildings and sky behind the first facade), with no GPU error logged. The October 15
+   morning switches did not test what their names said: bit 16 kept the depth compare, bit 1 never
+   touched the base pass, and bit 2 also skipped the depth clears (corrections 1-3 in
+   [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md#results-of-the-october-15-session)). The
+   morning inference that no scene draw reached the region was wrong. The second October 15
+   session found that some Adreno base-pass meshes produce depth up to about one float24 step
+   farther than their prepass and fail GEQUAL. `vulkan_android_color_depth_bias` defaults to 16 on
+   Qualcomm GPUs (0 on other GPUs unless set) and fixed the black regions while keeping the prepass
+   and early depth rejection. Evidence, along with the white objects removed by the Android
+   `LightEnvironmentShadows=0` default, is in
    [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md#black-scene-found-october-15-second-session).
 5. **Measure.** If the generic Xenos path cannot hold 30 fps in Act 1, the proven alternative is a
    renderer written for Unreal Engine 3's draw calls, which is a large project of its own. First
@@ -195,32 +192,43 @@ copy of the generated code.
    734 MHz, close to the game's own 30 fps cap, and the rate follows the thermal cap down to
    9-13 fps at 222 MHz after about four minutes. `FRAMES` lines carry the GPU clock and thermal
    state, and `GPUSTATS` lines the command processor's work, so numbers can be read per clock.
-   On October 15 afternoon, C8 measured ScreenPercentage 50 at 8.5/10.3 fps at 160/222 MHz and
-   ScreenPercentage 75 at 9.8-10.2 fps at 222 MHz, while `resolution_scale=2` raised the cost to
-   73.3-75.4 Mcycles/frame:
-   most cost scales with the runtime's render-target work, shadows and full-resolution passes,
-   so ScreenPercentage tiers are not a frame-rate lever.
+   On October 15 afternoon, C8 measured ScreenPercentage 100 at 7.7-7.8 fps at 160 MHz and
+   7.8-8.0 fps at 222 MHz (27.5-28.2 Mcycles/frame); 75 gave 9.8-10.2 fps at 222 MHz (about
+   21.9 Mcycles/frame); 50 gave 8.5 fps at 160 MHz and 10.3 fps at 222 MHz (21.3 Mcycles/frame),
+   with a heavy blur. `resolution_scale=2` raised the cost to 73.3-75.4 Mcycles/frame. These
+   measurements had light environment shadows on, before the F3 default. ScreenPercentage 75 gave
+   about 25 % more frames than 100 at 222 MHz in one run; 50 gave no further gain. Cost fell far
+   less than the pixel count (75 % keeps 56 % of the pixels, 50 % keeps 25 %), so most of the cost
+   does not depend on scene resolution (the runtime's render-target work, shadows and
+   full-resolution passes).
    Disabling only light environment shadows removed the white objects and reached 12.3 fps at
    222 MHz, keeping the world's dynamic shadows; the current build makes this the Android default
    and measured 10.1 fps at 160 MHz and 12.5 fps at 222 MHz on a warm phone.
    From a cool start (thermal status 0, skin 37.1 C), the current build ran at the game's 30 fps cap
    (29.7 fps at 734 MHz), 27.9 at 607 MHz, 25.0 at 525 MHz and 23.2 at 443 MHz in the first minutes,
-   then 15.8-12.7 fps at a 342-222 MHz cap after about five minutes on USB power, with a median
-   quiet-window GPU cost of 19.5 Mcycles/frame against 24.2 for the October 15 morning build,
-   which still had the black regions.
+   then, as the thermal cap kept falling, 15.8 fps at 342 MHz and 12.7 fps at 222 MHz by the end of
+   that six-minute run on USB power, with a median quiet-window GPU cost of 19.5 Mcycles/frame
+   against 24.2 for the October 15 morning build, which still had the black regions. Warm (thermal
+   status 3, GPU capped at 160-222 MHz), it runs at about 10-12.5 fps (above).
    With only the depth bias (before the shadow default), a cool start peaked at 23.6 fps at 734 MHz,
    but on USB power the phone went from thermal status 0 (skin 35.8 C) to status 3 about 90 s into
    gameplay.
    The phone cannot stay cool on USB power, so warm-phone A/B comparisons use Mcycles/frame and
    fps at the same capped clock.
+   On October 15, SurfaceFlinger showed the game's SurfaceView as DEVICE with ROT_90 at the title,
+   during gameplay and after walking, with no CLIENT layers; the display rotated the
+   IDENTITY-preTransform swapchain without a GPU composition pass, so pre-rotation was not needed
+   on this phone. The review-fix validation run had no errors, down from three
+   `VUID-vkQueueSubmit-pSignalSemaphores-00067` errors in A3 (the presenter semaphore error is
+   fixed), and gameplay ran at 27.5-28.1 fps at 607-734 MHz in a short run. See
+   [`ANDROID_EXPERIMENTS.md`](ANDROID_EXPERIMENTS.md#review-fixes-october-15-late-session).
 6. **More players and online** last, through hooks into the engine's session code (shared with
    the PC System Link work).
 
 ## Next steps
 
 Trace the root cause of the Adreno depth mismatch with per-shader readback of vertex 0 depth
-(plan B1(c)). Investigate light environment shadows in the Vulkan backend or Adreno driver, and
-fix the presenter semaphore error with per-swapchain-image semaphores.
+(plan B1(c)). Investigate light environment shadows in the Vulkan backend or Adreno driver.
 
 Frame generation (plan E1) would use depth plus camera reprojection in the presenter between guest
 frames, using the per-frame view-projection and camera position captured by patch 0002 and the
@@ -230,7 +238,7 @@ by edge stretch, and composite the HUD from a pre-HUD snapshot. Pace with FIFO a
 `VK_GOOGLE_display_timing` (or Swappy, Apache-2.0), enable above 28 fps sustained for 2 s and disable
 below 24 fps; the panel request must then be 60 Hz. The guest vblank is a fixed timer, so extra
 host presents never reach game timing and remain cross-play safe. This is not worth starting
-until the sustained base rate is near 28 fps; today it settles at 12.7-15.8 fps.
+until the sustained base rate is near 28 fps; warm, it runs at about 10-12.5 fps.
 
 The codegen options `skip_msr` (plan C5) and register-as-local (C10) also change the PC build and
 need a PC/System Link regression.

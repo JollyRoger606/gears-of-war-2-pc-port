@@ -112,12 +112,12 @@ The PC (Ethernet, 192.168.10.10) and a Galaxy S25 Ultra (Wi-Fi,
   `XGISessionJoinRemote ... first_xuid=B13E50A1BB0DC9A9 members=2`.
   Both sides used port 41000 for game traffic.
 
-Both logs show `XGISessionJoinRemote ... members=2` with the other
-side's XUID, and game traffic on port 41000 in both directions. The phone
-ran at 27-30 fps as the client in the first two minutes of chapter 2
-(docs/ANDROID.md). Either side can host; a PC copy hosts only from a path
-with the inbound firewall rule (below). In chapter 1 the second player's
-sticks did nothing until they held LB for the objectives prompt.
+Both logs show `XGISessionJoinRemote ... members=2` with the other side's XUID, and game traffic on
+port 41000 in both directions. As the client in chapter 2, the phone ran at about 21-24 fps with
+hitches of about 0.3 s for the first 20 s after the level appeared (streaming, before RT), then at
+30 fps (one 25.4 fps window) at 443-660 MHz, then 27-30 fps at 342-389 MHz (docs/ANDROID.md). Either
+side can host; a PC copy hosts only from a path with the inbound firewall rule (below). In chapter 1
+the second player's sticks did nothing until they held LB for the objectives prompt.
 
 A script can drive the phone without touching the screen: put
 `gow2_test_input = "/storage/emulated/0/Android/data/com.santiquiroz.gow2recomp/files/pad.txt"`
