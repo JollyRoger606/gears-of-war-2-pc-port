@@ -29,6 +29,7 @@ set(GOW2_SOURCES
     src/gow2_script_patch_table.cpp
     src/gow2_script_patch_hook.cpp
     src/gow2_coop_census.cpp
+    src/gow2_coop_scenes.cpp
     src/gow2_test_input.cpp
     src/gow2_test_input_hook.cpp
     # Stage 2 test tooling (d-tools): dev only, every piece off unless its gow2_dev_* setting is set.
