@@ -242,7 +242,8 @@ def test_append_structure_and_redirects():
 def test_render_cpp_matches_file():
     root = Path(__file__).resolve().parents[2]
     with open(root / "src" / "gow2_script_patch_survival.cpp", "r", encoding="utf-8", newline="") as f:
-        assert sv.render_cpp() == f.read()
+        # A core.autocrlf checkout turns the committed LF file into CRLF.
+        assert sv.render_cpp() == f.read().replace("\r\n", "\n")
 
 
 def test_render_cpp_contains_groups():
