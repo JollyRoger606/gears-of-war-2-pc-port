@@ -4,6 +4,7 @@
 // native script packages, by replacing the recompiled FStartupPackages::LoadAll.
 
 #include "gow2_script_patches.h"
+#include "gow2_script_patch_survival.h"
 #include "gow2_coop_census.h"
 #include "gow2_coop_network.h"
 
@@ -12,6 +13,7 @@
 #endif
 
 #include <cstdint>
+#include <string_view>
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
@@ -33,6 +35,14 @@ REXCVAR_DEFINE_BOOL(gow2_coop_marcus_clones, false, "Coop",
 REXCVAR_DEFINE_BOOL(gow2_coop_patch_fail_test, false, "Coop",
                     "Debug: corrupt one expected byte of the co-op patch rows. The whole group must "
                     "then be skipped and the game stays retail");
+REXCVAR_DEFINE_BOOL(gow2_coop_survival, true, "Coop",
+                    "With gow2_coop_players 3+: players 3+ keep their pawn through chapter travel, "
+                    "respawn near a teammate instead of ending the game, leave without an AI Dom "
+                    "taking their body, and do not block checkpoints while dead (Stage 2 group A, "
+                    "docs/COOP_STAGE2_SURVIVAL.md). false keeps Stage 1 only");
+REXCVAR_DEFINE_BOOL(gow2_coop_split_revive, false, "Coop",
+                    "Debug, row S2A-4: in co-op splits a standing player 3+ of the downed "
+                    "player's squad counts as a reviver");
 
 namespace rex::glue {
 
@@ -110,15 +120,56 @@ bool GuardedApply(ApplyCall* call) {
 #endif
 }
 
-void LogResult(const GroupResult& result, int players) {
+bool ApplyPatchGroup(uint8_t* base, const PatchGroup& group, int players,
+                     const script_patch::GuestAlloc& alloc, GroupResult* result) {
+  ApplyCall call{base, &group, players, &alloc, result};
+  return GuardedApply(&call);
+}
+
+void LogResult(std::string_view tag, std::string_view when_skipped, const GroupResult& result,
+               int players) {
   if (!result.applied) {
-    REXLOG_WARN("SCRIPTPATCH coop: skipped ({}: {}); the game stays retail", result.failed_row,
-                result.reason);
+    REXLOG_WARN("SCRIPTPATCH {}: skipped ({}: {}); {}", tag, result.failed_row, result.reason,
+                when_skipped);
     return;
   }
-  for (const std::string& line : result.lines) REXLOG_INFO("SCRIPTPATCH coop {}", line);
-  REXLOG_INFO("SCRIPTPATCH coop: {} rows applied for {} players, set hash {:016x}",
+  for (const std::string& line : result.lines) REXLOG_INFO("SCRIPTPATCH {} {}", tag, line);
+  REXLOG_INFO("SCRIPTPATCH {}: {} rows applied for {} players, set hash {:016x}", tag,
               result.lines.size(), players, result.set_hash);
+}
+
+void ApplySplitReviveGroup(uint8_t* base, const script_patch::GuestAlloc& alloc, int players) {
+  PatchGroup group = script_patch::CoopSplitReviveGroup();
+  GroupResult result;
+  if (!ApplyPatchGroup(base, group, players, alloc, &result)) {
+    REXLOG_WARN("SCRIPTPATCH split-revive: skipped (fault while reading guest objects); the "
+                "survival group stays applied");
+    return;
+  }
+  LogResult("split-revive", "the survival group stays applied", result, players);
+}
+
+void ApplySurvivalGroups(uint8_t* base, const script_patch::GuestAlloc& alloc, bool coop_applied,
+                         int players) {
+  if (!coop_applied) {
+    REXLOG_INFO("SCRIPTPATCH survival: off (the coop group was not applied)");
+    return;
+  }
+  if (!REXCVAR_GET(gow2_coop_survival)) {
+    REXLOG_INFO("SCRIPTPATCH survival: off (gow2_coop_survival=false)");
+    return;
+  }
+  PatchGroup group = script_patch::CoopSurvivalGroup();
+  GroupResult result;
+  if (!ApplyPatchGroup(base, group, players, alloc, &result)) {
+    REXLOG_WARN("SCRIPTPATCH survival: skipped (fault while reading guest objects); Stage 1 stays "
+                "applied");
+    return;
+  }
+  LogResult("survival", "Stage 1 stays applied", result, players);
+  if (result.applied && REXCVAR_GET(gow2_coop_split_revive)) {
+    ApplySplitReviveGroup(base, alloc, players);
+  }
 }
 
 void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
@@ -135,12 +186,12 @@ void ApplyStartupScriptPatches(PPCContext& ctx, uint8_t* base) {
     return GuestMalloc(ctx, base, size);
   };
   GroupResult result;
-  ApplyCall call{base, &group, players, &alloc, &result};
-  if (!GuardedApply(&call)) {
+  if (!ApplyPatchGroup(base, group, players, alloc, &result)) {
     REXLOG_WARN("SCRIPTPATCH coop: skipped (fault while reading guest objects); the game stays retail");
     return;
   }
-  LogResult(result, players);
+  LogResult("coop", "the game stays retail", result, players);
+  ApplySurvivalGroups(base, alloc, result.applied, players);
 }
 
 }  // namespace
