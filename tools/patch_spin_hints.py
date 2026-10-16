@@ -2,12 +2,14 @@
 
 The recompiler emits nothing for the Xenon's delay hints, so the game's GPU and
 lock wait loops spin at full speed on the phone. ISB is the usual AArch64
-spin-loop pause. This patch runs only on the Android copy of the generated code.
+spin-loop pause. Paths must be inside out/android (the Android copy). The pause
+is guarded by #if defined(__aarch64__) so the text also compiles on x64.
 
-    python tools/patch_spin_hints.py [--dry-run] [generated/default/*.cpp ...]
+    python tools/patch_spin_hints.py [--dry-run] out/android/generated/default.staging/*.cpp
 
-Idempotent (marker GOW2 SPINHINT): hints already followed by an ARM ISB are left
-alone. Writes nothing unless every file verifies. Counts include each mnemonic.
+Idempotent (marker GOW2 SPINHINT): hints already followed by a guarded or legacy
+ARM ISB are left alone. Writes nothing unless every file verifies. Counts include
+each mnemonic.
 """
 import argparse
 import collections
@@ -15,13 +17,27 @@ import glob
 import os
 import re
 import sys
+from pathlib import Path
 
 _MNEMONICS = ("db8cyc", "db10cyc", "db12cyc", "db14cyc", "db16cyc")
+ANDROID_OUT = Path(__file__).resolve().parent.parent / "out" / "android"
 _MARKER_RE = re.compile(
     r'^\t// (?P<mn>db8cyc|db10cyc|db12cyc|db14cyc|db16cyc)'
     r'(?: [^\r\n]*)?(?P<nl>\r?\n|\Z)', re.M
 )
-_PAUSE_AHEAD_RE = re.compile(r'[ \t]*__builtin_arm_isb\(')
+_MNEMONIC_RE = "|".join(_MNEMONICS)
+_PAUSE_AHEAD_RE = re.compile(
+    r'(?:[ \t]*__builtin_arm_isb\(|'
+    r'#if defined\(__aarch64__\)[ \t]+// GOW2 SPINHINT '
+    r'(?:' + _MNEMONIC_RE + r')[ \t]*\r?\n'
+    r'[ \t]*__builtin_arm_isb\()'
+)
+_GUARDED_PAUSE_RE = re.compile(
+    r'^#if defined\(__aarch64__\)[ \t]+// GOW2 SPINHINT '
+    r'(?:' + _MNEMONIC_RE + r')[ \t]*\r?\n'
+    r'[ \t]*__builtin_arm_isb\(15\);[ \t]*\r?\n'
+    r'#endif(?:\r?\n|\Z)', re.M
+)
 _GOW2_LINE_RE = re.compile(
     r'^\t__builtin_arm_isb\(15\);  // GOW2 SPINHINT '
     r'(?:db8cyc|db10cyc|db12cyc|db14cyc|db16cyc)(?:\r?\n|\Z)', re.M
@@ -34,7 +50,12 @@ def file_newline(text: str) -> str:
 
 
 def pause_line(mnemonic: str, newline: str) -> str:
-    return f"\t__builtin_arm_isb(15);  // GOW2 SPINHINT {mnemonic}{newline}"
+    line_ending = newline or "\n"
+    return (
+        f"#if defined(__aarch64__)  // GOW2 SPINHINT {mnemonic}{line_ending}"
+        f"\t__builtin_arm_isb(15);{line_ending}"
+        f"#endif{newline}"
+    )
 
 
 def _after_marker(text: str, marker: re.Match[str]) -> tuple[str, str]:
@@ -43,7 +64,9 @@ def _after_marker(text: str, marker: re.Match[str]) -> tuple[str, str]:
     newline = marker.group("nl")
     if newline == "":
         # An unterminated final marker borrows the file's newline; its pause stays unterminated.
-        return file_newline(text) + pause_line(marker.group("mn"), ""), "insert"
+        borrowed_newline = file_newline(text)
+        block = pause_line(marker.group("mn"), borrowed_newline)
+        return borrowed_newline + block[:-len(borrowed_newline)], "insert"
     return pause_line(marker.group("mn"), newline), "insert"
 
 
@@ -70,7 +93,9 @@ def unpaused_lines(text: str) -> list[int]:
 
 
 def strip_patch(text: str) -> str:
-    return _GOW2_LINE_RE.sub("", text) if "GOW2 SPINHINT" in text else text
+    if "GOW2 SPINHINT" not in text:
+        return text
+    return _GOW2_LINE_RE.sub("", _GUARDED_PAUSE_RE.sub("", text))
 
 
 def verify(original: str, patched: str) -> list[str]:
@@ -124,10 +149,10 @@ def _write_if_changed(path: str, original: str, patched: str, dry_run: bool) -> 
     return True
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], allowed_root: Path = ANDROID_OUT) -> int:
     parser = argparse.ArgumentParser(prog="patch_spin_hints")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("paths", nargs="*", default=["generated/default/*.cpp"])
+    parser.add_argument("paths", nargs="+")
     options = parser.parse_args(argv)
     files = expand_args(options.paths)
     if not files:
@@ -136,6 +161,24 @@ def main(argv: list[str]) -> int:
     if any(not path.endswith(".cpp") for path in files):
         print("patch_spin_hints: only .cpp sources are accepted", file=sys.stderr)
         return 1
+    root_real = os.path.normcase(os.path.realpath(allowed_root))
+    refused = []
+    for path in files:
+        path_real = os.path.normcase(os.path.realpath(path))
+        try:
+            inside_root = os.path.commonpath([root_real, path_real]) == root_real
+        except ValueError:
+            inside_root = False
+        if not inside_root:
+            refused.append(path)
+    if refused:
+        for path in refused:
+            print(
+                f"patch_spin_hints: refusing {path}: only the Android copy under "
+                f"{allowed_root} may be patched",
+                file=sys.stderr,
+            )
+        return 3
     results = [(path, *_read_and_patch(path)) for path in files]
     if any(problems for _, _, _, _, problems in results):
         for path, _, _, _, problems in results:
