@@ -80,7 +80,7 @@ DLSS SDK license keeps NVIDIA's NGX library out of an open-source release (THIRD
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build-sdk.ps1 -NoDlss
-pwsh -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 0.1.1
+pwsh -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 0.1.2
 ```
 
 `-NoDlss` installs the DLLs into `out\sdk-nodlss\` and leaves `out\sdk\`, the DLLs
