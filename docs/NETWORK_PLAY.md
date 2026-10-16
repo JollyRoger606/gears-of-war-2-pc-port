@@ -5,17 +5,88 @@ network or over the internet.
 
 ## What you need
 
-- Every player runs a build with patch 0011. Use the same build everywhere.
-  There is no automatic version check yet, so check by hand.
+- Every player runs the same release, v0.1.2. It contains the Stage 2 co-op work and the codegen fix d074c0d. Matching `gow2_coop_players` is not enough.
+- With `gow2_coop_players` 3 or more, v0.1.2 adds a beacon gate (`net_beacon_gate`, default true): every peer announces its co-op hash with each System Link search and answer, and campaigns whose hash differs stay hidden (the friend sees NO CAMPAIGNS FOUND). With 2 players there is still no check: a v0.1.1 peer finds and joins a v0.1.2 host without any warning, but it lacks d074c0d and is expected to crash about 0.5 s after the chapter 2 -> 3 map commit ("[FATAL] Call to invalid or unregistered function at guest address 0x82ADBEF0"), even in two-player co-op [I].
 - Every player turns System Link on with `net_link_active = true`. It is off
   by default (patch 0010): a solo game shows an unplugged cable and answers
   nobody on the network. `gow2_coop_players` 3 or more turns it on by
   itself; two-player co-op needs the setting.
-- For three or more players, every player (host and clients) sets the same `gow2_coop_players`, for
-  example 4. The host needs it for the join cap; each client needs it so that players 3 and up have a
-  body (a client left at 2 sees them invisible). Two-player co-op with a v0.1.1 peer works only when
-  everyone stays at the default 2.
+- For three or four players, every player (host and each friend) sets the same `gow2_coop_players`, for
+  example 4, and the same co-op settings (the defaults are fine). A v0.1.1 friend, a friend left at
+  `gow2_coop_players=2`, or a friend with a different co-op setting cannot see a 4-player host.
+  Without the gate (older builds) a friend left at 2 sees players 3-4 with no body [I].
 - Every player uses the same `net_port_offset`. Leave the default.
+
+## Four players
+
+Every player, host and each friend, sets `gow2_coop_players=4` and the same
+co-op settings (the defaults are fine). On PC pass `--gow2_coop_players=4`;
+on Android put `gow2_coop_players = 4` in `gow2.toml`.
+
+With 3 or more players the beacon gate applies: every peer announces its co-op
+hash with each System Link search and answer, and campaigns whose hash differs
+stay hidden. The friend sees NO CAMPAIGNS FOUND; the host log says
+`[netlink] beacon from <address> dropped: no co-op hello (ours <hash>)` or
+`... dropped: co-op hash <theirs> differs from ours <ours>`, and the friend log
+may say `[netlink] co-op hash from <address> is <theirs>, ours is <ours>:
+different build or co-op settings; its campaigns stay hidden`. A host at 2 has
+no gate.
+
+### Pre-session check
+
+Every player's log (the newest file in the logs folder next to gow2.exe, or
+the --log_file path) shows these lines with the same hashes and no `skipped`:
+
+```
+SCRIPTPATCH coop: 6 rows applied for 4 players, set hash 937c35f80cb274b7
+SCRIPTPATCH survival: 4 rows applied for 4 players, set hash @@HASH_SURVIVAL@@
+SCRIPTPATCH coop-body: 5 rows applied for 4 players, set hash @@HASH_BODY@@
+SCRIPTPATCH coop-ride: 3 rows applied for 4 players, set hash @@HASH_RIDE@@
+SCRIPTPATCH coop-scenes: 6 rows applied for 4 players, set hash cddd0eadc988a154
+SCRIPTPATCH stack: players=4 coop=937c35f80cb274b7 survival=@@HASH_SURVIVAL@@ split-revive=off coop-body=@@HASH_BODY@@ coop-ride=@@HASH_RIDE@@ coop-scenes=cddd0eadc988a154 combined=@@HASH_COMBINED@@
+```
+
+The four players compare the one `combined=` value. The hashes depend on the
+player count and the co-op settings; these are for 4 players with the default
+settings.
+
+### Session notes [V unless marked]
+
+- The campaign lobby lists only two of the four names (expected; players 3-4
+  are in the session).
+- Join outside cinematics: a remote join more than 15 s into a level cancels
+  the running cutscene for everyone.
+- After a crash wait about one minute before searching again: the host frees
+  the slot only after its 45 s connection timeout, and until then a full
+  session shows NO CAMPAIGNS FOUND.
+- After chapter travel the human Dom waits at PRESS RT TO BEGIN and presses
+  Right Trigger.
+- Players 3+ who fall far behind are moved next to Marcus or Dom by the host
+  (`gow2_coop_leash`, on by default on Windows, off by default on Android
+  because the fail-closed fault handling of these patches exists only on
+  Windows).
+- While Marcus or Dom rides a vehicle, players 3+ on foot cannot be hurt.
+
+### Not tried yet
+
+A launch with all four players already in the lobby on v0.1.2 (the Stage 2
+runs put host and Dom in the lobby and had players 3-4 join mid-game; that
+order is the tested one), co-op splits, getting out of a vehicle, the
+Ride-Reaver section, a join during a cinematic, long combat, four PCs over a
+LAN or the internet, Android with 3+ players. Stage 2 ran four copies on one
+PC over loopback only.
+
+### Bandwidth [V, loopback, scripted play]
+
+Per-client peak 5.3 KB/s (76 % of the game's 7000 B/s per-client cap,
+MaxDynamicBandwidth), host upload peak 16 KB/s with 3 clients. The host needs
+at most about 3 x 7000 B/s, about 170 kbit/s, of upload. Run the host with
+`--net_traffic_log_sec=10 --system_link_trace=true` for the session:
+`[nettraffic]` windows pinned near 7000 B/s mean the cap binds (a Stage 3
+change).
+
+See [COOP_N_PLAYERS.md](COOP_N_PLAYERS.md) for the co-op patch groups and the
+Stage 2 results.
 
 ## Settings
 
@@ -48,6 +119,7 @@ restart.
 | `net_peers` | empty | Comma-separated host[:port] list (IPv4 or DNS names). Every broadcast the game sends also goes to each peer as a unicast copy. |
 | `net_public_address` | empty | host[:port] (IPv4 or DNS name) advertised to other players. Set `net_allow_peers` with it. |
 | `net_allow_peers` | empty | IPv4 addresses, a.b.c.d/n ranges or DNS names that may send to the game; loopback and the local network always may. Empty: with `net_peers` or `net_public_address` set, only the `net_peers` and the local network; with neither, everyone. |
+| `net_beacon_gate` | true | With `gow2_coop_players` 3 or more, only peers with the same co-op hash see each other's campaigns. False turns the hash check off, for diagnosis only. |
 | `system_link_trace` | false | Set to true to log network activity under `[netlink]`. |
 
 ## PC and phone on the same Wi-Fi

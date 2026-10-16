@@ -40,8 +40,8 @@ no online address or this side heard from that LAN address in the last 10 minute
 host's own Wi-Fi keeps using the LAN address. [V code]
 
 ## Host setup (PC)
-Campaign co-op takes two players. For three or more, the host also sets `gow2_coop_players`
-(co-op Stage 1, see [COOP_N_PLAYERS.md](COOP_N_PLAYERS.md)); that has not been tried over the
+Campaign co-op takes two players. For three or four players every player, host and each
+friend adds `--gow2_coop_players=4` (Android: `gow2_coop_players = 4`), all on v0.1.2. A friend left at 2 or on an older build cannot see the host (beacon gate). `scripts\host-online.ps1 -Start -Players 4` prints the command lines with it; see [NETWORK_PLAY.md](NETWORK_PLAY.md) "Four players". Three or more players have not been tried over the
 internet.
 
 ### Open the ports with host-online.ps1 (UPnP)
@@ -207,8 +207,9 @@ On PC, pass settings on the command line. Every build copies `config/gow2.toml` 
 this line with the name it checked:
 ```
 gow2.exe --net_link_active=true --net_public_address=gow2.example.com --net_allow_peers=198.51.100.20,friend2.example.net --system_link_trace=true
+gow2.exe --net_link_active=true --net_public_address=gow2.example.com --net_allow_peers=198.51.100.20,friend2.example.net --system_link_trace=true --gow2_coop_players=4
 ```
-`net_link_active` turns System Link on; it is off by default. `net_public_address` is advertised
+The second line is for three or four players: every player adds `--gow2_coop_players=4` with the same value. `net_link_active` turns System Link on; it is off by default. `net_public_address` is advertised
 as the online address (XNADDR inaOnline). `net_allow_peers` lists IPv4 addresses, a.b.c.d/n
 ranges or DNS names that may send to the game; loopback and the local network always may. With
 `net_public_address` set and `net_allow_peers` empty, only the local network and `net_peers` get
@@ -244,6 +245,15 @@ On the host, look for these lines:
 The last line means a sender is not on the allow list. The first-datagram and dropped lines
 appear only with `system_link_trace=true`. [V code]
 
+### Bandwidth [V, loopback, scripted play]
+
+Per-client peak 5.3 KB/s (76 % of the game's 7000 B/s per-client cap,
+MaxDynamicBandwidth), host upload peak 16 KB/s with 3 clients. The host needs
+at most about 3 x 7000 B/s, about 170 kbit/s, of upload. Run the host with
+`--net_traffic_log_sec=10 --system_link_trace=true` for the session:
+`[nettraffic]` windows pinned near 7000 B/s mean the cap binds (a Stage 3
+change).
+
 ### Windows Firewall (needs an administrator)
 The first time a copy of `gow2.exe` listens, Windows asks whether to allow it. Allowing needs an
 administrator; pressing Cancel as a standard user creates a Block rule for that exact path, and a
@@ -270,10 +280,11 @@ game data. Friends name the host the way its `host-online.ps1 -Start` printed it
 below use `gow2.example.com`.
 
 ### PC
-Use the same build as the host. No version check exists yet, and a build without patch 0011 uses
-UDP 1000 instead of 41000 and cannot see a 0011 host.
+Use the same release as the host, v0.1.2. It contains the Stage 2 co-op work and the codegen fix
+d074c0d. With 3 or more players the beacon gate hides campaigns whose co-op hash differs; with 2 players there is still no check, and a v0.1.1 peer is expected to crash about 0.5 s after the chapter 2 -> 3 map commit even in two-player co-op [I]. For three or four players add `--gow2_coop_players=4` (every player sets the same value).
 ```
 gow2.exe --net_link_active=true --net_peers=gow2.example.com --user_name=<name>
+gow2.exe --net_link_active=true --net_peers=gow2.example.com --user_name=<name> --gow2_coop_players=4
 ```
 Then choose CO-OP CAMPAIGN -> JOIN CO-OP CAMPAIGN to open the System Link browser; X (E on the
 keyboard with `--mnk_mode=true`) refreshes. See [NETWORK_PLAY.md](NETWORK_PLAY.md) for the menu
@@ -282,12 +293,13 @@ flows the friend opened. [I] With `net_peers` set, the friend's game accepts onl
 network and the resolved host address. [V code]
 
 ### Android
-Use the same APK build. Put a `gow2.toml` in
+Use the same APK build, v0.1.2. Put a `gow2.toml` in
 `/sdcard/Android/data/com.santiquiroz.gow2recomp/files/` with these lines:
 ```
 net_link_active = true
 net_peers = "gow2.example.com"
 user_name = "<name>"
+gow2_coop_players = 4   # only for three or four players; every player sets the same value
 ```
 Copy it over USB, or push it from Git Bash (without `MSYS_NO_PATHCONV=1`, Git Bash rewrites the
 `/sdcard/...` path):
@@ -447,4 +459,5 @@ advertising its ZeroTier address is unreachable for devices outside it.
 - Tailscale and ZeroTier have not been tried.
 - A remote NAT that maps a friend's port to an external port below 1024 would be remapped wrongly.
   This is rare.
-- There is no version gate.
+- There is no version gate for two players; with 3+ players the beacon gate hides mismatched campaigns.
+- Stage 2 ran four players only on one PC over loopback; four PCs over the internet, Android with 3+ players and a launch with four in the lobby on v0.1.2 are not tried.

@@ -1,6 +1,6 @@
 # Opens the System Link ports on every UPnP router between this PC and the internet, with a lease,
 # and closes them again. Usage: docs/ONLINE.md, "Host setup". Runs in Windows PowerShell 5.1 and pwsh.
-#   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Start [-LeaseHours 6] [-Hostname gow2.example.com] [-AllowPeers a,b] [-AllowPermanent]
+#   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Start [-LeaseHours 6] [-Hostname gow2.example.com] [-AllowPeers a,b] [-AllowPermanent] [-Players 4]
 #   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Status
 #   powershell -ExecutionPolicy Bypass -File scripts\host-online.ps1 -Stop
 param(
@@ -11,6 +11,7 @@ param(
     [string]$Hostname = '',
     [string[]]$AllowPeers = @(),
     [ValidateRange(1024, 64512)][int]$PortOffset = 40000,
+    [ValidateRange(2, 255)][int]$Players = 2,
     [switch]$AllowPermanent,
     [string]$LogFile = ''
 )
@@ -353,6 +354,11 @@ function Get-AllowPeersText([string[]]$Peers) {
     '<friend-address-or-name>,<another>'
 }
 
+function Get-CoopPlayersArgument {
+    if ($Players -lt 3) { return '' }
+    " --gow2_coop_players=$Players"
+}
+
 function Get-OffsetArgument {
     if ($PortOffset -eq $DefaultPortOffset) { return '' }
     " --net_port_offset=$PortOffset"
@@ -360,15 +366,17 @@ function Get-OffsetArgument {
 
 function Show-GameSettings([string]$PeerName) {
     $offset = Get-OffsetArgument
+    $coop = Get-CoopPlayersArgument
     Write-Section 'Game settings'
     Write-Note 'Host (this PC); net_allow_peers lists your friends'' public addresses or DNS names:'
-    Write-Note "  gow2.exe --net_link_active=true --net_public_address=$PeerName --net_allow_peers=$(Get-AllowPeersText $AllowPeers) --user_name=<name>$offset"
+    Write-Note "  gow2.exe --net_link_active=true --net_public_address=$PeerName --net_allow_peers=$(Get-AllowPeersText $AllowPeers) --user_name=<name>$offset$coop"
     Write-Note 'Friends on PC:'
-    Write-Note "  gow2.exe --net_link_active=true --net_peers=$PeerName --user_name=<name>$offset"
+    Write-Note "  gow2.exe --net_link_active=true --net_peers=$PeerName --user_name=<name>$offset$coop"
     Write-Note "Friends on Android, in ${AndroidConfigDir}gow2.toml:"
     Write-Note '  net_link_active = true'
     Write-Note "  net_peers = `"$PeerName`""
     Write-Note '  user_name = "<name>"'
+    if ($coop) { Write-Note "  gow2_coop_players = $Players" }
     if ($offset) { Write-Note "  net_port_offset = $PortOffset" }
     Write-Note "Windows Firewall must allow the host's gow2.exe in on UDP $($script:Ports -join ' and ') (docs/ONLINE.md)."
 }

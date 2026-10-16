@@ -96,14 +96,26 @@ keybind_back = "Tab"
 keybind_start = "Return,Escape"
 
 # ---------- Co-op beyond two players ----------
-# Campaign co-op player cap: 2 keeps the retail game; 3 to 255 apply the Stage 1 script
-# patches and turn System Link on. See docs/COOP_N_PLAYERS.md.
+# Campaign co-op player cap: 2 keeps the retail game; 3+ applies the co-op patch groups
+# (Stage 1 and 2) and turns System Link on. Every player, host and friends, sets the same
+# value and runs the same build. See docs/COOP_N_PLAYERS.md.
 # gow2_coop_players = 2
+# gow2_coop_survival = true          # survival rows for players 3+ (false: Stage 1 only)
+# gow2_coop_split_revive = false     # true: a standing player 3+ of the downed player's squad counts as a reviver in co-op splits
+# gow2_coop_body = true              # bodies and loadouts for players 3+ (false: Stage 1 class and loadout)
+# gow2_coop_extra_carmine = false    # true: players 3+ are Ben Carmine where his class is loaded
+# gow2_coop_vehicle_ride = true      # vehicle rows (false: vehicles stay retail)
+# gow2_coop_scenes = true            # cinematic, teleport, checkpoint and split rows
+# gow2_coop_leash = true             # host moves far strays next to Marcus or Dom (Windows; false on Android)
+# gow2_coop_leash_distance = 4000    # stray distance in game units
+# gow2_coop_leash_seconds = 8        # stray time in seconds
 
 # ---------- Network (System Link) ----------
 # System Link (LAN and internet co-op) stays off until this is true on every player's copy;
 # gow2_coop_players 3+ turns it on by itself. See docs/NETWORK_PLAY.md.
 # net_link_active = true
+# With gow2_coop_players 3+ only peers with the same co-op hash see each other's campaigns.
+# net_beacon_gate = true
 # Guest ports below 1024 move up by this offset, with the link on or off (the game's UDP 1000
 # becomes 41000); every player needs the same value.
 # net_port_offset = 40000
