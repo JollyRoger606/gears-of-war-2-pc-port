@@ -25,10 +25,12 @@ dMarcus=<uu>`. It starts with the group, also when `gow2_coop_scenes` is false. 
 the package layouts; when no pawn points back at its controller for three sweeps in a row
 it logs `SCENEPROBE layout check failed` and stops.
 
-It is an independent fail-closed group. Stage 1 (`coop`) is applied first and is
-independent. The hook then applies registered groups in name order after Stage 1
-(`src/gow2_script_patch_groups.h`). One failed check skips only `coop-scenes` and logs
-`SCRIPTPATCH coop-scenes: skipped (<row>: <reason>); the game stays retail`.
+It is an independent fail-closed group. The hook applies registered groups in name order
+(`src/gow2_script_patch_groups.h`) last, after `coop`, `survival`, `coop-body` and
+`coop-ride`, and only when `coop` applied; otherwise it logs
+`SCRIPTPATCH coop-scenes: off (the coop group was not applied)`. One failed check skips only
+`coop-scenes` and logs `SCRIPTPATCH coop-scenes: skipped (<row>: <reason>); the other groups
+stay applied`.
 
 Definitions: an extra PC is a GearPC whose DefaultPawnClass is not None, not
 GearPawn_COGMarcus and not GearPawn_COGDom. A hero PC is one whose DefaultPawnClass is
