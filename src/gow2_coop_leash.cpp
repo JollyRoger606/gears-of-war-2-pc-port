@@ -18,10 +18,19 @@
 #include "gow2_dev_guest_calls.h"
 #include "gow2_engine_tick.h"
 #include "gow2_guest.h"
+#include "gow2_script_patch_groups.h"
 
-REXCVAR_DEFINE_BOOL(gow2_coop_leash, true, "Coop",
+#ifdef _WIN32
+constexpr bool kCoopLeashDefault = true;
+#else
+constexpr bool kCoopLeashDefault = false;
+#endif
+
+REXCVAR_DEFINE_BOOL(gow2_coop_leash, kCoopLeashDefault, "Coop",
                     "Players 3+ who stay far from the nearest human Marcus or Dom are moved next "
-                    "to him (host only; gow2_coop_players 3 or more)");
+                    "to him, and players 3+ on foot cannot be hurt while Marcus or Dom rides a "
+                    "vehicle (host only; gow2_coop_players 3 or more). On by default on Windows "
+                    "only: elsewhere a bad guest read would crash the game instead of being skipped");
 REXCVAR_DEFINE_DOUBLE(gow2_coop_leash_distance, 4000.0, "Coop",
                       "Distance in game units beyond which a player 3+ counts as left behind");
 REXCVAR_DEFINE_INT32(gow2_coop_leash_seconds, 8, "Coop",
@@ -64,6 +73,10 @@ void InitSettings(LeashSettings* settings) {
   settings->ready = true;
   if (!REXCVAR_GET(gow2_coop_leash)) return;
   if (REXCVAR_GET(gow2_coop_players) < kMinLeashPlayers) return;
+  if (!script_patch::CoopStage1Applied()) {
+    REXLOG_INFO("COOPLEASH off (the coop group was not applied)");
+    return;
+  }
   settings->enabled = true;
   settings->distance = float(REXCVAR_GET(gow2_coop_leash_distance));
   settings->seconds = REXCVAR_GET(gow2_coop_leash_seconds);
@@ -125,6 +138,19 @@ std::string DefaultPawnClassName(const uint8_t* base, uint32_t pc) {
   return dev_commands::ObjectName(base, dev_commands::kGameGlobals, cls);
 }
 
+bool ReadGodFlag(const uint8_t* base, uint32_t pc) {
+  const uint32_t flags = guest::LoadU32(base, pc + dev_commands::layout::kControllerFlags);
+  return (flags & dev_commands::layout::kGodModeMask) != 0;
+}
+
+bool ReadRiding(const uint8_t* base, uint32_t pawn) {
+  if (pawn == 0) return false;
+  if (dev_commands::ClassChainHas(base, dev_commands::kGameGlobals, pawn, "GearVehicle")) {
+    return true;
+  }
+  return dev_commands::ClassChainHas(base, dev_commands::kGameGlobals, pawn, "GearWeaponPawn");
+}
+
 void FillPawnFields(const uint8_t* base, uint32_t pawn, coop_leash::LeashPc* out) {
   out->pawn_class = dev_commands::ClassName(base, dev_commands::kGameGlobals, pawn);
   out->health = int32_t(guest::LoadU32(base, pawn + kPawnHealth));
@@ -139,9 +165,15 @@ coop_leash::LeashPc ReadLeashPc(const uint8_t* base, uint32_t pc) {
   out.pc = pc;
   out.dpc = DefaultPawnClassName(base, pc);
   out.cinematic = (guest::LoadU32(base, pc + kPcCinematicFlags) & kCinematicModeMask) != 0;
+  out.god = ReadGodFlag(base, pc);
   out.pawn = guest::LoadU32(base, pc + kControllerPawn);
+  out.riding = ReadRiding(base, out.pawn);
   if (out.pawn != 0) FillPawnFields(base, out.pawn, &out);
   return out;
+}
+
+bool IsCampaignController(const uint8_t* base, uint32_t pc) {
+  return dev_commands::ClassChainHas(base, dev_commands::kGameGlobals, pc, "GearPC_SP");
 }
 
 std::optional<std::vector<coop_leash::LeashPc>> TakeSnapshot(const uint8_t* base) {
@@ -153,6 +185,7 @@ std::optional<std::vector<coop_leash::LeashPc>> TakeSnapshot(const uint8_t* base
   }
   std::vector<coop_leash::LeashPc> pcs;
   for (uint32_t pc : dev_commands::PlayerControllers(base, dev_commands::kGameGlobals, world_info)) {
+    if (!IsCampaignController(base, pc)) continue;
     pcs.push_back(ReadLeashPc(base, pc));
   }
   return pcs;
@@ -180,8 +213,44 @@ bool ExtraIsClose(const uint8_t* base, const coop_leash::PullOrder& order) {
   return close;
 }
 
+bool OverlapPullSucceeded(const uint8_t* base, const coop_leash::PullOrder& order) {
+  bool ok = false;
+  auto read = [&] {
+    const float x = LoadFloat(base, order.extra_pawn + kActorLocation);
+    const float y = LoadFloat(base, order.extra_pawn + kActorLocation + 4);
+    const float z = LoadFloat(base, order.extra_pawn + kActorLocation + 8);
+    const double ox = double(x - order.overlap_x);
+    const double oy = double(y - order.overlap_y);
+    const double oz = double(z - order.overlap_z);
+    const double ax = double(x - order.anchor_x);
+    const double ay = double(y - order.anchor_y);
+    const double az = double(z - order.anchor_z);
+    const bool clear = std::sqrt(ox * ox + oy * oy + oz * oz) > coop_leash::kOverlapDistance;
+    const bool close = std::sqrt(ax * ax + ay * ay + az * az) <= coop_leash::kPulledCloseEnough;
+    ok = clear && close;
+  };
+  if (!guest_call::Guarded(read)) return false;
+  return ok;
+}
+
+bool SpotPullSucceeded(const uint8_t* base, const coop_leash::PullOrder& order) {
+  if (order.reason == coop_leash::PullReason::kOverlap) return OverlapPullSucceeded(base, order);
+  return ExtraIsClose(base, order);
+}
+
+int FellDepth(const std::vector<coop_leash::LeashPc>& pcs, const coop_leash::PullOrder& order) {
+  for (const coop_leash::LeashPc& pc : pcs) {
+    if (pc.pc != order.extra_pc) continue;
+    return std::lround(double(order.hero_z - pc.z));
+  }
+  return 0;
+}
+
 std::string PcName(const uint8_t* base, uint32_t pc) {
-  return dev_commands::ObjectName(base, dev_commands::kGameGlobals, pc);
+  std::string out = "?";
+  auto read = [&] { out = dev_commands::ObjectName(base, dev_commands::kGameGlobals, pc); };
+  if (!guest_call::Guarded(read)) return "?";
+  return out;
 }
 
 std::string AnchorLabel(const uint8_t* base, const coop_leash::PullOrder& order) {
@@ -190,7 +259,46 @@ std::string AnchorLabel(const uint8_t* base, const coop_leash::PullOrder& order)
   return anchor + " near " + PcName(base, order.hero_pc);
 }
 
-bool TrySpotPull(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrder& order) {
+void LogSpotPull(const uint8_t* base, const coop_leash::PullOrder& order, int fell_below) {
+  if (order.reason == coop_leash::PullReason::kOverlap) {
+    REXLOG_INFO("COOPLEASH {} moved next to {} (was {} units away; overlapped {})",
+                PcName(base, order.extra_pc), AnchorLabel(base, order),
+                std::lround(order.distance), PcName(base, order.overlap_pc));
+    return;
+  }
+  if (order.reason == coop_leash::PullReason::kFell) {
+    REXLOG_INFO("COOPLEASH {} moved next to {} (was {} units away; fell {} units below every hero)",
+                PcName(base, order.extra_pc), AnchorLabel(base, order),
+                std::lround(order.distance), fell_below);
+    return;
+  }
+  REXLOG_INFO("COOPLEASH {} moved next to {} (was {} units away)", PcName(base, order.extra_pc),
+              AnchorLabel(base, order), std::lround(order.distance));
+}
+
+void LogFallbackPull(const uint8_t* base, const coop_leash::PullOrder& order, float dx, float dy,
+                     int fell_below) {
+  if (order.reason == coop_leash::PullReason::kOverlap) {
+    REXLOG_INFO("COOPLEASH {} placed {},{} from {} (was {} units away; overlapped {}; no "
+                "navigation point near him)",
+                PcName(base, order.extra_pc), dx, dy, AnchorLabel(base, order),
+                std::lround(order.distance), PcName(base, order.overlap_pc));
+    return;
+  }
+  if (order.reason == coop_leash::PullReason::kFell) {
+    REXLOG_INFO("COOPLEASH {} placed {},{} from {} (was {} units away; fell {} units below every "
+                "hero; no navigation point near him)",
+                PcName(base, order.extra_pc), dx, dy, AnchorLabel(base, order),
+                std::lround(order.distance), fell_below);
+    return;
+  }
+  REXLOG_INFO("COOPLEASH {} placed {},{} from {} (was {} units away; no navigation point near him)",
+              PcName(base, order.extra_pc), dx, dy, AnchorLabel(base, order),
+              std::lround(order.distance));
+}
+
+bool TrySpotPull(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrder& order,
+                 int fell_below) {
   static std::optional<uint64_t> name =
       guest_call::MakeName(ctx, base, "FindAvailableTeleportSpot", false);
   if (!name.has_value()) return false;
@@ -200,9 +308,8 @@ bool TrySpotPull(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrd
     guest_call::ProcessEventWithParms(ctx, base, order.anchor_pc, fn, EncodeU32Be(order.extra_pawn),
                                       nullptr, 0);
   }
-  if (!ExtraIsClose(base, order)) return false;
-  REXLOG_INFO("COOPLEASH {} moved next to {} (was {} units away)", PcName(base, order.extra_pc),
-              AnchorLabel(base, order), std::lround(order.distance));
+  if (!SpotPullSucceeded(base, order)) return false;
+  LogSpotPull(base, order, fell_below);
   return true;
 }
 
@@ -228,31 +335,37 @@ void SetFalling(const PPCContext& ctx, uint8_t* base, uint32_t pawn,
 void SendClientLocation(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrder& order,
                         float x, float y, float z, const std::optional<uint64_t>& name) {
   if (!name.has_value()) return;
+  uint32_t rx = 0, ry = 0, rz = 0;
+  auto read = [&] {
+    rx = guest::LoadU32(base, order.extra_pawn + kActorRotation);
+    ry = guest::LoadU32(base, order.extra_pawn + kActorRotation + 4);
+    rz = guest::LoadU32(base, order.extra_pawn + kActorRotation + 8);
+  };
+  if (!guest_call::Guarded(read)) return;
   const uint32_t fn = guest_call::FindFunction(ctx, base, order.extra_pc, *name);
   if (fn == 0) return;
   std::vector<uint8_t> parms = EncodeVectorBe(x, y, z);
-  AppendU32Be(guest::LoadU32(base, order.extra_pawn + kActorRotation), &parms);
-  AppendU32Be(guest::LoadU32(base, order.extra_pawn + kActorRotation + 4), &parms);
-  AppendU32Be(guest::LoadU32(base, order.extra_pawn + kActorRotation + 8), &parms);
+  AppendU32Be(rx, &parms);
+  AppendU32Be(ry, &parms);
+  AppendU32Be(rz, &parms);
   guest_call::ProcessEventWithParms(ctx, base, order.extra_pc, fn, parms, nullptr, 0);
 }
 
 bool TryPlaceAt(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrder& order,
                 uint32_t place_fn, float dx, float dy, const std::optional<uint64_t>& physics_name,
-                const std::optional<uint64_t>& client_name) {
+                const std::optional<uint64_t>& client_name, int fell_below) {
   const float x = order.anchor_x + dx;
   const float y = order.anchor_y + dy;
   const float z = order.anchor_z + coop_leash::kFallbackRaiseZ;
   if (!PlaceExtraAt(ctx, base, order.extra_pawn, place_fn, x, y, z)) return false;
   SetFalling(ctx, base, order.extra_pawn, physics_name);
   SendClientLocation(ctx, base, order, x, y, z, client_name);
-  REXLOG_INFO("COOPLEASH {} placed {},{} from {} (was {} units away; no navigation point near him)",
-              PcName(base, order.extra_pc), dx, dy, AnchorLabel(base, order),
-              std::lround(order.distance));
+  LogFallbackPull(base, order, dx, dy, fell_below);
   return true;
 }
 
-bool TryFallbackPull(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrder& order) {
+bool TryFallbackPull(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrder& order,
+                     int fell_below) {
   static std::optional<uint64_t> set_location =
       guest_call::MakeName(ctx, base, "SetLocation", false);
   static std::optional<uint64_t> set_physics =
@@ -263,18 +376,64 @@ bool TryFallbackPull(const PPCContext& ctx, uint8_t* base, const coop_leash::Pul
   const uint32_t place_fn = guest_call::FindFunction(ctx, base, order.extra_pawn, *set_location);
   if (place_fn == 0) return false;
   for (const auto [dx, dy] : coop_leash::FallbackOffsets()) {
-    if (TryPlaceAt(ctx, base, order, place_fn, dx, dy, set_physics, client_set_location)) {
+    if (TryPlaceAt(ctx, base, order, place_fn, dx, dy, set_physics, client_set_location,
+                   fell_below)) {
       return true;
     }
   }
   return false;
 }
 
-void PullExtra(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrder& order) {
-  if (TrySpotPull(ctx, base, order)) return;
-  if (TryFallbackPull(ctx, base, order)) return;
+void PullExtra(const PPCContext& ctx, uint8_t* base, const coop_leash::PullOrder& order,
+               int fell_below) {
+  if (TrySpotPull(ctx, base, order, fell_below)) return;
+  if (TryFallbackPull(ctx, base, order, fell_below)) return;
   REXLOG_WARN("COOPLEASH {}: no free spot next to {} ({} units away)", PcName(base, order.extra_pc),
               PcName(base, order.hero_pc), std::lround(order.distance));
+}
+
+bool SetGodMode(uint8_t* base, uint32_t pc, bool on) {
+  auto write = [&] {
+    const uint32_t flags = guest::LoadU32(base, pc + dev_commands::layout::kControllerFlags);
+    guest::StoreU32(base, pc + dev_commands::layout::kControllerFlags,
+                    dev_commands::WithGodMode(flags, on));
+  };
+  return guest_call::Guarded(write);
+}
+
+const coop_leash::LeashPc* FindRidingHero(const std::vector<coop_leash::LeashPc>& pcs) {
+  for (const coop_leash::LeashPc& pc : pcs) {
+    if (coop_leash::IsRidingHero(pc)) return &pc;
+  }
+  return nullptr;
+}
+
+void ApplyGrants(uint8_t* base, const std::vector<coop_leash::LeashPc>& pcs,
+                 const coop_leash::GodOrders& orders) {
+  const coop_leash::LeashPc* hero = FindRidingHero(pcs);
+  for (uint32_t pc : orders.grant) {
+    if (!SetGodMode(base, pc, true)) continue;
+    std::string hero_name = "?";
+    std::string vehicle = "?";
+    if (hero != nullptr) {
+      hero_name = PcName(base, hero->pc);
+      vehicle = hero->pawn_class;
+    }
+    REXLOG_INFO("COOPLEASH {}: god mode on ({} rides {})", PcName(base, pc), hero_name, vehicle);
+  }
+}
+
+void ApplyRevokes(uint8_t* base, const coop_leash::GodOrders& orders) {
+  for (uint32_t pc : orders.revoke) {
+    if (!SetGodMode(base, pc, false)) continue;
+    REXLOG_INFO("COOPLEASH {}: god mode off (no hero rides)", PcName(base, pc));
+  }
+}
+
+void ApplyGodOrders(uint8_t* base, const std::vector<coop_leash::LeashPc>& pcs,
+                    const coop_leash::GodOrders& orders) {
+  ApplyGrants(base, pcs, orders);
+  ApplyRevokes(base, orders);
 }
 
 void LeashTick(const PPCContext& ctx, uint8_t* base) {
@@ -284,11 +443,15 @@ void LeashTick(const PPCContext& ctx, uint8_t* base) {
   if (!TakeSnapshotTurn()) return;
   const std::optional<std::vector<coop_leash::LeashPc>> snapshot = GuardedSnapshot(base);
   if (!snapshot.has_value()) return;
-  static std::map<uint32_t, int> far_seconds;
+  static coop_leash::LeashState state;
   const coop_leash::LeashConfig config{settings.distance, settings.seconds};
   const std::vector<coop_leash::PullOrder> orders =
-      coop_leash::PlanPulls(*snapshot, config, &far_seconds);
-  for (const coop_leash::PullOrder& order : orders) PullExtra(ctx, base, order);
+      coop_leash::PlanPulls(*snapshot, config, &state);
+  for (const coop_leash::PullOrder& order : orders) {
+    PullExtra(ctx, base, order, FellDepth(*snapshot, order));
+  }
+  const coop_leash::GodOrders god = coop_leash::PlanGodMode(*snapshot, &state.god_granted);
+  ApplyGodOrders(base, *snapshot, god);
 }
 
 [[maybe_unused]] const bool kLeashRegistered =
