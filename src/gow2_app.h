@@ -57,16 +57,23 @@ class Gow2App : public rex::ReXApp {
         PPCImageConfig));
   }
 
+  // A folder with only default.xex (like the repo's codegen input) boots to a black screen.
+  static bool IsDiscFolder(const std::filesystem::path& dir) {
+    std::error_code ec;
+    return std::filesystem::exists(dir / "default.xex", ec) &&
+           std::filesystem::is_directory(dir / "GearGame", ec);
+  }
+
   static std::filesystem::path WithXex(const std::filesystem::path& dir) {
     std::error_code ec;
     if (dir.empty()) return {};
-    if (std::filesystem::exists(dir / "default.xex", ec)) return dir;
+    if (IsDiscFolder(dir)) return dir;
     for (std::filesystem::directory_iterator it(
              dir, std::filesystem::directory_options::skip_permission_denied, ec);
          !ec && it != std::filesystem::directory_iterator(); ++it) {
       std::error_code e2;
       if (!it->is_directory(e2)) continue;
-      if (std::filesystem::exists(it->path() / "default.xex", e2)) return it->path();
+      if (IsDiscFolder(it->path())) return it->path();
     }
     return {};
   }
