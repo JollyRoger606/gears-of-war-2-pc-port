@@ -31,6 +31,10 @@ stay hidden. The friend sees NO CAMPAIGNS FOUND; the host log says
 may say `[netlink] co-op hash from <address> is <theirs>, ours is <ours>:
 different build or co-op settings; its campaigns stay hidden`. A host at 2 has
 no gate.
+The gate holds over the internet, where the host answers only the peers whose
+search it accepted. On one LAN the host also answers with a broadcast, so a copy
+without a co-op hash (v0.1.1, or `gow2_coop_players=2`) can still list a 4-player
+host while another player's search is running [I]. Check the hashes anyway.
 
 ### Pre-session check
 
