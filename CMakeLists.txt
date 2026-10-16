@@ -31,6 +31,15 @@ set(GOW2_SOURCES
     src/gow2_coop_census.cpp
     src/gow2_test_input.cpp
     src/gow2_test_input_hook.cpp
+    # Stage 2 test tooling (d-tools): dev only, every piece off unless its gow2_dev_* setting is set.
+    src/gow2_engine_tick_hook.cpp
+    src/gow2_dev_commands.cpp
+    src/gow2_dev_guest_calls.cpp
+    src/gow2_dev_commands_hook.cpp
+    src/gow2_dev_host_verbs.cpp
+    src/gow2_dev_map_change.cpp
+    src/gow2_dev_cheats.cpp
+    src/gow2_dev_cheats_table.cpp
 )
 
 # The exe icon. CMake already turns on RC for clang on Windows; enable_language makes it explicit.
@@ -70,6 +79,14 @@ add_executable(gow2_save_dir_test EXCLUDE_FROM_ALL
     src/gow2_machine_xuid.cpp
 )
 target_include_directories(gow2_save_dir_test PRIVATE src)
+
+# Host-side test of the dev command parser, command file reader and guest object walkers on
+# synthetic guest memory (no game data, no SDK).
+add_executable(gow2_dev_commands_test EXCLUDE_FROM_ALL
+    tools/tests/dev_commands_core_test.cpp
+    src/gow2_dev_commands.cpp
+)
+target_include_directories(gow2_dev_commands_test PRIVATE src)
 
 # SDL's gamepad mapping database; the input driver looks for it in the working directory.
 add_custom_command(TARGET gow2 POST_BUILD

@@ -9,6 +9,12 @@
 #   coop-instances.ps1 hold  -Instance 2 -Pad "LY=1" -OutDir out\coop-test\s1   (release clears it)
 #   coop-instances.ps1 stats -Seconds 10 -OutDir out\coop-test\s1
 #   coop-instances.ps1 stop  -OutDir out\coop-test\s1
+#   coop-instances.ps1 cmd -Instance 1 -Command "help" -OutDir out\coop-test\s1
+#   coop-instances.ps1 waitlog -Instance 1 -Pattern "DEVCMD on:" -OutDir out\coop-test\s1
+#   coop-instances.ps1 stopone -Instance 2 -OutDir out\coop-test\s1
+#   coop-instances.ps1 startone -Instance 2 -OutDir out\coop-test\s1
+#   coop-instances.ps1 chapter -Chapter 5 -OutDir out\coop-test\s1
+#   coop-instances.ps1 macro -Instance 1 -Steps "pad:A:200,wait:500" -OutDir out\coop-test\s1
 #
 # key/down/up send real keystrokes to the focused window, so they need the focus. pad/hold/release
 # write the instance's gow2_test_input file instead: the game reads it as guest user 0's pad even
@@ -21,7 +27,7 @@
 # and stop ends it and exits 3 when the guard saw the user come back.
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('start', 'shot', 'shots', 'key', 'down', 'up', 'pad', 'hold', 'release', 'stats', 'status', 'stop')]
+    [ValidateSet('start', 'shot', 'shots', 'key', 'down', 'up', 'pad', 'hold', 'release', 'stats', 'status', 'stop', 'cmd', 'waitlog', 'stopone', 'startone', 'chapter', 'macro')]
     [string]$Action,
     [Parameter(Mandatory)] [string]$OutDir,
     [int]$Count = 1,
@@ -41,7 +47,16 @@ param(
     [switch]$NoGuard,
     [string]$GameRoot = 'C:\personal\gow2-gamedata\retail',
     [string]$Exe = '',
-    [string]$Guard = 'C:\personal\gow2-recomp\out\idle-gate\guard-user.ps1'
+    [string]$Guard = 'C:\personal\gow2-recomp\out\idle-gate\guard-user.ps1',
+    [string]$Command = '',
+    [string]$Pattern = '',
+    [int]$TimeoutSec = 30,
+    [switch]$FromStart,
+    [switch]$Coop,
+    [int]$Players = 4,
+    [switch]$DevCheats,
+    [int]$Chapter = 0,
+    [string]$Steps = ''
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -70,7 +85,8 @@ public static class CoopWin {
 
 function Read-State {
     if (-not (Test-Path $stateFile)) { return @() }
-    return @(Get-Content $stateFile -Raw | ConvertFrom-Json)
+    # Windows PowerShell 5.1 emits a JSON array as one object; enumerate it as pwsh 7 does.
+    return @(Get-Content $stateFile -Raw | ConvertFrom-Json | ForEach-Object { $_ })
 }
 
 function Write-State($items) { ConvertTo-Json -InputObject @($items) -Depth 4 | Set-Content $stateFile }
@@ -87,9 +103,22 @@ function New-InstanceFolder([int]$i) {
     }
     New-Item -ItemType Directory -Force -Path $user | Out-Null
     Set-Content -Path (Join-Path $dir 'pad.txt') -Value ''
+    $path = Join-Path $dir 'cmd.txt'
+    [IO.File]::WriteAllText($path, '')
+    Remove-Item -LiteralPath (Join-Path $dir 'cmd.txt.ack') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $dir 'log-offset.txt') -Force -ErrorAction SilentlyContinue
     $cache = Join-Path $user 'cache'
     if ($SeedCache -and -not (Test-Path $cache)) { Copy-Item -Recurse -Path $SeedCache -Destination $cache }
     return $dir
+}
+
+function Get-CoopArgs([int]$i) {
+    $list = @()
+    for ($k = 1; $k -le $Count; $k++) {
+        $list += "127.0.0.$k"
+    }
+    $targets = $list -join ','
+    return @("--gow2_coop_players=$Players", '--net_link_active=true', "--net_bind_ip=127.0.0.$i", "--net_broadcast_targets=$targets", "--user_name=P$i", '--system_link_trace=true', '--gow2_coop_census=true', '--net_traffic_log_sec=10')
 }
 
 function Get-InstanceArgs([int]$i, [string]$dir) {
@@ -97,6 +126,9 @@ function Get-InstanceArgs([int]$i, [string]$dir) {
         "--gow2_test_input=`"$(Join-Path $dir 'pad.txt')`"",
         "--user_data_root=`"$(Join-Path $dir 'user')`"", '--fullscreen=false',
         "--window_width=$Width", "--window_height=$Height", '--resolution_scale=1')
+    $own += "--gow2_dev_command_file=`"$(Join-Path $dir 'cmd.txt')`""
+    if ($Coop) { $own += Get-CoopArgs $i }
+    if ($DevCheats -and $i -eq 1) { $own += '--gow2_dev_cheats=true' }
     $extra = @(Expand-InstanceArgs $Common $i)
     $ownExtra = @($PerInstance -split '\|')
     if ($ownExtra.Count -ge $i) { $extra += Expand-InstanceArgs $ownExtra[$i - 1] $i }
@@ -145,11 +177,15 @@ function Start-Instances {
     $guard = Start-Guard
     for ($i = 1; $i -le $Count; $i++) {
         $dir = New-InstanceFolder $i
-        $proc = Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe) -PassThru -ArgumentList (Get-InstanceArgs $i $dir)
+        $logPath = Join-Path $dir 'game.log'
+        $logStart = 0
+        if (Test-Path $logPath) { $logStart = (Get-Item $logPath).Length }
+        $finalArgs = Get-InstanceArgs $i $dir
+        $proc = Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe) -PassThru -ArgumentList $finalArgs
         $h = Wait-Window $proc
         if ($h -ne [IntPtr]::Zero) { Move-ToSlot $h $i }
         $items += [pscustomobject]@{ Index = $i; Pid = $proc.Id; Ticks = (Get-StartTicks $proc); Dir = $dir
-            Guard = $(if ($guard) { $guard.Id } else { 0 }); GuardTicks = (Get-StartTicks $guard) }
+            Guard = $(if ($guard) { $guard.Id } else { 0 }); GuardTicks = (Get-StartTicks $guard); Args = $finalArgs; LogStart = $logStart }
         Write-State $items
         Write-Output "instance $i pid $($proc.Id) log $(Join-Path $dir 'game.log')"
         if ($i -lt $Count) { Start-Sleep -Seconds $StaggerSec }
@@ -240,7 +276,7 @@ function Send-InstancePad([string]$mode) {
 }
 
 # No focus change: the windows sit in separate slots, so the screen shows each one.
-function Save-InstanceShot([int]$i) {
+function Save-InstanceShot([int]$i, [string]$shotLabel) {
     $proc = Get-InstanceProcess $i
     $h = $proc.MainWindowHandle
     $r = New-Object CoopWin+RECT
@@ -248,7 +284,7 @@ function Save-InstanceShot([int]$i) {
     $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
-    $path = Join-Path $OutDir ("{0}-i{1}-{2}.png" -f (Get-Date -Format 'HHmmss'), $i, $Label)
+    $path = Join-Path $OutDir ("{0}-i{1}-{2}.png" -f (Get-Date -Format 'HHmmss'), $i, $shotLabel)
     $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $bmp.Dispose()
     Write-Output "shot $path"
@@ -274,8 +310,11 @@ function Write-Stats {
     foreach ($p in $live) {
         $p.Refresh()
         $cpu = ($p.TotalProcessorTime.TotalSeconds - $before[$p.Id]) / $Seconds / $cores * 100
-        Write-Output ("pid {0}: cpu {1:N1}% of {2} threads, ram {3} MB, vram {4} MB, gpu3d {5}%" -f `
-            $p.Id, $cpu, $cores, [Math]::Round($p.WorkingSet64 / 1MB), (Get-GpuMemoryMB $p.Id), (Get-Gpu3dPercent $p.Id))
+        $ram = [Math]::Round($p.WorkingSet64 / 1MB)
+        $vram = Get-GpuMemoryMB $p.Id
+        $gpu = Get-Gpu3dPercent $p.Id
+        $fmt = 'pid {0}: cpu {1:N1}% of {2} threads, ram {3} MB, vram {4} MB, gpu3d {5}%'
+        Write-Output ($fmt -f $p.Id, $cpu, $cores, $ram, $vram, $gpu)
     }
 }
 
@@ -298,10 +337,369 @@ function Stop-Instances {
     if (Test-Path $guardFlag) { Write-Output "USER RETURNED: $(Get-Content $guardFlag)"; exit 3 }
 }
 
+function Get-InstanceDir([int]$i) {
+    return Join-Path $OutDir "inst$i"
+}
+
+function Get-CommandFile([int]$i) {
+    return Join-Path (Get-InstanceDir $i) 'cmd.txt'
+}
+
+function Get-AckFile([int]$i) {
+    return Join-Path (Get-InstanceDir $i) 'cmd.txt.ack'
+}
+
+function Get-LogFile([int]$i) {
+    return Join-Path (Get-InstanceDir $i) 'game.log'
+}
+
+function Get-LineCount([string]$path) {
+    if (-not (Test-Path $path)) { return 0 }
+    $fs = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    try {
+        $count = 0
+        $buf = New-Object byte[] 4096
+        while ($true) {
+            $n = $fs.Read($buf, 0, $buf.Length)
+            if ($n -le 0) { break }
+            for ($k = 0; $k -lt $n; $k++) {
+                if ($buf[$k] -eq 10) { $count++ }
+            }
+        }
+        return $count
+    } finally {
+        $fs.Dispose()
+    }
+}
+
+function Add-CommandLine([string]$path, [string]$line) {
+    if (-not $line) { throw 'command line is empty' }
+    if ($line.StartsWith('#')) { throw "command line must not start with '#'" }
+    foreach ($ch in $line.ToCharArray()) {
+        $code = [int]$ch
+        if ($code -eq 9) { continue }
+        if ($code -lt 32 -or $code -gt 126) { throw ("command line has invalid char 0x{0:X2}" -f $code) }
+    }
+    $bytes = [Text.Encoding]::ASCII.GetBytes($line + "`n")
+    for ($try = 0; $try -lt 20; $try++) {
+        try {
+            $fs = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+            try {
+                $fs.Write($bytes, 0, $bytes.Length)
+            } finally {
+                $fs.Dispose()
+            }
+            return
+        } catch [IO.IOException] {
+            Start-Sleep -Milliseconds 5
+        }
+    }
+    throw "could not write $path"
+}
+
+function Read-SharedText([string]$path, [long]$start) {
+    if (-not (Test-Path $path)) { return '' }
+    $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+    $fs = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+    try {
+        if ($fs.Length -le $start) { return '' }
+        $fs.Seek($start, [IO.SeekOrigin]::Begin) | Out-Null
+        $len = [int]($fs.Length - $start)
+        $buf = New-Object byte[] $len
+        $read = 0
+        while ($read -lt $len) {
+            $n = $fs.Read($buf, $read, $len - $read)
+            if ($n -le 0) { break }
+            $read += $n
+        }
+        return [Text.Encoding]::ASCII.GetString($buf, 0, $read)
+    } finally {
+        $fs.Dispose()
+    }
+}
+
+function Save-LogOffset([int]$i) {
+    $log = Get-LogFile $i
+    $len = 0
+    if (Test-Path $log) { $len = (Get-Item $log).Length }
+    $offPath = Join-Path (Get-InstanceDir $i) 'log-offset.txt'
+    Set-Content -Path $offPath -Value "$len"
+}
+
+function Find-AckLine([string]$ackPath, [int]$n) {
+    $text = Read-SharedText $ackPath 0
+    if (-not $text) { return $null }
+    $prefix = "$n`t"
+    foreach ($line in ($text -split "`n")) {
+        $clean = $line.TrimEnd("`r")
+        if ($clean.StartsWith($prefix)) { return $clean }
+    }
+    return $null
+}
+
+function Wait-Ack([string]$ackPath, [int]$n, [int]$timeoutSec) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $line = Find-AckLine $ackPath $n
+        if ($null -ne $line) { return $line }
+        if ($clock.Elapsed.TotalSeconds -ge $timeoutSec) { return $null }
+        Start-Sleep -Milliseconds 100
+    }
+}
+
+function Wait-PumpReady([int]$i, [int]$timeoutSec) {
+    $item = Read-State | Where-Object { $_.Index -eq $i } | Select-Object -First 1
+    $start = 0
+    if ($item -and ($item.PSObject.Properties.Name -contains 'LogStart')) { $start = [long]$item.LogStart }
+    $log = Get-LogFile $i
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $text = Read-SharedText $log $start
+        if ($text -and $text.Contains('DEVCMD on:')) { return $true }
+        if ($clock.Elapsed.TotalSeconds -ge $timeoutSec) { return $false }
+        Start-Sleep -Milliseconds 250
+    }
+}
+
+function Invoke-InstanceCommand([int]$i, [string]$text, [int]$timeoutSec) {
+    Get-InstanceProcess $i | Out-Null
+    if (-not (Wait-PumpReady $i $timeoutSec)) {
+        return @{ Code = 2; Text = "instance $i has no command pump (no 'DEVCMD on' in its log)" }
+    }
+    $cmdPath = Get-CommandFile $i
+    $n = (Get-LineCount $cmdPath) + 1
+    Save-LogOffset $i
+    Add-CommandLine $cmdPath $text
+    $ackPath = Get-AckFile $i
+    $line = Wait-Ack $ackPath $n $timeoutSec
+    if ($null -eq $line) {
+        return @{ Code = 2; Text = "instance $i #$n no result after $timeoutSec s" }
+    }
+    $parts = $line -split "`t", 3
+    $status = ''
+    $detail = ''
+    if ($parts.Count -ge 2) { $status = $parts[1] }
+    if ($parts.Count -ge 3) { $detail = $parts[2] }
+    $code = 1
+    if ($status -eq 'ok') { $code = 0 }
+    return @{ Code = $code; Text = "instance $i #$n $status $detail" }
+}
+
+function Get-LogWaitStart([int]$i) {
+    if ($FromStart) { return 0 }
+    $offPath = Join-Path (Get-InstanceDir $i) 'log-offset.txt'
+    if (Test-Path $offPath) {
+        $txt = (Get-Content $offPath -Raw).Trim()
+        $val = [long]0
+        if ([long]::TryParse($txt, [ref]$val)) { return $val }
+    }
+    $log = Get-LogFile $i
+    if (Test-Path $log) { return (Get-Item $log).Length }
+    return 0
+}
+
+function Find-LogMatch([int]$i, [string]$pattern, [int]$timeoutSec) {
+    $pos = Get-LogWaitStart $i
+    $log = Get-LogFile $i
+    $pending = ''
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $chunk = Read-SharedText $log $pos
+        if ($chunk.Length -gt 0) {
+            $pos += $chunk.Length
+            $text = $pending + $chunk
+            $lines = $text -split "`n"
+            $pending = $lines[$lines.Count - 1]
+            for ($k = 0; $k -lt ($lines.Count - 1); $k++) {
+                $line = $lines[$k].TrimEnd("`r")
+                if ($line -match $pattern) { return $line }
+            }
+        }
+        if ($clock.Elapsed.TotalSeconds -ge $timeoutSec) { return $null }
+        Start-Sleep -Milliseconds 250
+    }
+}
+
+function Test-LogPattern([int]$i, [string]$pattern, [int]$timeoutSec) {
+    $m = Find-LogMatch $i $pattern $timeoutSec
+    return ($null -ne $m)
+}
+
+function Wait-LogPattern([int]$i, [string]$pattern, [int]$timeoutSec) {
+    $m = Find-LogMatch $i $pattern $timeoutSec
+    if ($null -ne $m) {
+        Write-Output "instance $i matched: $m"
+        exit 0
+    }
+    Write-Output "instance $i no line matching '$pattern' after $timeoutSec s"
+    exit 2
+}
+
+function Stop-OneInstance([int]$i) {
+    $items = Read-State
+    $item = $items | Where-Object { $_.Index -eq $i } | Select-Object -First 1
+    if (-not $item) { throw "no instance $i in $stateFile" }
+    Stop-SameProcess $item.Pid $item.Ticks
+    $item.Pid = 0
+    $item.Ticks = 0
+    Write-State $items
+    Write-Output "instance $i stopped"
+}
+
+function Start-OneInstance([int]$i) {
+    $items = Read-State
+    $item = $items | Where-Object { $_.Index -eq $i } | Select-Object -First 1
+    if (-not $item) { throw "no instance $i in $stateFile" }
+    $old = $null
+    if ($item.Pid) { $old = Get-Process -Id $item.Pid -ErrorAction SilentlyContinue }
+    if ($old -and $old.ProcessName -eq 'gow2') { throw "instance $i is already running (pid $($item.Pid))" }
+    if (-not ($item.PSObject.Properties.Name -contains 'Args')) { throw "instance $i has no stored Args; start it again with 'start'" }
+    $dir = $item.Dir
+    if (-not $dir) { $dir = Get-InstanceDir $i }
+    $logPath = Join-Path $dir 'game.log'
+    $logStart = 0
+    if (Test-Path $logPath) { $logStart = (Get-Item $logPath).Length }
+    $stored = @($item.Args)
+    $proc = Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe) -PassThru -ArgumentList $stored
+    $h = Wait-Window $proc
+    if ($h -ne [IntPtr]::Zero) { Move-ToSlot $h $i }
+    $item.Pid = $proc.Id
+    $item.Ticks = Get-StartTicks $proc
+    $item.LogStart = $logStart
+    Write-State $items
+    Write-Output "instance $i pid $($proc.Id) log $logPath"
+}
+
+function Invoke-PadMacroStep([int]$i, [string]$buttons, [string]$msText) {
+    if (-not $buttons) { return 'bad pad step' }
+    $ms = 0
+    if (-not ([int]::TryParse($msText, [ref]$ms))) { return "bad ms '$msText'" }
+    try {
+        $padLine = $buttons -replace '\+', ' '
+        Write-PadFile $i $padLine
+        Start-Sleep -Milliseconds $ms
+        Write-PadFile $i ''
+        return $null
+    } catch {
+        return $_.Exception.Message
+    }
+}
+
+function Invoke-HoldMacroStep([int]$i, [string]$buttons) {
+    if (-not $buttons) { return 'bad hold step' }
+    try {
+        $padLine = $buttons -replace '\+', ' '
+        Write-PadFile $i $padLine
+        return $null
+    } catch {
+        return $_.Exception.Message
+    }
+}
+
+function Invoke-WaitMacroStep([string]$msText) {
+    $ms = 0
+    if (-not ([int]::TryParse($msText, [ref]$ms))) { return "bad ms '$msText'" }
+    Start-Sleep -Milliseconds $ms
+    return $null
+}
+
+function Invoke-ShotMacroStep([int]$i, [string]$shotLabel) {
+    if (-not $shotLabel) { return 'bad shot step' }
+    try {
+        # Print the path here: anything a step function outputs counts as its failure reason.
+        Write-Host (Save-InstanceShot $i $shotLabel)
+        return $null
+    } catch {
+        return $_.Exception.Message
+    }
+}
+
+function Invoke-CmdMacroStep([int]$i, [string]$cmdText, [int]$timeoutSec) {
+    if (-not $cmdText) { return 'bad cmd step' }
+    try {
+        $r = Invoke-InstanceCommand $i $cmdText $timeoutSec
+    } catch {
+        return $_.Exception.Message
+    }
+    if ($r.Code -ne 0) { return $r.Text }
+    return $null
+}
+
+function Invoke-LogMacroStep([int]$i, [string]$regex, [string]$secText) {
+    if (-not $regex) { return 'bad log step' }
+    $sec = 0
+    if (-not ([int]::TryParse($secText, [ref]$sec))) { return "bad sec '$secText'" }
+    try {
+        $ok = Test-LogPattern $i $regex $sec
+    } catch {
+        return $_.Exception.Message
+    }
+    if (-not $ok) { return "no line matching '$regex' after $sec s" }
+    return $null
+}
+
+function Invoke-MacroStep([int]$i, [string]$step, [int]$timeoutSec) {
+    if ($step -eq 'release') {
+        try {
+            Write-PadFile $i ''
+            return $null
+        } catch {
+            return $_.Exception.Message
+        }
+    }
+    if ($step.StartsWith('pad:')) {
+        $rest = $step.Substring(4)
+        $parts = $rest -split ':', 2
+        if ($parts.Count -ne 2) { return 'bad pad step' }
+        return Invoke-PadMacroStep $i $parts[0] $parts[1]
+    }
+    if ($step.StartsWith('hold:')) {
+        $buttons = $step.Substring(5)
+        return Invoke-HoldMacroStep $i $buttons
+    }
+    if ($step.StartsWith('wait:')) {
+        $msText = $step.Substring(5)
+        return Invoke-WaitMacroStep $msText
+    }
+    if ($step.StartsWith('shot:')) {
+        $shotLabel = $step.Substring(5)
+        return Invoke-ShotMacroStep $i $shotLabel
+    }
+    if ($step.StartsWith('cmd:')) {
+        $cmdText = $step.Substring(4)
+        return Invoke-CmdMacroStep $i $cmdText $timeoutSec
+    }
+    if ($step.StartsWith('log:')) {
+        $rest = $step.Substring(4)
+        $idx = $rest.LastIndexOf(':')
+        if ($idx -lt 0) { return 'bad log step' }
+        $regex = $rest.Substring(0, $idx)
+        $secText = $rest.Substring($idx + 1)
+        return Invoke-LogMacroStep $i $regex $secText
+    }
+    return 'unknown step'
+}
+
+function Invoke-Macro([int]$i, [string]$stepsText, [int]$timeoutSec) {
+    $list = $stepsText -split ','
+    $k = 0
+    foreach ($raw in $list) {
+        $k++
+        $text = $raw.Trim()
+        Write-Output "$(Get-Date -Format 'HH:mm:ss.fff') instance $i step $text"
+        $why = Invoke-MacroStep $i $text $timeoutSec
+        if ($why) {
+            Write-Output "macro failed at step $k '$text': $why"
+            exit 1
+        }
+    }
+    exit 0
+}
+
 switch ($Action) {
     'start' { Start-Instances }
-    'shot' { Save-InstanceShot $Instance }
-    'shots' { foreach ($item in Read-State) { Save-InstanceShot $item.Index } }
+    'shot' { Save-InstanceShot $Instance $Label }
+    'shots' { foreach ($item in Read-State) { Save-InstanceShot $item.Index $Label } }
     'key' { Send-InstanceKey 'key' }
     'down' { Send-InstanceKey 'down' }
     'up' { Send-InstanceKey 'up' }
@@ -311,4 +709,30 @@ switch ($Action) {
     'stats' { Write-Stats }
     'status' { Write-Status }
     'stop' { Stop-Instances }
+    'cmd' {
+        try {
+            $cmdResult = Invoke-InstanceCommand $Instance $Command $TimeoutSec
+        } catch {
+            Write-Output $_.Exception.Message
+            exit 3
+        }
+        Write-Output $cmdResult.Text
+        exit $cmdResult.Code
+    }
+    'waitlog' { Wait-LogPattern $Instance $Pattern $TimeoutSec }
+    'stopone' { Stop-OneInstance $Instance }
+    'startone' { Start-OneInstance $Instance }
+    'chapter' {
+        if ($Chapter -lt 1 -or $Chapter -gt 29) { throw 'chapter must be 1..29' }
+        $travel = "servertravel geargame_p?loadcheckpoint=0?chapter=$($Chapter - 1)"
+        try {
+            $chapterResult = Invoke-InstanceCommand 1 $travel $TimeoutSec
+        } catch {
+            Write-Output $_.Exception.Message
+            exit 3
+        }
+        Write-Output $chapterResult.Text
+        exit $chapterResult.Code
+    }
+    'macro' { Invoke-Macro $Instance $Steps $TimeoutSec }
 }
