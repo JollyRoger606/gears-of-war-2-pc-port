@@ -52,6 +52,7 @@ param(
     [string]$Pattern = '',
     [int]$TimeoutSec = 30,
     [switch]$FromStart,
+    [switch]$SinceStart,
     [switch]$Coop,
     [int]$Players = 4,
     [switch]$DevCheats,
@@ -447,10 +448,14 @@ function Wait-Ack([string]$ackPath, [int]$n, [int]$timeoutSec) {
     }
 }
 
+function Get-RunLogStart([int]$i) {
+    $found = Read-State | Where-Object { $_.Index -eq $i } | Select-Object -First 1
+    if ($found -and ($found.PSObject.Properties.Name -contains 'LogStart')) { return [long]$found.LogStart }
+    return 0
+}
+
 function Wait-PumpReady([int]$i, [int]$timeoutSec) {
-    $item = Read-State | Where-Object { $_.Index -eq $i } | Select-Object -First 1
-    $start = 0
-    if ($item -and ($item.PSObject.Properties.Name -contains 'LogStart')) { $start = [long]$item.LogStart }
+    $start = Get-RunLogStart $i
     $log = Get-LogFile $i
     $clock = [Diagnostics.Stopwatch]::StartNew()
     while ($true) {
@@ -487,6 +492,7 @@ function Invoke-InstanceCommand([int]$i, [string]$text, [int]$timeoutSec) {
 
 function Get-LogWaitStart([int]$i) {
     if ($FromStart) { return 0 }
+    if ($SinceStart) { return (Get-RunLogStart $i) }
     $offPath = Join-Path (Get-InstanceDir $i) 'log-offset.txt'
     if (Test-Path $offPath) {
         $txt = (Get-Content $offPath -Raw).Trim()

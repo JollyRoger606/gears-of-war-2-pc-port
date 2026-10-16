@@ -34,7 +34,8 @@ param(
     [switch]$NoIdleGate,
     [int]$TitleWaitSec = 0,
     [int]$LoadSec = 0,
-    [double]$WaitScale = 1.0
+    [double]$WaitScale = 1.0,
+    [string]$Common = ''
 )
 $ErrorActionPreference = 'Stop'
 
@@ -186,6 +187,15 @@ function Copy-SharedFile {
     }
 }
 
+function Move-ScenarioShots {
+    param([string]$Scenario, [string]$Label)
+    $dir = Join-Path $OutRoot $Scenario
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    foreach ($shot in @(Get-ChildItem -Path $OutRoot -File -Filter "*-$Label.png")) {
+        Move-Item -Force -Path $shot.FullName -Destination (Join-Path $dir $shot.Name)
+    }
+}
+
 function Save-Evidence {
     param([string]$Scenario)
     $dir = Join-Path $OutRoot $Scenario
@@ -197,6 +207,7 @@ function Save-Evidence {
         }
     }
     Invoke-Instances 'shots' '-Label' $Scenario | Out-Null
+    Move-ScenarioShots $Scenario $Scenario
 }
 
 function Wait-Scaled {
@@ -241,6 +252,7 @@ function Invoke-SetupScenario {
     if ($DevCheats) { $startArgs += '-DevCheats' }
     $startArgs += @('-SeedUser', $SeedUser)
     if ($SeedCache) { $startArgs += @('-SeedCache', $SeedCache) }
+    if ($Common) { $startArgs += @('-Common', $Common) }
     Invoke-Instances @startArgs | Out-Null
     for ($i = 1; $i -le $Players; $i++) {
         $r = Invoke-Instances 'waitlog' '-Instance' "$i" '-Pattern' 'DEVCMD on:' '-FromStart' '-TimeoutSec' '120'
@@ -256,11 +268,11 @@ function Invoke-SetupScenario {
     }
     Wait-Scaled 1
     if (-not (Invoke-CheckedMacro 'setup' 1 $HostLobbyMacro 'host lobby')) { Save-Evidence 'setup'; return }
-    $r = Invoke-Instances 'waitlog' '-Instance' '1' '-Pattern' 'XGISessionCreate .*host=true' '-TimeoutSec' '90'
+    $r = Invoke-Instances 'waitlog' '-Instance' '1' '-Pattern' 'XGISessionCreate .*host=true' '-TimeoutSec' '90' '-SinceStart'
     Add-Result 'setup' ($r.Code -eq 0) 'host session created' ($r.Lines -join ' | ')
     if (-not (Invoke-CheckedMacro 'setup' 2 $OpenBrowserMacro 'open browser')) { Save-Evidence 'setup'; return }
     if (-not (Invoke-CheckedMacro 'setup' 2 $JoinMacro 'join')) { Save-Evidence 'setup'; return }
-    $r = Invoke-Instances 'waitlog' '-Instance' '2' '-Pattern' 'XGISessionJoinRemote .*members=' '-TimeoutSec' '90'
+    $r = Invoke-Instances 'waitlog' '-Instance' '2' '-Pattern' 'XGISessionJoinRemote .*members=' '-TimeoutSec' '90' '-SinceStart'
     Add-Result 'setup' ($r.Code -eq 0) 'client 2 joined' ($r.Lines -join ' | ')
     if (-not (Invoke-CheckedMacro 'setup' 1 $LaunchMacro 'launch')) { Save-Evidence 'setup'; return }
     Wait-Scaled $LoadSec
@@ -268,7 +280,7 @@ function Invoke-SetupScenario {
     for ($i = 3; $i -le $Players; $i++) {
         if (-not (Invoke-CheckedMacro 'setup' $i $OpenBrowserMacro 'open browser')) { Save-Evidence 'setup'; return }
         if (-not (Invoke-CheckedMacro 'setup' $i $JoinListedMacro 'join listed')) { Save-Evidence 'setup'; return }
-        $r = Invoke-Instances 'waitlog' '-Instance' "$i" '-Pattern' 'XGISessionJoinRemote .*members=' '-TimeoutSec' '90'
+        $r = Invoke-Instances 'waitlog' '-Instance' "$i" '-Pattern' 'XGISessionJoinRemote .*members=' '-TimeoutSec' '90' '-SinceStart'
         Add-Result 'setup' ($r.Code -eq 0) "client $i joined" ($r.Lines -join ' | ')
         Wait-Scaled $LoadSec
         if (-not (Invoke-CheckedMacro 'setup' $i $SpawnMacro 'spawn')) { Save-Evidence 'setup'; return }
@@ -293,10 +305,13 @@ function Invoke-TransitionScenario {
     Add-Result 'transition' ($r.Code -eq 0) 'mapcommit' ($r.Lines -join ' | ')
     Wait-Scaled 2
     Invoke-Instances 'shots' '-Label' 'transition-2s' | Out-Null
+    Move-ScenarioShots 'transition' 'transition-2s'
     Wait-Scaled 8
     Invoke-Instances 'shots' '-Label' 'transition-10s' | Out-Null
+    Move-ScenarioShots 'transition' 'transition-10s'
     Wait-Scaled 20
     Invoke-Instances 'shots' '-Label' 'transition-30s' | Out-Null
+    Move-ScenarioShots 'transition' 'transition-30s'
     $list = @(Get-ListLines)
     $pcs = @($list | Where-Object { $_.IsPc })
     Add-PlayerChecks 'transition' $pcs
@@ -332,6 +347,8 @@ function Invoke-KillHostScenario {
     $r = Send-Command 1 '!kill P1'
     Add-Result 'kill-host' ($r.Code -eq 0) 'kill P1' ($r.Lines -join ' | ')
     Wait-Scaled 8
+    Invoke-Instances 'shots' '-Label' 'kill-host-8s' | Out-Null
+    Move-ScenarioShots 'kill-host' 'kill-host-8s'
     $list = @(Get-ListLines)
     foreach ($c in $list) {
         Add-Note 'kill-host' "$($c.Name) pc=$($c.IsPc) player=$($c.Player) pawn=$($c.PawnClass) state=$($c.State)"
@@ -353,19 +370,32 @@ function Invoke-CheckpointScenario {
     Save-Evidence 'checkpoint'
 }
 
+function Get-OrphanExtras {
+    param([array]$List)
+    return @($List | Where-Object { (-not $_.IsPc) -and ($_.Class -eq 'GearAI_Dom') -and (($_.PawnClass -eq 'GearPawn_COGBenjaminCarmine') -or ($_.PawnClass -eq 'GearPawn_COGGear')) })
+}
+
+function Add-OrphanCheck {
+    param([string]$Scenario, [array]$List, [string]$Check)
+    $orphans = @(Get-OrphanExtras $List)
+    $names = 'none'
+    if ($orphans.Count -gt 0) { $names = (($orphans | ForEach-Object { $_.Name }) -join ', ') }
+    Add-Result $Scenario ($orphans.Count -eq 0) $Check $names
+}
+
 function Invoke-LeaveRejoinScenario {
     Write-Output '=== leave-rejoin: stop last instance, rejoin ==='
+    Send-Command 1 "!mark leave-$Players" | Out-Null
     Invoke-Instances 'stopone' '-Instance' "$Players" | Out-Null
-    Wait-Scaled 10
+    $r = Invoke-Instances 'waitlog' '-Instance' '1' '-Pattern' 'XGISessionLeaveRemote' '-TimeoutSec' '120'
+    Add-Result 'leave-rejoin' ($r.Code -eq 0) 'host saw the leave' ($r.Lines -join ' | ')
+    Wait-Scaled 3
     $list = @(Get-ListLines)
     $pcs = @($list | Where-Object { $_.IsPc })
     Add-Note 'leave-rejoin' (Get-PlayerSummary $pcs)
-    $orphans = @($list | Where-Object { (-not $_.IsPc) -and ($_.PawnClass -eq 'GearPawn_COGBenjaminCarmine') })
-    foreach ($o in $orphans) {
-        Add-Note 'leave-rejoin' "orphan Carmine pawn: $($o.Name) pawn=$($o.Pawn) state=$($o.State)"
-    }
     $want = $Players - 1
     Add-Result 'leave-rejoin' ($pcs.Count -eq $want) 'player count dropped' "found $($pcs.Count), want $want"
+    Add-OrphanCheck 'leave-rejoin' $list 'no AI-driven extra after the leave'
     Invoke-Instances 'startone' '-Instance' "$Players" | Out-Null
     $r = Invoke-Instances 'waitlog' '-Instance' "$Players" '-Pattern' 'DEVCMD on:' '-TimeoutSec' '120'
     Add-Note 'leave-rejoin' ($r.Lines -join ' | ')
@@ -381,6 +411,7 @@ function Invoke-LeaveRejoinScenario {
     $list = @(Get-ListLines)
     $pcs = @($list | Where-Object { $_.IsPc })
     Add-PlayerChecks 'leave-rejoin' $pcs
+    Add-OrphanCheck 'leave-rejoin' $list 'no AI-driven extra after the rejoin'
     Save-Evidence 'leave-rejoin'
 }
 

@@ -186,7 +186,8 @@ buttons), `hold:<buttons>`, `release`, `wait:<ms>`, `shot:<label>`,
 `cmd` exit codes: 0 ok, 1 error, 2 no result in time or no pump, 3 not sent
 (the instance is not running, or the line is empty, a `#` comment or not
 ASCII). The `cmd` action waits for `DEVCMD on:` in the log before it writes.
-`chapter` sends the travel to instance 1 and takes 1..29.
+`chapter` sends the travel to instance 1 and takes 1..29. `waitlog`
+`-SinceStart` reads from where the instance's current run began.
 
 `-Coop` sets per instance: `--gow2_coop_players` (from `-Players`, default
 4), `--net_link_active`, `--net_bind_ip=127.0.0.<i>`,
@@ -216,9 +217,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/coop-stage2.ps1 -Sce
   the notes.
 - `checkpoint`: `SaveCheckpoint` on instance 1, walk P3 away, `LoadCheckpoint`
   on instance 1. Check every player has a pawn.
-- `leave-rejoin`: `stopone` the last instance, check the player count
-  dropped and note orphan Carmine pawns, then `startone`, rejoin through the
-  menu macros, and check every player has a pawn.
+- `leave-rejoin`: `stopone` the last instance, wait up to 120 s for the
+  host to log XGISessionLeaveRemote, then check the player count dropped
+  and that no GearAI_Dom drives an extra's body (GearPawn_COGBenjaminCarmine
+  or GearPawn_COGGear). Then `startone`, rejoin through the menu macros,
+  and check every player has a pawn and still no GearAI_Dom drives an
+  extra's body.
 - `travel`: `chapter -Chapter <n>` (default 5), then wait for `COOPCENSUS
   pawns` in each log. Check every player has a pawn.
 - `all`: run every scenario in order (setup, transition, kill-extra,
