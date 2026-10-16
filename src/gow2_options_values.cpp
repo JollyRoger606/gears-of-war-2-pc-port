@@ -221,11 +221,9 @@ bool HasFidelityFx() {
 }
 
 bool HasDlss() {
-#ifdef _WIN32
-  if (!rex::cvar::GetFlagInfo("gow2_dlss")) return false;
-  std::error_code ec;
-  return std::filesystem::is_regular_file(
-      rex::filesystem::GetExecutablePath().parent_path() / "nvngx_dlss.dll", ec);
+#ifdef GOW2_DLSS_RUNTIME
+  // Defined by CMake only when the runtime next to the exe was built with NVIDIA's SDK (never the release).
+  return rex::cvar::GetFlagInfo("gow2_dlss") != nullptr;
 #else
   return false;
 #endif
