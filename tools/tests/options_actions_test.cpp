@@ -21,7 +21,7 @@ void TestExample() {
       "GOW2HOST {\"mode\":\"Start\",\"ok\":true,\"error\":\"\",\"public_address\":\"203.0.113.7\","
       "\"peer_name\":\"gow2.example.com\",\"ports\":[14001,41000],\"lease_hours\":6,"
       "\"lease_end\":\"2026-10-16T22:40:00\",\"stop_scheduled_at\":\"2026-10-16T22:41:00\","
-      "\"routers\":[{\"address\":\"192.168.10.1\",\"closing\":\"the lease ends at 2026-10-16 22:40\"}],"
+      "\"routers\":[{\"address\":\"192.168.0.1\",\"closing\":\"the lease ends at 2026-10-16 22:40\"}],"
       "\"open_ports\":0,\"warnings\":[\"a \\\"quoted\\\" note\"]}";
   const std::optional<HostResult> parsed = ParseHostLine(line);
   Expect(parsed.has_value(), "example parses");
