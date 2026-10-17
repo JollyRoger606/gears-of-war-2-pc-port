@@ -42,31 +42,47 @@ Read in English: [README.md](README.md)
 - [x] Juego por internet, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): un teléfono con datos móviles se unió a una campaña alojada en un PC a través de puertos abiertos por UPnP, verificado el 2026-10-15; todavía no se probó con un amigo en otro PC fuera de la red
 - [x] Menú de opciones en el juego (Opciones de PC; Opciones del dispositivo en Android) ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): verificado en un PC y en un Galaxy S25 Ultra el 2026-10-16
 - [ ] Horda y Versus por System Link
-- [ ] Android: una compilación del repositorio llega a jugar y se une a la campaña de un PC por System Link, pero todavía no está terminado; la release v0.1.2 trae un APK experimental. Toda la escena se dibuja desde el 15 de octubre; corre a unos 30 fps durante los primeros minutos desde un arranque en frío y baja a unos 10-12,5 fps cuando el teléfono está caliente ([docs/ANDROID.md](docs/ANDROID.md))
+- [ ] Android: una compilación del repositorio llega a jugar y se une a la campaña de un PC por System Link, pero todavía no está terminado; cada versión desde la v0.1.2 trae un APK experimental (ver [Android](#android-experimental)). Toda la escena se dibuja desde el 15 de octubre; corre a unos 30 fps durante los primeros minutos desde un arranque en frío y baja a unos 10-12,5 fps cuando el teléfono está caliente ([docs/ANDROID.md](docs/ANDROID.md))
 
 Ver el plan completo en [ROADMAP.md](ROADMAP.md).
 
 ## Descarga y juego
 
-Descarga el zip de la versión desde la página de GitHub Releases.
-
-Requisitos:
-
-- Windows 10/11 x64.
-- Una GPU con DirectX 12 (desarrollado en una AMD Radeon RX 7800 XT).
-- Tu propia copia comercial de Gears of War 2 para Xbox 360 (ID de título `4D53082D`), volcada a una carpeta con `default.xex` y `GearGame`, por ejemplo extrayendo tu ISO con [xdvdfs](https://github.com/antangelo/xdvdfs):
-
-  ```text
-  xdvdfs unpack "Gears of War 2.iso" C:\Games\GoW2
-  ```
-
-Descomprime en cualquier lugar y ejecuta `gow2.exe`: el primer arranque pide la carpeta del juego y la recuerda en `gow2_game_path.txt`. Como alternativa, pasa la carpeta directamente:
+La versión no incluye nada del juego. Necesitas tu propia copia comercial de Gears of War 2 para Xbox 360 (ID de título `4D53082D`), volcada a una carpeta que tenga `default.xex` y la carpeta `GearGame`, por ejemplo extrayendo tu ISO con [xdvdfs](https://github.com/antangelo/xdvdfs):
 
 ```text
-gow2.exe --game_data_root="C:\path\to\game"
+xdvdfs unpack "Gears of War 2.iso" C:\Games\GoW2
 ```
 
-La versión no incluye nada del juego. No piratees el juego.
+No piratees el juego.
+
+### PC
+
+Requisitos: Windows 10/11 x64 y una GPU con DirectX 12 (desarrollado en una AMD Radeon RX 7800 XT).
+
+1. Descarga `gow2-recomp-<versión>-win64.zip` de la [última versión](https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest) (el `.apk` es la versión de Android).
+2. Descomprímelo en cualquier lugar y ejecuta `gow2.exe`. El exe no está firmado, así que Windows puede mostrar «Windows protegió tu PC»: elige **Más información** y luego **Ejecutar de todas formas**.
+3. El primer arranque pide la carpeta del juego (la que tiene `default.xex` y `GearGame`) y la recuerda en `gow2_game_path.txt`, junto al exe. Para elegir otra carpeta más adelante, borra ese archivo.
+
+No pregunta si la carpeta del juego está dentro de la carpeta del exe o justo al lado, si la carpeta del exe está dentro de la del juego, o si pasas la carpeta tú:
+
+```text
+gow2.exe --game_data_root="C:\Games\GoW2"
+```
+
+La primera vez que juegues en cooperativo por System Link, Windows pregunta si `gow2.exe` puede usar la red: permítelo, o los demás jugadores no encontrarán tu partida.
+
+### Android (experimental)
+
+Requisitos: un teléfono arm64 con Android 10 o superior y Vulkan, y espacio libre para una copia completa de los archivos del juego.
+
+1. Descarga `gow2-recomp-<versión>-android-arm64.apk` de la [última versión](https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest) e instálalo (Android te pide permitir instalar apps desde el navegador o el gestor de archivos).
+2. Copia al teléfono la carpeta del juego extraída.
+3. Abre la app, toca **Elegir carpeta del juego** (**Choose game folder** con el teléfono en inglés) y elige esa carpeta. La app copia los archivos a su propio almacenamiento, lo que necesita tanto espacio libre como ocupa el juego, porque el juego no puede leer archivos a través del selector de carpetas. Con la carpeta del paso 2 son dos copias; borra la tuya cuando la app termine.
+
+En lugar de los pasos 2 y 3 puedes copiar la carpeta por USB desde un PC, de modo que `default.xex` quede en `Android/data/com.santiquiroz.gow2recomp/files/game/`, y luego tocar **Volver a comprobar**.
+
+En Android el menú de ajustes se llama Opciones del dispositivo (el engranaje de la esquina superior derecha). Estado y límites conocidos: [docs/ANDROID.md](docs/ANDROID.md).
 
 ## Controles
 

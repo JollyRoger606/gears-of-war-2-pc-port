@@ -42,31 +42,47 @@ Leer en español: [README.es.md](README.es.md)
 - [x] Internet play, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): a phone on mobile data joined a PC-hosted campaign through ports opened by UPnP, verified 2026-10-15; a PC friend outside the network has not been tried yet
 - [x] In-game options menu (PC Options; Device Options on Android) ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): verified on a PC and on a Galaxy S25 Ultra on 2026-10-16
 - [ ] System Link Horde and Versus
-- [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but is not finished yet; an experimental APK is attached to the v0.1.2 release. The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm ([docs/ANDROID.md](docs/ANDROID.md))
+- [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but is not finished yet; an experimental APK has been attached to every release since v0.1.2 (see [Android](#android-experimental)). The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm ([docs/ANDROID.md](docs/ANDROID.md))
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 
 ## Download and play
 
-Get the release zip from the GitHub Releases page.
-
-Requirements:
-
-- Windows 10/11 x64.
-- A DirectX 12 GPU (developed on an AMD Radeon RX 7800 XT).
-- Your own retail Xbox 360 copy of Gears of War 2 (title ID `4D53082D`), dumped to a folder with `default.xex` and `GearGame`, e.g. extract your ISO with [xdvdfs](https://github.com/antangelo/xdvdfs):
-
-  ```text
-  xdvdfs unpack "Gears of War 2.iso" C:\Games\GoW2
-  ```
-
-Unzip anywhere and run `gow2.exe` — the first launch asks for the game folder and remembers it in `gow2_game_path.txt`. Alternatively, pass the folder directly:
+Nothing of the game is included in the release. You need your own retail Xbox 360 copy of Gears of War 2 (title ID `4D53082D`), dumped to a folder that has `default.xex` and the `GearGame` folder, for example by extracting your ISO with [xdvdfs](https://github.com/antangelo/xdvdfs):
 
 ```text
-gow2.exe --game_data_root="C:\path\to\game"
+xdvdfs unpack "Gears of War 2.iso" C:\Games\GoW2
 ```
 
-Nothing of the game is included in the release. Do not pirate the game.
+Do not pirate the game.
+
+### PC
+
+Requirements: Windows 10/11 x64 and a DirectX 12 GPU (developed on an AMD Radeon RX 7800 XT).
+
+1. Download `gow2-recomp-<version>-win64.zip` from the [latest release](https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest) (the `.apk` is the Android build).
+2. Unzip it anywhere and run `gow2.exe`. The exe is not signed, so Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**.
+3. The first launch asks for the game folder (the one with `default.xex` and `GearGame`) and remembers it in `gow2_game_path.txt` next to the exe. To pick another folder later, delete that file.
+
+It does not ask when the game folder is inside the exe's folder or right next to it, when the exe's folder is inside the game folder, or when you pass the folder yourself:
+
+```text
+gow2.exe --game_data_root="C:\Games\GoW2"
+```
+
+The first time you play System Link co-op, Windows asks whether `gow2.exe` may use the network: allow it, or the other players will not find your game.
+
+### Android (experimental)
+
+Requirements: an arm64 phone with Android 10 or newer and Vulkan, and free space for a full copy of the game files.
+
+1. Download `gow2-recomp-<version>-android-arm64.apk` from the [latest release](https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/latest) and install it (Android asks you to allow installing apps from your browser or file manager).
+2. Copy your extracted game folder to the phone.
+3. Open the app, tap **Choose game folder** and pick that folder. The app copies the files into its own storage, which needs as much free space as the game takes, because the game cannot read files through the folder picker. With the folder from step 2 that is two copies; delete yours once the app has finished.
+
+Instead of steps 2-3 you can copy the folder over USB from a PC, so that `default.xex` ends up in `Android/data/com.santiquiroz.gow2recomp/files/game/`, then tap **Check again**.
+
+The settings menu is called Device Options on Android (the gear in the top-right corner). Status and known limits: [docs/ANDROID.md](docs/ANDROID.md).
 
 ## Controls
 
