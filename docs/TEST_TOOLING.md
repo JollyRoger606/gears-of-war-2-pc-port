@@ -70,6 +70,7 @@ Three kinds of line:
 | `!callpawn` | `<target> <Function>` | Same, on each target's pawn. | remote targets only (`remote targets need the host`) | `!callpawn P2 Suicide` |
 | `!mark` | `<text>` | Logs `DEVCMD mark <text>`. | no | `!mark chapter-2-start` |
 | `!skipcutscene` | none | Runs what the skip-cutscene key (default 9) runs, with no keyboard focus needed: ends running non-looping matinees while the local player is in cinematic mode, and stops a playing video. Logs a `SKIPCUTSCENE` line. | no | `!skipcutscene` |
+| `!viewinfo` | none | Logs a `VIEWINFO` line: the screen size the game set up (`screen=WxH`), each viewport client's `GetViewportSize`, and how often each widescreen field-of-view site ran. See docs/WIDESCREEN.md. | no | `!viewinfo` |
 | `!listmapchanges` | none | Logs one line per loaded SeqAct_PrepareMapChange and returns the prepare/commit counts. | no | `!listmapchanges` |
 | `!mapchange` | `[Level]` | Activates the one matching retail PrepareMapChange native. With no Kismet action for a named level it sends ClientPrepareMapChange to all player controllers instead. | yes (`not the host`) | `!mapchange SP_AssaultIntro_P` |
 | `!mapcommit` | `[force]` | Runs the retail commit native, which sends ClientCommitMapChange to all player controllers. Without `force` it refuses unless a change is being prepared. | yes (`not the host`) | `!mapcommit` |

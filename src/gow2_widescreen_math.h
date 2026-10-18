@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026 Santiago Quiroz Upegui and the gow2-recomp contributors
+// The arithmetic of the widescreen support (src/gow2_widescreen.cpp), header only so a host test can
+// check it: which aspect a setting names, how wide the game's back buffer becomes, how much shadow
+// map still fits the EDRAM, and how the field of view widens.
+#pragma once
+
+#include <cmath>
+#include <cstdlib>
+#include <string>
+
+namespace rex::glue::widescreen {
+
+constexpr int kOriginalWidth = 1280;  // what the game builds at 16:9
+constexpr int kTileWidth = 80;        // an EDRAM tile at 32 bits per pixel is 80 pixels wide
+constexpr int kMinWidth = 960;
+constexpr int kMaxWidth = 1680;       // 21:9; scene colour and depth then use 9.5 of the 10 MB of EDRAM
+constexpr long long kEdramBytes = 10LL * 1024 * 1024;
+
+// "off", "", "0", "false" -> 0; "auto" -> display_aspect (0 when unknown); "21:9" or "2.39" -> that
+// aspect. Anything outside 1.2 .. 4 names no widescreen (0).
+inline double ParseAspect(const std::string& text, double display_aspect) {
+  if (text.empty() || text == "off" || text == "0" || text == "false") return 0.0;
+  double a = 0.0;
+  if (text == "auto") {
+    a = display_aspect;
+  } else if (const size_t colon = text.find(':'); colon != std::string::npos) {
+    const double w = std::atof(text.substr(0, colon).c_str());
+    const double h = std::atof(text.substr(colon + 1).c_str());
+    if (w > 0 && h > 0) a = w / h;
+  } else {
+    a = std::atof(text.c_str());
+  }
+  return (a >= 1.2 && a <= 4.0) ? a : 0.0;
+}
+
+// The back buffer width for an aspect at the given height: a multiple of 80 between 960 and 1680, or 0
+// when it is what the game builds anyway (1280 at 720 lines) or the aspect is 0.
+inline int BackBufferWidth(double aspect, int height) {
+  if (aspect <= 0.0) return 0;
+  int w = int(std::lround(aspect * height / double(kTileWidth))) * kTileWidth;
+  if (w < kMinWidth) w = kMinWidth;
+  if (w > kMaxWidth) w = kMaxWidth;
+  return (w == kOriginalWidth && height == 720) ? 0 : w;
+}
+
+// The largest square 32-bit shadow depth map (a multiple of 32 pixels) that fits what is left of the
+// EDRAM after the scene colour and depth, or 0 when the game's own 800 fits.
+inline int MaxShadowResolution(int width, int height) {
+  if (width <= 0) return 0;
+  const long long left = kEdramBytes - 8LL * width * height;
+  const int size = int(std::sqrt(double(left > 0 ? left : 0) / 4.0)) / 32 * 32;
+  if (size >= 800) return 0;
+  return size < 128 ? 128 : size;
+}
+
+// The camera's half field of view (radians) widened for a back buffer of the given width: the tangent
+// grows by width / 1280 so the vertical view stays the one of the 16:9 game.
+inline double WidenHalfFov(double half_fov, int width) {
+  if (width <= 0) return half_fov;
+  return std::atan(std::tan(half_fov) * (double(width) / double(kOriginalWidth)));
+}
+
+}  // namespace rex::glue::widescreen

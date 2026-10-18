@@ -6,6 +6,7 @@
 #include "gow2_dev_map_change.h"
 #include "gow2_dev_commands.h"
 #include "gow2_skip_cutscene.h"
+#include "gow2_widescreen.h"
 #include "gow2_dev_guest_calls.h"
 #include "gow2_guest.h"
 
@@ -396,6 +397,7 @@ VerbResult RunHostVerb(const PPCContext& ctx, uint8_t* base, uint32_t engine,
   if (verb == "callpawn") return CallVerb(ctx, base, engine, command, true);
   if (verb == "mark") return MarkVerb(command);
   if (verb == "skipcutscene") return Ok(rex::glue::SkipCutsceneNow(ctx, base));
+  if (verb == "viewinfo") return Ok(rex::glue::ViewInfo(ctx, base));
   if (verb == "listmapchanges") return ListMapChanges(ctx, base, engine, command);
   if (verb == "mapchange") return MapChange(ctx, base, engine, command);
   if (verb == "mapcommit") return MapCommit(ctx, base, engine, command);

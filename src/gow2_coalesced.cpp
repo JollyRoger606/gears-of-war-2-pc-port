@@ -2,6 +2,7 @@
 // GoW2's Coalesced tweak layer, see gow2_coalesced.h.
 
 #include "gow2_coalesced.h"
+#include "gow2_widescreen.h"
 #include "gow2_coalesced_text.h"
 #include "gow2_native_bindings.h"
 
@@ -49,7 +50,11 @@ REXCVAR_DEFINE_BOOL(gow2_keycaps, true, "input",
 
 #if defined(__ANDROID__)
 // Default measured on the S25 Ultra (docs/ANDROID_EXPERIMENTS.md, October 15 second session).
-REXCVAR_DEFINE_STRING(gow2_system_settings, "LightEnvironmentShadows=0", "debug",
+#define GOW2_SYSTEM_SETTINGS_DEFAULT "LightEnvironmentShadows=0"
+#else
+#define GOW2_SYSTEM_SETTINGS_DEFAULT ""
+#endif
+REXCVAR_DEFINE_STRING(gow2_system_settings, GOW2_SYSTEM_SETTINGS_DEFAULT, "debug",
                       "Values for the game's own [SystemSettings] (Xe-GearEngine.ini in the "
                       "Coalesced bundles) as Key=Value pairs separated by ';', for example "
                       "AmbientOcclusion=0;MotionBlur=0. Only keys the bundle has are changed, in a "
@@ -59,7 +64,6 @@ REXCVAR_DEFINE_STRING(gow2_system_settings, "LightEnvironmentShadows=0", "debug"
                       "white on the Adreno 830 and cost about a quarter of the GPU frame there; "
                       "setting this replaces the default, and \"\" keeps the game's values")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-#endif
 
 REXCVAR_DEFINE_BOOL(gow2_pc_options_entry, true, "UI",
                     "The game's Options > Storage Location button opens the port's PC Options "
@@ -665,7 +669,6 @@ std::string KeybindLabel(const char* name, const char* fallback) {
   return "[" + FriendlyKeyName(FirstKey(v)) + "]";
 }
 
-#if defined(__ANDROID__)
 std::string TrimSpaces(const std::string& s) {
   const size_t first = s.find_first_not_of(" \t");
   if (first == std::string::npos) return {};
@@ -689,7 +692,6 @@ std::vector<std::pair<std::string, std::string>> ParseSettingList(const std::str
   }
   return settings;
 }
-#endif
 
 }  // namespace
 
@@ -707,9 +709,15 @@ CoalescedOptions CoalescedOptionsFromCvars() {
   o.pc_options_entry = REXCVAR_GET(gow2_pc_options_entry) && HostUiHooksAvailable();
   // "0", not "False": an edit that makes a bundle longer than its TOC size is not applied.
   if (!REXCVAR_GET(gow2_motion_blur)) o.system_settings.emplace_back("MotionBlur", "0");
-#if defined(__ANDROID__)
+  // Widescreen: the game's own resolution setting follows the back buffer it now builds (same digit
+  // count as 1280 / 720, so the bundle does not grow).
+  if (const int ws = WidescreenBackBufferWidth(); ws > 0 && ws < 10000) {
+    o.system_settings.emplace_back("ResX", std::to_string(ws));
+    o.system_settings.emplace_back("ResY", std::to_string(WidescreenBackBufferHeight()));
+    if (const int shadow = WidescreenMaxShadowResolution(); shadow > 0)
+      o.system_settings.emplace_back("MaxShadowResolution", std::to_string(shadow));
+  }
   for (auto& kv : ParseSettingList(REXCVAR_GET(gow2_system_settings))) o.system_settings.push_back(std::move(kv));
-#endif
   // The live swap (gow2_prompt_swap.cpp) rewrites the strings in memory: leave the bundles alone.
   if (PromptsFollowController()) return o;
   const std::string mode = REXCVAR_GET(gow2_prompts);
