@@ -76,6 +76,11 @@ anisotropic_override = 4
 # texture_dump = false
 # texture_replace = false   # turned on by itself while the keycap pack is installed (gow2_keycaps)
 
+# ---------- Cutscenes ----------
+# Press this key to skip the video or cutscene that is playing (a digit or letter, or F1..F12; the
+# digits also work on the keypad). Some in-engine scenes are not covered yet.
+# gow2_skip_cutscene = true
+# gow2_skip_cutscene_key = "9"
 # ---------- Keyboard and mouse ----------
 # The keyboard and mouse act as an Xbox 360 controller, so every action works as on the console.
 # A real controller can be used at the same time.

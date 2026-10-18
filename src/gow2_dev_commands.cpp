@@ -108,7 +108,7 @@ Target ParseTargetToken(std::string_view token) {
 bool IsKnownVerb(std::string_view verb) {
   return verb == "list" || verb == "selftest" || verb == "listmapchanges" || verb == "god" ||
          verb == "kill" || verb == "call" || verb == "callpawn" || verb == "mapchange" ||
-         verb == "mapcommit" || verb == "mark";
+         verb == "mapcommit" || verb == "mark" || verb == "skipcutscene";
 }
 
 bool ArityOk(std::string_view verb, size_t nargs) {

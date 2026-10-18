@@ -22,6 +22,7 @@
 #include "gow2_coalesced.h"
 #include "gow2_audio_volume.h"
 #include "gow2_native_keys.h"
+#include "gow2_skip_cutscene.h"
 #include "gow2_prompt_swap.h"
 #include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
@@ -450,6 +451,7 @@ class Gow2App : public rex::ReXApp {
   void OnPostSetup() override {
     rex::glue::InstallNativeMouseAim(window());
     rex::glue::InstallNativeKeys(window());
+    rex::glue::InstallSkipCutscene(window());
     rex::glue::InstallAudioVolume();
 #ifdef _WIN32
     rex::glue::InstallPromptSwap(game_data_root_);
