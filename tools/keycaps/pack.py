@@ -285,6 +285,10 @@ def main() -> int:
         if args.png:
             os.makedirs(args.png, exist_ok=True)
             im.save(os.path.join(args.png, h + ".png"))
+    # The tutorial pictograms have buttons painted in: their keyboard variant has none.
+    import atlas
+
+    atlas.build(args.dump, os.path.join(os.path.dirname(os.path.abspath(args.out)), "replace_kbd"))
     return 0
 
 

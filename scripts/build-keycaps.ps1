@@ -28,7 +28,8 @@
 #>
 param(
     [string]$Exe = '',
-    [string]$GameFolder = ''
+    [string]$GameFolder = '',
+    [string]$TextureRoot = ''   # texture pack root, when it is not the textures folder next to the exe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,7 +42,8 @@ function Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
 if (-not (Test-Path $Exe)) { Fail "$Exe not found: run scripts\build.ps1 first." }
 if (-not (Get-Command py -ErrorAction SilentlyContinue)) { Fail 'Python 3 (the py launcher) was not found.' }
 $exeDir = Split-Path -Parent (Resolve-Path $Exe)
-$pack = Join-Path $exeDir 'textures\4D53082D'
+$packRoot = if ($TextureRoot) { $TextureRoot } else { Join-Path $exeDir 'textures' }
+$pack = Join-Path $packRoot '4D53082D'
 $dump = Join-Path $pack 'dump'
 $replace = Join-Path $pack 'replace'
 
@@ -50,19 +52,43 @@ py -m pip install --user --quiet pillow numpy resvg-py fonttools
 if ($LASTEXITCODE -ne 0) { Fail 'pip could not install the Python packages.' }
 
 $info = Get-Content (Join-Path $root 'tools\keycaps\font_info.json') -Raw | ConvertFrom-Json
+$atlas = Get-Content (Join-Path $root 'tools\keycaps\atlas_info.json') -Raw | ConvertFrom-Json
 function Missing-Pages {
     $info.page_hashes | Where-Object { -not (Get-ChildItem $dump -Filter "$_`_*.dds" -ErrorAction SilentlyContinue) }
 }
 
-if (Missing-Pages) {
-    Step 'Dumping the font pages'
-    Write-Host 'gow2.exe starts now. Press Start, choose Solo Campaign and wait for the Select Difficulty'
-    Write-Host 'screen (its spinner draws the second font page), then quit the game.'
-    $arguments = @('--texture_dump=true', '--gow2_keycaps=false', '--gow2_prompts=controller')
+if ((Missing-Pages) -or -not (Get-ChildItem $dump -Filter "$($atlas.hash)_*.dds" -ErrorAction SilentlyContinue)) {
+    Step 'Dumping the font pages and the tutorial pictograms'
+    Write-Host 'gow2.exe starts now and plays itself for about two minutes (title screen, Solo Campaign,'
+    Write-Host 'the difficulty screen, then the first level). Do not press keys in it; it closes by itself.'
+    $work = Join-Path $env:TEMP 'gow2-keycaps'
+    New-Item -ItemType Directory -Force $work | Out-Null
+    $cmd = Join-Path $work 'cmd.txt'; [IO.File]::WriteAllText($cmd, '')
+    $pad = Join-Path $work 'pad.txt'; [IO.File]::WriteAllText($pad, '')
+    $arguments = @('--texture_dump=true', '--gow2_keycaps=false', '--gow2_prompts=controller',
+        "--gow2_dev_command_file=$cmd", "--gow2_test_input=$pad")
+    if ($TextureRoot) { $arguments += "--texture_pack_dir=$TextureRoot" }
     if ($GameFolder) { $arguments += "--game_data_root=$GameFolder" }
-    Start-Process -FilePath $Exe -ArgumentList $arguments -WorkingDirectory $exeDir -Wait
+    $game = Start-Process -FilePath $Exe -ArgumentList $arguments -WorkingDirectory $exeDir -PassThru
+    function Press($buttons, $holdMs = 300) {
+        Set-Content $pad $buttons -Encoding ascii; Start-Sleep -Milliseconds $holdMs
+        Set-Content $pad '' -Encoding ascii
+    }
+    try {
+        Start-Sleep -Seconds 55
+        Press 'START'; Start-Sleep -Seconds 6          # title screen -> main menu
+        Press 'A'; Start-Sleep -Seconds 6              # Solo Campaign -> save slots
+        Press 'A'; Start-Sleep -Seconds 8              # slot -> Select Difficulty (its spinner is the second font page)
+        [IO.File]::AppendAllText($cmd, "servertravel geargame_p?loadcheckpoint=0?chapter=1`n")  # first level: the HUD textures
+        Start-Sleep -Seconds 90
+    } finally {
+        if (-not $game.HasExited) { Stop-Process -Id $game.Id -Force }
+    }
     $missing = @(Missing-Pages)
-    if ($missing.Count) { Fail "The dump still lacks page(s) $($missing -join ', '). Reach the Select Difficulty screen and run this again." }
+    if ($missing.Count) { Fail "The dump still lacks font page(s) $($missing -join ', '). Run this again." }
+    if (-not (Get-ChildItem $dump -Filter "$($atlas.hash)_*.dds" -ErrorAction SilentlyContinue)) {
+        Write-Host 'Warning: the tutorial pictograms were not dumped; the keyboard variant of them is skipped.' -ForegroundColor Yellow
+    }
 }
 
 Step 'Building the pack'

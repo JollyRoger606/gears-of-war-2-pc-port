@@ -202,6 +202,22 @@ bool KeycapFilesPresent() {
   return true;
 }
 
+// The tutorial pictograms have Xbox buttons painted into them; the pack's replace_kbd folder holds
+// the same picture without them, which the texture pack shows while no controller is connected.
+bool VariantPresent() {
+  if (!rex::cvar::Query<bool>("gow2_keycaps")) return false;
+  std::error_code ec;
+  const std::filesystem::path dir = PackDir().parent_path() / "replace_kbd";
+  for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+    if (it->path().extension() == ".dds") return true;
+  return false;
+}
+
+void SetVariant(bool keyboard) {
+  static bool present = VariantPresent();
+  if (present) (void)rex::cvar::SetFlagByName("texture_replace_variant", keyboard ? "kbd" : "");
+}
+
 void Worker() {
   // The bundle is parsed during start-up; give the engine a moment, then retry while it loads.
   for (int attempt = 1; attempt <= 20; ++attempt) {
@@ -343,6 +359,7 @@ void PromptSwapTick(const PPCContext& ctx, uint8_t* base) {
   }
   s.applied = keyboard;
   s.applied_signature = signature;
+  SetVariant(keyboard != 0);
   REXLOG_INFO("PROMPTS live: {} labels ({} strings written)",
               keyboard ? (s.keycaps ? "keycap" : "keyboard text") : "controller", written);
 }
@@ -352,7 +369,7 @@ void PromptSwapTick(const PPCContext& ctx, uint8_t* base) {
 }  // namespace
 
 void PrepareKeycapPack() {
-  if (!PromptsFollowController() || !KeycapFilesPresent()) return;
+  if (!PromptsFollowController() || (!KeycapFilesPresent() && !VariantPresent())) return;
   // The pages are swapped in by the texture pack. The GPU plugin registers texture_replace after
   // this runs, so the setting goes in as the environment variable it reads when it does.
 #ifdef _WIN32
