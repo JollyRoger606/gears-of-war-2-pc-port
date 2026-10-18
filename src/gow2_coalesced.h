@@ -12,7 +12,7 @@
 //   key-prompts  menu prompts show keyboard labels ([Space], [LMB]...) (cvar gow2_prompts)
 //   pc-options-entry  Options > Storage Location becomes the PC Options entry
 //                     (cvar gow2_pc_options_entry, needs SDK patch 0013)
-//   system-settings  the game's own [SystemSettings] values (cvar gow2_system_settings, Android)
+//   system-settings  the game's own [SystemSettings] values (gow2_motion_blur; gow2_system_settings, Android)
 #pragma once
 
 #include <filesystem>
@@ -31,11 +31,9 @@ struct CoalescedOptions {
   // Key = a name in [ControllerFont] of GearGameUI ("Controller_A"), value = the label shown
   // ("[Space]"). Empty means "leave the pad glyphs alone".
   std::vector<std::pair<std::string, std::string>> prompt_labels;
-#if defined(__ANDROID__)
-  // Key = a name in [SystemSettings] of Xe-GearEngine.ini ("AmbientOcclusion"), value = its new
-  // value ("False"). Empty means "leave the game's settings alone".
+  // Key = a name in [SystemSettings] of Xe-GearEngine.ini ("MotionBlur"), value = its new value
+  // ("0": a longer value would not fit the bundle). Empty means "leave the game's settings alone".
   std::vector<std::pair<std::string, std::string>> system_settings;
-#endif
 };
 
 struct CoalescedResult {
@@ -54,5 +52,19 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
 CoalescedOptions CoalescedOptionsFromCvars();
 // True when the runtime routes the device selector to the PC Options menu (patch 0013).
 bool HostUiHooksAvailable();
+
+// Live prompts (gow2_prompt_swap.cpp), Windows with gow2_prompts = auto: the bundles keep the
+// pad glyphs and the strings are rewritten in memory as controllers come and go.
+bool PromptsFollowController();
+bool PhysicalGamepadConnected();
+// Keyboard label per [ControllerFont] key ("Controller_A" -> "[Space]"), from the keybind_* settings.
+std::vector<std::pair<std::string, std::string>> KeyboardPromptLabels();
+// The [ControllerFont] values of every Coalesced bundle in the game folder, by locale. The glyphs
+// differ between locales, so the swap needs the set the running game really loaded.
+struct ControllerFontSet {
+  std::string locale;
+  std::vector<std::pair<std::string, std::u16string>> values;  // key, original text
+};
+std::vector<ControllerFontSet> ReadControllerFontOriginals(const std::filesystem::path& game_root);
 
 }  // namespace rex::glue
