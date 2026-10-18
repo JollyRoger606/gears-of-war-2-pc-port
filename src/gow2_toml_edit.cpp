@@ -508,10 +508,18 @@ std::filesystem::path TemporaryPath(const std::filesystem::path& path) {
 
 std::error_code ReplaceFile(const std::filesystem::path& tmp, const std::filesystem::path& path) {
 #ifdef _WIN32
-  if (MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-    return {};
+  // Another writer, a virus scanner or the search indexer can hold the destination for a moment;
+  // the move then fails with an access or sharing error that goes away on its own.
+  DWORD last = 0;
+  for (int attempt = 0; attempt < 50; ++attempt) {
+    if (MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+      return {};
+    }
+    last = GetLastError();
+    if (last != ERROR_ACCESS_DENIED && last != ERROR_SHARING_VIOLATION) break;
+    Sleep(10);
   }
-  return std::error_code(GetLastError(), std::system_category());
+  return std::error_code(last, std::system_category());
 #else
   std::error_code ec;
   std::filesystem::rename(tmp, path, ec);
