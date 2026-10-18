@@ -268,4 +268,23 @@ constexpr KeyChar kKeyChars[] = {
     {"Z", u'\x0046'},
 };
 
+// The tutorial pictograms' button sprites (atlas.py): the box of each, and its disc.
+constexpr const char* kAtlasHash = "ce11e464b5064714";
+struct AtlasSprite {
+  const char* button;  // "A", "B", "X", "Y" or "RS"
+  int box[4];          // x0, y0, x1, y1 (inclusive)
+  int disc[4];
+};
+constexpr AtlasSprite kAtlasSprites[] = {
+    {"Y", {176, 314, 208, 376}, {181, 339, 202, 361}},
+    {"A", {214, 314, 245, 356}, {219, 331, 239, 353}},
+    {"A", {250, 314, 281, 357}, {256, 335, 274, 353}},
+    {"B", {285, 314, 327, 345}, {302, 319, 323, 339}},
+    {"X", {331, 314, 374, 345}, {334, 319, 356, 339}},
+    {"X", {378, 314, 419, 345}, {382, 321, 400, 339}},
+    {"Y", {390, 423, 422, 462}, {395, 425, 416, 447}},
+    {"RS", {426, 423, 459, 476}, {430, 447, 455, 472}},
+    {"RS", {462, 423, 493, 476}, {467, 450, 488, 471}},
+};
+
 }  // namespace rex::glue::keycap

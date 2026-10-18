@@ -39,10 +39,12 @@ The SVGs in `assets/keycaps/svg` are original artwork and can be used on their o
   shows up at once on the next screen drawn. `src/gow2_keycaps.cpp` maps a binding to characters.
 - `keycaps.id` in the pack names the layout; the game ignores a pack made for another layout.
 - The tutorial pictograms (the "look at something" hint and the other tutorial panels) are one
-  texture with Xbox buttons painted in. `atlas.py` makes a copy without those sprites in
-  `replace_kbd`; the game sets `texture_replace_variant = "kbd"` while no controller is connected
-  (SDK patch 0015 reloads the texture at once), so the picture shows the button only with a pad.
-  The key itself is named by the hint's text, which uses the keycaps.
+  texture with Xbox buttons painted in. `atlas.py` makes the same picture without those nine
+  sprites (`replace_kbd_base`). While no controller is connected the game draws the keycaps of your
+  bindings onto it (`src/gow2_atlas_swap` code in `gow2_prompt_swap.cpp`, from the keycap pages of
+  the pack), writes the result to `replace_kbdA` or `replace_kbdB` (alternating) and sets
+  `texture_replace_variant` to it; SDK patch 0015 reloads the texture at once. A rebind composes it
+  again, a controller gets the original picture back.
 
 ## Limits
 
@@ -51,6 +53,6 @@ The SVGs in `assets/keycaps/svg` are original artwork and can be used on their o
 - A string with room for one character shows the main key of a chord (`Shift+Up` shows Up); only
   the stick and D-pad clusters listed in `keys.py` have a single glyph.
 - Screens already open keep the labels they were built with until they are opened again.
-- The pictograms lose their button circles with a keyboard instead of showing a keycap: they are
-  baked into the picture, so only the text beside them can name your key.
+- A wide key (Space, Enter) is drawn small on a pictogram: the sprite is as wide as the Xbox button
+  was. The press-animation dots round the buttons are gone with a keyboard.
 - Windows only; Android keeps its text labels.

@@ -73,7 +73,8 @@ def build(dump: str, out_dir: str) -> bool:
     px = np.array(img)
     lab, boxes = _components(px[..., 3] > 24)
     erased = 0
-    for want in info["button_boxes"]:  # [x0, y0, x1, y1] as found in the retail art
+    for sprite in info["sprites"]:
+        want = sprite["box"]  # [x0, y0, x1, y1] as found in the retail art
         hits = [n for n, b in boxes.items() if tuple(b) == tuple(want)]
         if len(hits) != 1:
             print(f"atlas: sprite {want} not found (the art differs from the retail texture): skipped")

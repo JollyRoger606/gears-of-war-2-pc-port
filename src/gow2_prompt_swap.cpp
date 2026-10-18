@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -22,6 +23,7 @@
 #include <rex/runtime.h>
 #include <rex/system/xmemory.h>
 
+#include "gow2_atlas_image.h"
 #include "gow2_coalesced.h"
 #include "gow2_coalesced_text.h"
 #include "gow2_engine_tick.h"
@@ -56,6 +58,7 @@ struct State {
   int applied = -1;  // 1 keyboard, 0 controller, -1 nothing written yet
   std::string applied_signature;
   int pending = -1;  // a reading seen once, not yet confirmed
+  int atlas_slot = -1;  // the variant folder the tutorial pictograms were last composed into
 };
 
 State& S() {
@@ -202,20 +205,89 @@ bool KeycapFilesPresent() {
   return true;
 }
 
-// The tutorial pictograms have Xbox buttons painted into them; the pack's replace_kbd folder holds
-// the same picture without them, which the texture pack shows while no controller is connected.
+// The tutorial pictograms have Xbox buttons painted into them. The pack holds that picture without
+// them (replace_kbd_base); while no controller is connected the keycaps of the player's bindings
+// are drawn onto it, the result goes to replace_kbdA or replace_kbdB (alternating, so the variant
+// name changes and the texture pack reloads the picture) and that variant is turned on.
+std::filesystem::path AtlasBaseFile() {
+  return PackDir().parent_path() / "replace_kbd_base" / (std::string(keycap::kAtlasHash) + ".dds");
+}
+
 bool VariantPresent() {
   if (!rex::cvar::Query<bool>("gow2_keycaps")) return false;
   std::error_code ec;
-  const std::filesystem::path dir = PackDir().parent_path() / "replace_kbd";
-  for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
-    if (it->path().extension() == ".dds") return true;
-  return false;
+  return std::filesystem::exists(AtlasBaseFile(), ec);
 }
 
-void SetVariant(bool keyboard) {
-  static bool present = VariantPresent();
-  if (present) (void)rex::cvar::SetFlagByName("texture_replace_variant", keyboard ? "kbd" : "");
+void SetVariant(const char* name) {
+  (void)rex::cvar::SetFlagByName("texture_replace_variant", name);
+}
+
+const keycap::Cell* CellFor(char16_t ch) {
+  for (const keycap::Cell& c : keycap::kCells)
+    if (c.ch == ch) return &c;
+  return nullptr;
+}
+
+// The one character of a one-glyph keycap markup ("<Fonts:...>X<Fonts:/>"), 0 for anything else.
+char16_t MarkupGlyph(const std::u16string& markup) {
+  const std::u16string open = keycap::Markup(u"");
+  const size_t tag = open.find(u'>');
+  const size_t close = markup.rfind(u'<');
+  if (tag == std::u16string::npos || close == std::u16string::npos || close != tag + 2) return 0;
+  return markup[tag + 1];
+}
+
+struct PageImages {
+  atlas::Image page[2];
+  bool loaded = false;
+};
+
+bool LoadPages(PageImages* pages) {
+  if (pages->loaded) return true;
+  for (int i = 0; i < 2; ++i)
+    if (!atlas::ReadDds(PackDir() / (std::string(keycap::kPageHash[i]) + ".dds"), &pages->page[i], nullptr))
+      return false;
+  pages->loaded = true;
+  return true;
+}
+
+// Draws the keycap of each button sprite onto the keyboard base of the atlas.
+bool ComposeAtlas(const std::map<std::string, keycap::Prompt>& caps, bool mouse_look, int slot) {
+  static PageImages pages;
+  if (!LoadPages(&pages)) return false;
+  atlas::Image image;
+  std::vector<uint8_t> header;
+  if (!atlas::ReadDds(AtlasBaseFile(), &image, &header)) return false;
+  for (const keycap::AtlasSprite& sprite : keycap::kAtlasSprites) {
+    char16_t glyph = 0;
+    const std::string button = sprite.button;
+    if (button == "RS" && mouse_look) {
+      glyph = keycap::CharFor("IC_MOUSE");
+    } else {
+      const auto it = caps.find(button == "RS" ? "Controller_RightStick" : "Controller_" + button);
+      if (it != caps.end()) glyph = MarkupGlyph(it->second.brief);
+    }
+    const keycap::Cell* cell = glyph ? CellFor(glyph) : nullptr;
+    if (!cell) continue;
+    const atlas::Image& src = pages.page[cell->page];
+    const int scale = src.width / 256;
+    const int cw = (cell->w - 1) * scale, ch = (cell->h - 1) * scale;
+    // A square-ish cap the size of the disc it replaces; a wide cap keeps its shape and shrinks
+    // until it fits the sprite.
+    const int box_w = sprite.box[2] - sprite.box[0] + 1;
+    float th = 24.0f, tw = th * cw / ch;
+    if (tw > box_w) {
+      th *= box_w / tw;
+      tw = float(box_w);
+    }
+    const int cx = (sprite.disc[0] + sprite.disc[2]) / 2, cy = (sprite.disc[1] + sprite.disc[3]) / 2;
+    atlas::Blit(image, src, cell->u * scale + scale / 2, cell->v * scale + scale / 2, cw, ch,
+                cx - int(tw / 2), cy - int(th / 2), std::max(1, int(tw)), std::max(1, int(th)));
+  }
+  const std::filesystem::path out =
+      PackDir().parent_path() / (slot ? "replace_kbdB" : "replace_kbdA") / (std::string(keycap::kAtlasHash) + ".dds");
+  return atlas::WriteDds(out, header, image);
 }
 
 void Worker() {
@@ -359,7 +431,15 @@ void PromptSwapTick(const PPCContext& ctx, uint8_t* base) {
   }
   s.applied = keyboard;
   s.applied_signature = signature;
-  SetVariant(keyboard != 0);
+  if (keyboard && s.keycaps && VariantPresent()) {
+    const int next = s.atlas_slot == 0 ? 1 : 0;
+    if (ComposeAtlas(caps, rex::cvar::Query<bool>("mnk_mouse"), next)) {
+      s.atlas_slot = next;
+      SetVariant(next ? "kbdB" : "kbdA");
+    }
+  } else {
+    SetVariant("");
+  }
   REXLOG_INFO("PROMPTS live: {} labels ({} strings written)",
               keyboard ? (s.keycaps ? "keycap" : "keyboard text") : "controller", written);
 }

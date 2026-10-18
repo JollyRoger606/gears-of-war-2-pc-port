@@ -245,6 +245,23 @@ def write_include(info: dict, placed: list, path: str, cell_h: int) -> None:
     ]
     for p in sorted(placed, key=lambda p: p["id"]):
         lines.append(f"    {{\"{p['id']}\", u'\\x{p['char']:04x}'}},")
+    import atlas as atlas_tool
+
+    ai = atlas_tool.load_info()
+    lines += [
+        "};",
+        "",
+        "// The tutorial pictograms' button sprites (atlas.py): the box of each, and its disc.",
+        f'constexpr const char* kAtlasHash = "{ai["hash"]}";',
+        "struct AtlasSprite {",
+        "  const char* button;  // \"A\", \"B\", \"X\", \"Y\" or \"RS\"",
+        "  int box[4];          // x0, y0, x1, y1 (inclusive)",
+        "  int disc[4];",
+        "};",
+        "constexpr AtlasSprite kAtlasSprites[] = {",
+    ]
+    for sp in ai["sprites"]:
+        lines.append(f'    {{"{sp["button"]}", {{{", ".join(map(str, sp["box"]))}}}, {{{", ".join(map(str, sp["disc"]))}}}}},')
     lines += ["};", "", "}  // namespace rex::glue::keycap", ""]
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
@@ -288,7 +305,7 @@ def main() -> int:
     # The tutorial pictograms have buttons painted in: their keyboard variant has none.
     import atlas
 
-    atlas.build(args.dump, os.path.join(os.path.dirname(os.path.abspath(args.out)), "replace_kbd"))
+    atlas.build(args.dump, os.path.join(os.path.dirname(os.path.abspath(args.out)), "replace_kbd_base"))
     return 0
 
 
