@@ -3,6 +3,7 @@
 
 #include "gow2_coalesced.h"
 #include "gow2_coalesced_text.h"
+#include "gow2_native_bindings.h"
 
 #include "gow2_mouse_aim.h"
 
@@ -68,7 +69,7 @@ namespace rex::glue {
 
 namespace {
 
-constexpr int kVersion = 9;  // bump when the edit definitions change (invalidates cached copies)
+constexpr int kVersion = 10;  // bump when the edit definitions change (invalidates cached copies)
 
 // Bundle layout: BE u32 file count; per file a name, BE u32 section count; per section a name and
 // BE u32 key count; per key a key and a value. Strings are a BE int32 length, negative = UTF-16LE
@@ -270,11 +271,12 @@ bool ReadAll(const std::filesystem::path& p, std::vector<uint8_t>* out) {
 }
 
 struct Edit {
-  enum Kind { kSet, kReplaceSub } kind;
+  enum Kind { kSet, kReplaceSub, kAppend, kRemove } kind;
   std::string file;     // file name suffix inside the bundle
   std::string section;  // section name
-  std::string key;      // kSet: the key; kReplaceSub: a key prefix
-  std::string value;    // kSet: the new value; kReplaceSub: "from|to"
+  std::string key;      // kSet and kAppend: the key; kReplaceSub: a key prefix; kRemove: the key
+  std::string value;    // kSet: the new value; kReplaceSub: "from|to"; kAppend: a new entry;
+                        // kRemove: the entries whose value starts with this (empty = all)
   std::string match;    // kReplaceSub only: only values containing this text (empty = all)
   std::string locale;   // only bundles with this locale apply the edit (empty = every locale)
   bool optional = false;
@@ -313,6 +315,23 @@ void AddMouseLook(std::vector<Edit>* e) {
                   "DeadZone=0.3|DeadZone=0.0", look});
 }
 
+// Keyboard bindings of the engine itself (SDK-independent): the game's own debug bindings of the
+// keys in use go (an F that freezes rendering, a P that stops physics), then each key gets the
+// command of the pad button it stands for. The retail editor and debug-camera bindings go too:
+// they are unused and make room, because a bundle may not grow past its size in the TOC.
+void AddNativeKeys(std::vector<Edit>* e, const CoalescedOptions& o) {
+  const char* const kFile = "Xe-GearInput.ini";
+  for (const char* section : {"Editor.EditorViewportInput", "UnrealEd.ObjectEditorViewportInput",
+                              "Engine.DebugCameraInput"})
+    e->push_back({Edit::kRemove, kFile, section, "Bindings", "", "", "", false, false});
+  for (const std::string& key : NativeBindingKeys(o.native_bindings))
+    e->push_back({Edit::kRemove, kFile, "Engine.PlayerInput", "Bindings",
+                  "(Name=\"" + key + "\",", "", "", false, false});
+  for (const NativeBinding& b : o.native_bindings)
+    e->push_back({Edit::kAppend, kFile, "Engine.PlayerInput", "Bindings", BindingIniValue(b), "", "",
+                  false, false});
+}
+
 void AddNativeMouse(std::vector<Edit>* e) {
   e->push_back({Edit::kSet, "Xe-GearInput.ini", "Engine.PlayerInput", "bEnableMouseSmoothing",
                 "false"});
@@ -347,6 +366,29 @@ int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std
       if (!FileMatches(f.name, ed.file, locale)) continue;
       for (Section& s : f.sections) {
         if (!EqFold(s.name, ed.section)) continue;
+        if (ed.kind == Edit::kAppend) {
+          const std::u16string value = W(ed.value);
+          bool present = false;
+          for (const Entry& en : s.entries)
+            if (EqFold(en.key, ed.key) && en.value == value) present = true;
+          if (!present) {
+            s.entries.push_back({W(ed.key), value});
+            ++changed;
+          }
+          continue;
+        }
+        if (ed.kind == Edit::kRemove) {
+          const std::u16string prefix = W(ed.value);
+          const auto removed = std::remove_if(s.entries.begin(), s.entries.end(), [&](const Entry& en) {
+            if (!EqFold(en.key, ed.key) || en.value.size() < prefix.size()) return false;
+            for (size_t i = 0; i < prefix.size(); ++i)
+              if (Fold(en.value[i]) != Fold(prefix[i])) return false;
+            return true;
+          });
+          changed += int(s.entries.end() - removed);
+          s.entries.erase(removed, s.entries.end());
+          continue;
+        }
         if (ed.kind == Edit::kReplaceSub) {
           const size_t bar = ed.value.find('|');
           const std::u16string from = W(ed.value.substr(0, bar)), to = W(ed.value.substr(bar + 1));
@@ -408,6 +450,10 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
       AddMouseLook(&edits);
       groups += "mouse-look ";
     }
+  }
+  if (!options.native_bindings.empty()) {
+    AddNativeKeys(&edits, options);
+    groups += "native-keys ";
   }
   if (!options.prompt_labels.empty()) {
     AddPrompts(&edits, options);
@@ -655,6 +701,9 @@ CoalescedOptions CoalescedOptionsFromCvars() {
   CoalescedOptions o;
   o.mouse_look = rex::cvar::Query<bool>("mnk_mouse");
   o.native_mouse = NativeMouseAimWanted();
+  if (rex::cvar::Query<bool>("gow2_native_keys") && o.native_mouse) {
+    o.native_bindings = NativeKeyBindings([](const char* name) { return rex::cvar::Query<std::string>(name); });
+  }
   o.pc_options_entry = REXCVAR_GET(gow2_pc_options_entry) && HostUiHooksAvailable();
   // "0", not "False": an edit that makes a bundle longer than its TOC size is not applied.
   if (!REXCVAR_GET(gow2_motion_blur)) o.system_settings.emplace_back("MotionBlur", "0");
