@@ -1,0 +1,63 @@
+{
+ "frames": 3567.5,
+ "duration_s": 59.4995,
+ "fps_avg": 59.94286667803968,
+ "frame_ms": {
+  "avg": 16.6825550545906,
+  "p50": 16.678,
+  "p95": 18.598,
+  "p99": 19.451115,
+  "p999": 26.87625250000005,
+  "max": 36.33
+ },
+ "gpu_ms": {
+  "avg": 10.430444031768232,
+  "p50": 10.710999999999999,
+  "p95": 13.747300000000001,
+  "p99": 13.985215,
+  "p999": 15.0282690000001,
+  "max": 19.837
+ },
+ "gpu_idle_ms_avg": 6.255162448768981,
+ "gpu_busy_pct": 62.52221828409935,
+ "cpu_wait_on_gpu_ms_avg": 0.0,
+ "off_pace_pct": 0.6149349195186441,
+ "hitches": 2.0,
+ "hitches_per_min": 2.0169145981183383,
+ "hitch_lost_ms_total": 37.67999999999999,
+ "draws_avg": 1976.00496128173,
+ "skipped_draws_total": 1.0,
+ "skipped_draw_frames_pct": 0.028031948957101493,
+ "pipelines_built": 1.0,
+ "shaders_built": 0.0,
+ "texture_mb_per_s": 2727.180805457391,
+ "shared_memory_mb_per_s": 483.35465004289847,
+ "hitch_causes": {
+  "heavy frame": {
+   "count": 1,
+   "lost_ms": 17.912
+  },
+  "cpu/game": {
+   "count": 1,
+   "lost_ms": 18.818999999999996
+  }
+ },
+ "worst_hitches": [
+  {
+   "frame": 3745,
+   "at_s": 16.035,
+   "interval_ms": 35.489,
+   "cause": "cpu/game",
+   "detail": "nothing unusual in the GPU or upload counters"
+  },
+  {
+   "frame": 2825,
+   "at_s": 0.634,
+   "interval_ms": 34.582,
+   "cause": "heavy frame",
+   "detail": "3248 draws (typical 1838)"
+  }
+ ],
+ "runs": 2,
+ "frame_ms_p99_spread_pct": 1.8096134848825078
+}

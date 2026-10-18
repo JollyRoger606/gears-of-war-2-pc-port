@@ -76,6 +76,43 @@ pipelines were built, no draws skipped. It is GPU work that grows with what is o
 is in the per-pixel and per-pass cost (step 2 below), not in caching or threads. The numbers repeat
 to about 1 %, so a change of more than that is real.
 
+## Render target path (the big one)
+
+Screened on `hospital_walk` (one run each, vsync on, scale 2; baseline GPU 14.8 ms, 39 hitches/min):
+
+| Change | GPU avg | Frame p99 | Hitches/min | Verdict |
+|---|---|---|---|---|
+| `render_target_path_d3d12=rov` | 5.6 ms | 19.3 ms | 19 (shader builds) | large win |
+| `resolution_scale=1` (reference) | 4.5 ms | 19.2 ms | 3 | the cost is per pixel |
+| `direct_host_resolve=false` | 13.9 ms | 32.6 ms | 26 | small, not pursued |
+| `anisotropic_override=1`, no `gow2_aniso16` | 14.7 ms | 33.5 ms | 36 | nothing |
+| `gow2_dof_upscaling_fix=false` | 14.7 ms | 33.6 ms | 38 | nothing |
+| `gow2_ao_upscaling_fix=false` | 17.1 ms | 34.6 ms | 45 | worse |
+| `gow2_black_shading_fix=false` | 17.6 ms | 41.2 ms | 72 | worse, new shaders |
+
+ROV in steady state, two or three runs per scene against the host-render-target path (spread between
+runs 1-2 %):
+
+| Scene | fps | Frame p99 | GPU p50 | Hitches/min |
+|---|---|---|---|---|
+| `hospital_walk`, host RT / ROV (vsync off) | 74 / 136 | 22 / 12 ms | 13.3 / 6.3 ms | 10-13 / 24-34 (a hitch is 2x the median, so at 7 ms frames smaller spikes count) |
+| `outdoor_assault`, host RT / ROV | 40 / 57 | 33.5 / 19.4 ms | 26.3 / 10.1 ms | 10 / 8 (first-visit shader builds) |
+| `landown`, host RT / ROV | 50 / 59 | 36.1 / 19.4 ms | 18.8 / 10.7 ms | 235 / 4 |
+
+First visit (empty shader cache, `-Cold`, `outdoor_assault`): both paths built about 80 pipelines and
+had one hitch in the minute (55 ms host RT, 440 ms ROV). The 300-570 ms stalls seen in a first ROV
+run were new areas, not the path.
+
+Pictures: the hospital (static geometry identical, only moving characters differ), chapter 3 (a
+cutscene face) and chapter 4 (fire and smoke) showed no rendering difference between the paths.
+
+Result: SDK patch 0018 makes ROV the default on NVIDIA (Intel already had it; AMD is unchanged and
+untested). A GPU without ROV support falls back to host render targets by itself, and
+`render_target_path_d3d12 = "rtv"` forces the old path. Not tested: AMD and Intel GPUs, the other
+23 chapters, co-op, and a long play session. The hitch counts that remain are first visits to an
+area (each new area builds shaders once; `scripts/chapter-sweep.ps1` visits them all) and a
+CPU/game spike when heavy scenes load.
+
 ## Optimization plan, in order
 
 1. **Timing/pacing (cheap, large visual effect).** Decouple the guest blank rate from the host

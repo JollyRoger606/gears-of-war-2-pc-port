@@ -22,6 +22,7 @@ Both SDK builds apply every patch here in file-name order on top of ReXGlue comm
 
 | `0016-mnk-keys-switch.patch` | `mnk_keys` (default true). Off, the keyboard no longer drives the emulated pad buttons and sticks, so a game that reads keys itself does not get them twice; the mouse and its capture are not affected (the port turns it off during gameplay, when it reads keys itself). |
 | `0017-perf-frame-log.patch` | Per-frame performance log. `perf_frame_csv=<file>` writes one row per presented frame: wall clock, CPU interval, GPU span and idle time (timestamp queries), fence wait, draws, skipped draws, pipelines and shaders built, texture loads and kilobytes, shared memory uploaded. Off by default; read it with `tools/perf/analyze.py` or run `scripts/perf-run.ps1`. |
+| `0018-nvidia-rov-default.patch` | `render_target_path_d3d12` unset now picks the pixel-shader-interlock (ROV) path on NVIDIA as well as Intel (AMD keeps host render targets; a GPU without ROV support still falls back). In Gears of War 2 at `resolution_scale = 2` on an RTX 5080 it halves GPU time per frame and removes most hitches while walking, with the same picture (`docs/PERFORMANCE_PLAN.md`). `render_target_path_d3d12 = "rtv"` brings the old default back. |
 ## Working on a patch
 
 Each patch lives in a git worktree of rexglue-sdk based on `923c1a5` plus the patches before it.
