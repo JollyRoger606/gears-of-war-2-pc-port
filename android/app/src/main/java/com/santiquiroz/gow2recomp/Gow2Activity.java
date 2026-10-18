@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions {
     static final String EXTRA_SKIP_GAME_SETUP = "com.santiquiroz.gow2recomp.extra.SKIP_GAME_SETUP";
     static final String EXTRA_SHOW_WHEN_LOCKED = "com.santiquiroz.gow2recomp.extra.SHOW_WHEN_LOCKED";
+    static final String EXTRA_LAUNCH_OPTIONS = "com.santiquiroz.gow2recomp.extra.LAUNCH_OPTIONS";
     private static final String TAG = "Gow2Activity";
     private static final int REQUEST_GAME_FOLDER = 0x6702;
 
@@ -31,6 +32,9 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
     private GamePaths paths;
     private GameSetupScreen setupScreen;
     private NetworkPlayLocks networkLocks;
+    private LaunchMarker launchMarker;
+    private boolean nativeStarted;
+    private boolean resumed;
 
     public boolean requestSustainedPerformanceMode(boolean enable) {
         PowerManager pm = getSystemService(PowerManager.class);
@@ -45,6 +49,8 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         paths = GamePaths.of(this);
+        launchMarker = new LaunchMarker(paths.dataDir());
+        boolean previousLaunchCrashed = launchMarker.exists();
         NativeEnvironment.apply(paths);
         applyDebugLaunchOptions();
         super.onCreate(savedInstanceState);
@@ -55,6 +61,69 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
         }
         if (needsGameSetup()) {
             showGameSetup();
+        } else if (shouldShowLaunchOptions(previousLaunchCrashed)) {
+            showLaunchOptions(previousLaunchCrashed);
+        } else {
+            markNativeStarted();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (nativeStarted || !intent.getBooleanExtra(EXTRA_LAUNCH_OPTIONS, false)) {
+            return;
+        }
+        setIntent(intent);
+        if (paths.isGameInstalled()) {
+            showLaunchOptions(false);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        resumed = true;
+        if (nativeStarted) {
+            createLaunchMarker();
+        }
+        super.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        resumed = false;
+        try {
+            launchMarker.delete();
+        } catch (IOException e) {
+            Log.w(TAG, "could not remove launch marker", e);
+        }
+        super.onPause();
+    }
+
+    private boolean shouldShowLaunchOptions(boolean crashed) {
+        return (paths.isGameInstalled() && crashed)
+                || getIntent().getBooleanExtra(EXTRA_LAUNCH_OPTIONS, false);
+    }
+
+    private void showLaunchOptions(boolean crashed) {
+        setupScreen = null;
+        LaunchOptionsScreen screen = new LaunchOptionsScreen(this, paths.dataDir(), crashed,
+                this::startNativeSide);
+        setContentView(screen.view());
+    }
+
+    private void markNativeStarted() {
+        if (resumed) {
+            createLaunchMarker();
+        }
+        nativeStarted = true;
+    }
+
+    private void createLaunchMarker() {
+        try {
+            launchMarker.create();
+        } catch (IOException e) {
+            Log.w(TAG, "could not create launch marker", e);
         }
     }
 
@@ -99,7 +168,7 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
     @Override
     public void onCheckAgain() {
         if (paths.isGameInstalled()) {
-            startNativeSide();
+            onGameReady();
             return;
         }
         setupScreen.showChoice(getString(R.string.setup_still_missing, paths.gameDir().getAbsolutePath()));
@@ -179,7 +248,7 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         Log.i(TAG, "game files copied to " + paths.gameDir());
         if (!isDestroyed()) {
-            startNativeSide();
+            onGameReady();
         }
     }
 
@@ -190,8 +259,17 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
         }
     }
 
+    private void onGameReady() {
+        if (shouldShowLaunchOptions(launchMarker.exists())) {
+            showLaunchOptions(launchMarker.exists());
+            return;
+        }
+        startNativeSide();
+    }
+
     private void startNativeSide() {
         Log.i(TAG, "starting the native side with the game in " + paths.gameDir());
+        markNativeStarted();
         setupScreen = null;
         setContentView(mLayout);
         mSurface.requestFocus();

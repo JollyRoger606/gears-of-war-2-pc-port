@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="launch_options"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/launch_title">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.santiquiroz.gow2recomp"
+            android:targetClass="com.santiquiroz.gow2recomp.Gow2Activity">
+            <extra android:name="com.santiquiroz.gow2recomp.extra.LAUNCH_OPTIONS" android:value="true" />
+        </intent>
+    </shortcut>
+</shortcuts>
