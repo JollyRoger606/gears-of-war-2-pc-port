@@ -24,6 +24,9 @@ int main() {
   Expect(Near(ParseAspect("2.39", 0), 2.39, 1e-9), "plain number");
   Expect(Near(ParseAspect("auto", 3440.0 / 1440.0), 3440.0 / 1440.0, 1e-9), "auto takes the display");
   Expect(ParseAspect("auto", 0) == 0.0, "auto with no display is off");
+  Expect(ParseAspect("auto", 16.0 / 9.0) == 0.0, "auto on a 16:9 display leaves the game alone");
+  Expect(ParseAspect("auto", 1.6) == 0.0, "auto on 16:10 leaves the game alone");
+  Expect(Near(ParseAspect("auto", 21.0 / 9.0), 21.0 / 9.0, 1e-9), "auto on 21:9 is on");
   Expect(ParseAspect("9", 0) == 0.0, "9 is not an aspect");
   Expect(ParseAspect("0.5", 0) == 0.0, "narrower than 1.2 is refused");
   Expect(ParseAspect("5:1", 0) == 0.0, "wider than 4 is refused");

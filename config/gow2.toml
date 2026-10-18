@@ -83,9 +83,9 @@ anisotropic_override = 4
 # gow2_skip_cutscene_key = "9"
 
 # ---------- Ultrawide ----------
-# Draw a really wider picture instead of 16:9 with bars: off, auto (this PC's main display), or an aspect such
-# as "21:9". Up to 1680 pixels wide; the shadow map gets smaller to fit. Needs a restart. See docs/WIDESCREEN.md.
-# gow2_widescreen = "off"
+# Draw a really wider picture instead of 16:9 with bars: auto (the default: on when this PC's main display is
+# wider than 16:9), off, or an aspect such as "21:9". Up to 1680 pixels wide; the shadow map gets smaller to fit. Needs a restart. See docs/WIDESCREEN.md.
+# gow2_widescreen = "auto"
 # ---------- Keyboard and mouse ----------
 # The keyboard and mouse act as an Xbox 360 controller, so every action works as on the console.
 # A real controller can be used at the same time.

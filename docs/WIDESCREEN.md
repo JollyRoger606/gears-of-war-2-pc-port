@@ -2,13 +2,12 @@
 
 ## TL;DR
 
-Set `gow2_widescreen = "21:9"` (or `"auto"`, or any aspect such as `"2.39"`) in `gow2.toml` and restart. The
+It is on by itself (`gow2_widescreen = "auto"`) when the main display is wider than 16:9. Set `"off"`, or an aspect such as `"21:9"` or `"2.39"`, in `gow2.toml` and restart to change that. The
 game then draws a really wider picture: you see more to the left and right, nothing is stretched, and the
-black bars of a 16:9 picture on a 21:9 monitor are gone. The default is `off`, so nothing changes until you
-turn it on.
+black bars of a 16:9 picture on a 21:9 monitor are gone. On a 16:9 or narrower display nothing changes.
 
 ```toml
-gow2_widescreen = "auto"     # off | auto | 21:9 | 16:10 | 2.39 ...
+gow2_widescreen = "auto"     # auto (default) | off | 21:9 | 16:10 | 2.39 ...
 ```
 
 | | |
@@ -48,8 +47,8 @@ the scene and left dark rectangles on characters. `gow2_system_settings` edits i
 
 | Setting | Meaning |
 |---|---|
-| `gow2_widescreen = "off"` | The game's own 16:9 (default). |
-| `"auto"` | The aspect of the main display (Windows only). |
+| `"auto"` (default) | The aspect of the main display (Windows only) when it is wider than 16:9; otherwise the game's own 16:9. |
+| `"off"` | The game's own 16:9. |
 | `"21:9"`, `"16:10"`, `"2.39"` | A fixed aspect, accepted between 1.2 and 4. |
 
 Widths are rounded to a multiple of 80 and held between 960 and 1680. Needs a restart. `video_mode_width` and

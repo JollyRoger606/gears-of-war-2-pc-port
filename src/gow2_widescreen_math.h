@@ -13,17 +13,19 @@ namespace rex::glue::widescreen {
 
 constexpr int kOriginalWidth = 1280;  // what the game builds at 16:9
 constexpr int kTileWidth = 80;        // an EDRAM tile at 32 bits per pixel is 80 pixels wide
+constexpr double kAutoMinAspect = 1.85;  // above 16:9 (1.78) with room for 16:9.5 panels
 constexpr int kMinWidth = 960;
 constexpr int kMaxWidth = 1680;       // 21:9; scene colour and depth then use 9.5 of the 10 MB of EDRAM
 constexpr long long kEdramBytes = 10LL * 1024 * 1024;
 
-// "off", "", "0", "false" -> 0; "auto" -> display_aspect (0 when unknown); "21:9" or "2.39" -> that
+// "off", "", "0", "false" -> 0; "auto" -> display_aspect when it is wider than 16:9, else 0; "21:9" or "2.39" -> that
 // aspect. Anything outside 1.2 .. 4 names no widescreen (0).
 inline double ParseAspect(const std::string& text, double display_aspect) {
   if (text.empty() || text == "off" || text == "0" || text == "false") return 0.0;
   double a = 0.0;
   if (text == "auto") {
-    a = display_aspect;
+    // A 16:9 (or narrower) display is what the game already fills; only a wider one switches it on.
+    a = display_aspect >= kAutoMinAspect ? display_aspect : 0.0;
   } else if (const size_t colon = text.find(':'); colon != std::string::npos) {
     const double w = std::atof(text.substr(0, colon).c_str());
     const double h = std::atof(text.substr(colon + 1).c_str());

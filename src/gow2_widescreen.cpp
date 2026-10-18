@@ -23,9 +23,9 @@
 #include "gow2_guest.h"
 #include "gow2_widescreen_math.h"
 
-REXCVAR_DEFINE_STRING(gow2_widescreen, "off", "Display",
-                      "Ultrawide support: off, auto (the aspect of this PC's main display), an aspect such "
-                      "as 21:9 or 2.39. The game then renders wider instead of showing black bars; the "
+REXCVAR_DEFINE_STRING(gow2_widescreen, "auto", "Display",
+                      "Ultrawide support: auto (on when this PC's main display is wider than 16:9), off, or an "
+                      "aspect such as 21:9 or 2.39. The game then renders wider instead of showing black bars; the "
                       "field of view is widened to keep the vertical view. Takes effect on the next "
                       "start. Videos and some menus are still 16:9 stretched.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
