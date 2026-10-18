@@ -104,6 +104,7 @@ Defaults keep the original game and crossplay working.
 | 16x filtering patch | `gow2_aniso16` | on, off | restart | both |
 | Ambient occlusion fix | `gow2_ao_upscaling_fix` | on, off | now | both |
 | Depth of field fix | `gow2_dof_upscaling_fix` | on, off | now | both |
+| Motion blur | `gow2_motion_blur` | on, off | restart | both |
 | Texture packs | `texture_replace` | on, off | restart | Windows |
 | Dump textures | `texture_dump` | on, off (advanced) | restart | Windows |
 | Sustained performance | `gow2_android_sustained_performance` | on, off | restart | Android |
@@ -119,6 +120,7 @@ Defaults keep the original game and crossplay working.
 | Invert mouse Y | `gow2_mouse_invert_y` | on, off | now | both |
 | Aim assist with the mouse | `gow2_mouse_aim_assist` | on, off | now | both |
 | Button prompts | `gow2_prompts` | automatic, keyboard, controller | restart | both |
+| Keycap pictures | `gow2_keycaps` | on, off | restart | Windows |
 | Controller look dead zone | `pad_right_stick_deadzone` | 0 ... 0.9 | now | both |
 | Key bindings | opens the page below | | now | both |
 | Controller layout | info | in the game's own Options | now | both |

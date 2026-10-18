@@ -389,6 +389,16 @@ void AddGraphicsPatches(std::vector<Setting>& out) {
       .help_es =
           "Parche de la comunidad: profundidad de campo sin artefactos por encima de 720p."});
   out.push_back(Setting{
+      .id = "gow2_motion_blur",
+      .tab = Tab::kGraphics,
+      .kind = Kind::kToggle,
+      .apply = Apply::kRestart,
+      .platforms = kAllPlatforms,
+      .label_en = "Motion blur",
+      .label_es = "Desenfoque de movimiento",
+      .help_en = "The game's own motion blur. Off by default: it smears the picture while the camera turns.",
+      .help_es = "El desenfoque de movimiento del propio juego. Apagado por defecto: ensucia la imagen al girar la cámara."});
+  out.push_back(Setting{
       .id = "texture_replace",
       .tab = Tab::kGraphics,
       .kind = Kind::kToggle,
@@ -529,6 +539,16 @@ void AddControls(std::vector<Setting>& out) {
           C("keyboard", "Keyboard keys", "Teclas"),
           C("controller", "Controller buttons", "Botones del mando"),
       }});
+  out.push_back(Setting{
+      .id = "gow2_keycaps",
+      .tab = Tab::kControls,
+      .kind = Kind::kToggle,
+      .apply = Apply::kRestart,
+      .platforms = kWindows,
+      .label_en = "Keycap pictures",
+      .label_es = "Imágenes de teclas",
+      .help_en = "Shows the keys as keycaps (needs the pack from scripts/build-keycaps.ps1) instead of text.",
+      .help_es = "Muestra las teclas como teclas dibujadas (necesita el paquete de scripts/build-keycaps.ps1) en vez de texto."});
   out.push_back(Setting{
       .id = "pad_right_stick_deadzone",
       .tab = Tab::kControls,

@@ -312,3 +312,11 @@ checked by the first `!list` / `!selftest` in game.
 The [I] offsets for PRI.PlayerName (+464), Pawn.Health (+692) and
 bGodMode (+460, mask 0x40000000) were confirmed by !list in game on
 2026-10-16 (names, Health 1410/2100/900, god flag). [V]
+
+## Faking a controller
+
+`GOW2_PROMPTS_PAD_FILE=<file>` (environment, Windows) makes the live button prompts read "a controller is connected" from the first character of that file, `1` or `0`, every half second instead of asking XInput. Change the file while the game runs to watch the prompts switch between the keycaps and the pad buttons (a screen already open keeps its labels until it is opened again). `scripts/build-keycaps.ps1` and `tools/keycaps/README.md` describe the pack.
+
+## Chapter sweep
+
+`scripts/chapter-sweep.ps1` travels through the chapters one by one (`servertravel` from the main menu works) and records, per chapter, whether the game survived: `ok`, `unregistered 0x82...` (a function codegen missed) or `exit`/`fatal`. It restarts the game after a crash and goes on, so a whole pass finds every missing function that chapter starts reach. With `-AddHints` each new address goes into `hints/runtime.toml`; run `scripts/build.ps1` (it regenerates the code) and sweep again until no chapter reports one. It reaches only the first minutes of each chapter: combat, vehicles and bosses use code it does not run.

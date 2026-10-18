@@ -62,6 +62,8 @@ gow2_texture_streaming_fix = true  # bigger texture pool, less pop-in
 gow2_aniso16 = true                # 16x anisotropic filtering in the game's own sampler setup
 gow2_ao_upscaling_fix = true       # ambient occlusion without checkerboard/ghosting when scaled
 gow2_dof_upscaling_fix = true      # depth of field without blur artifacts when scaled
+# The game's own screen motion blur (off: it smears the picture while the camera turns).
+gow2_motion_blur = false
 
 # ---------- Textures ----------
 # The texture cache can hold more on PC than the console's budget.
@@ -71,8 +73,8 @@ anisotropic_override = 4
 
 # Texture packs (README, "Texture packs"). Dumps go to textures\4D53082D\dump next to gow2.exe;
 # replacements are read from textures\4D53082D\replace (any size, full mip chain).
-texture_dump = false
-texture_replace = false
+# texture_dump = false
+# texture_replace = false   # turned on by itself while the keycap pack is installed (gow2_keycaps)
 
 # ---------- Keyboard and mouse ----------
 # The keyboard and mouse act as an Xbox 360 controller, so every action works as on the console.
@@ -81,9 +83,13 @@ mnk_mode = true
 mnk_mouse = true
 mnk_sensitivity = 1.0
 
-# Menu button prompts: "auto" shows keyboard labels unless a controller is connected at
-# launch, "keyboard" always shows them, "controller" keeps the Xbox button art.
+# Menu button prompts: "auto" shows the keyboard keys while no controller is connected and
+# switches live when one is plugged in or removed (Windows; Android decides at launch),
+# "keyboard" always shows them, "controller" keeps the Xbox button art.
 gow2_prompts = "auto"
+# Show the keys as keycap pictures (the pack that scripts/build-keycaps.ps1 puts in
+# textures/4D53082D/replace) instead of text such as [Space].
+gow2_keycaps = true
 
 keybind_lstick_up = "W"
 keybind_lstick_down = "S"
