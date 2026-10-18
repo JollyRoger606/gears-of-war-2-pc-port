@@ -1,0 +1,39 @@
+{
+ "frames": 3555,
+ "duration_s": 59.233,
+ "fps_avg": 60.00067848868502,
+ "frame_ms": {
+  "avg": 16.666478199718707,
+  "p50": 16.653,
+  "p95": 18.494600000000002,
+  "p99": 19.39398,
+  "p999": 20.298140000000032,
+  "max": 20.827
+ },
+ "gpu_ms": {
+  "avg": 13.096470869687588,
+  "p50": 13.022,
+  "p95": 13.6928,
+  "p99": 14.10596,
+  "p999": 14.617474000000007,
+  "max": 14.836
+ },
+ "gpu_idle_ms_avg": 3.5770526463963965,
+ "gpu_busy_pct": 78.58227903425106,
+ "cpu_wait_on_gpu_ms_avg": 0.0,
+ "off_pace_pct": 0.3049625727751594,
+ "hitches": 0,
+ "hitches_per_min": 0.0,
+ "hitch_lost_ms_total": 0,
+ "draws_avg": 1156.8274697438785,
+ "skipped_draws_total": 0,
+ "skipped_draw_frames_pct": 0.0,
+ "pipelines_built": 0,
+ "shaders_built": 0,
+ "texture_mb_per_s": 1929.3200167449363,
+ "shared_memory_mb_per_s": 475.18130201914477,
+ "hitch_causes": {},
+ "worst_hitches": [],
+ "runs": 3,
+ "frame_ms_p99_spread_pct": 1.1136445433067286
+}

@@ -1,0 +1,431 @@
+﻿diff --git a/include/rex/graphics/d3d12/command_processor.h b/include/rex/graphics/d3d12/command_processor.h
+index 2fac5a4..3af5a2f 100644
+--- a/include/rex/graphics/d3d12/command_processor.h
++++ b/include/rex/graphics/d3d12/command_processor.h
+@@ -26,6 +26,7 @@
+ #include <rex/graphics/command_processor.h>
+ #include <rex/graphics/d3d12/deferred_command_list.h>
+ #include <rex/graphics/d3d12/graphics_system.h>
++#include <rex/graphics/d3d12/perf_frames.h>
+ #include <rex/graphics/d3d12/pipeline_cache.h>
+ #include <rex/graphics/d3d12/primitive_processor.h>
+ #include <rex/graphics/d3d12/render_target_cache.h>
+@@ -449,6 +450,9 @@ class D3D12CommandProcessor : public CommandProcessor {
+   uint64_t queue_operations_since_submission_fence_last_ = 0;
+   bool queue_operations_done_since_submission_signal_ = false;
+ 
++  // Per-frame performance log (perf_frame_csv); does nothing when the cvar is empty.
++  PerfFrameRecorder perf_frames_;
++
+   bool frame_open_ = false;
+   // Guest frame index, since some transient resources can be reused across
+   // submissions. Values updated in the beginning of a frame.
+diff --git a/include/rex/graphics/d3d12/perf_frames.h b/include/rex/graphics/d3d12/perf_frames.h
+new file mode 100644
+index 0000000..44c3a65
+--- /dev/null
++++ b/include/rex/graphics/d3d12/perf_frames.h
+@@ -0,0 +1,257 @@
++/**
++ * @file        graphics/d3d12/perf_frames.h
++ * @brief       Per-frame performance log (CSV): CPU pacing, GPU time from timestamp queries, and
++ *              what the frame did (draws, skipped draws, pipelines, uploads).
++ *
++ * Off unless the perf_frame_csv cvar names a file. One row per guest frame (per swap), written when
++ * the GPU has finished the frame. Header only. Used by the D3D12 command processor.
++ */
++#pragma once
++
++#include <atomic>
++#include <chrono>
++#include <cstdint>
++#include <cstdio>
++#include <string>
++
++#include <rex/cvar.h>
++#include <rex/logging.h>
++#include <rex/ui/d3d12/d3d12_util.h>
++
++REXCVAR_DECLARE(std::string, perf_frame_csv);
++
++namespace rex::graphics::perf {
++
++// Totals since the last frame closed; any thread may add.
++struct FrameCounters {
++  std::atomic<uint64_t> draws{0};
++  std::atomic<uint64_t> draws_skipped{0};  // dropped: the pipeline was still being built
++  std::atomic<uint64_t> pipelines{0};      // D3D12 pipeline states created
++  std::atomic<uint64_t> shaders{0};        // shader translations
++  std::atomic<uint64_t> texture_loads{0};
++  std::atomic<uint64_t> texture_kb{0};     // guest bytes of those textures
++  std::atomic<uint64_t> shared_memory_kb{0};  // guest memory uploaded to the GPU
++  std::atomic<uint64_t> fence_wait_us{0};  // CPU time blocked waiting for the GPU
++};
++
++inline FrameCounters& Counters() {
++  static FrameCounters counters;
++  return counters;
++}
++
++inline int64_t SteadyUs() {
++  return std::chrono::duration_cast<std::chrono::microseconds>(
++             std::chrono::steady_clock::now().time_since_epoch())
++      .count();
++}
++
++}  // namespace rex::graphics::perf
++
++namespace rex::graphics::d3d12 {
++
++class PerfFrameRecorder {
++ public:
++  ~PerfFrameRecorder() { Shutdown(); }
++
++  bool enabled() const { return file_ != nullptr; }
++
++  // Opens the CSV named by perf_frame_csv and makes the GPU timers. Does nothing (and costs
++  // nothing per frame) when the cvar is empty.
++  void Initialize(ID3D12Device* device, ID3D12CommandQueue* queue) {
++    Shutdown();
++    const std::string path = REXCVAR_GET(perf_frame_csv);
++    if (path.empty()) return;
++    file_ = std::fopen(path.c_str(), "wb");
++    if (!file_) {
++      REXLOG_WARN("perf: cannot open {}", path);
++      return;
++    }
++    std::fputs(
++        "frame,wall_ms,cpu_interval_us,gpu_span_us,gpu_idle_us,fence_wait_us,submissions,draws,"
++        "draws_skipped,pipelines,shaders,texture_loads,texture_kb,shared_memory_kb\n",
++        file_);
++    queue_ = queue;
++    if (queue_ && SUCCEEDED(queue_->GetTimestampFrequency(&frequency_)) && frequency_ != 0) {
++      D3D12_QUERY_HEAP_DESC heap_desc = {};
++      heap_desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
++      heap_desc.Count = kSlots * 2;
++      D3D12_HEAP_PROPERTIES readback_heap = {};
++      readback_heap.Type = D3D12_HEAP_TYPE_READBACK;
++      D3D12_RESOURCE_DESC buffer = {};
++      buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
++      buffer.Width = kSlots * 16;
++      buffer.Height = 1;
++      buffer.DepthOrArraySize = 1;
++      buffer.MipLevels = 1;
++      buffer.SampleDesc.Count = 1;
++      buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
++      bool ok = SUCCEEDED(device->CreateQueryHeap(&heap_desc, IID_PPV_ARGS(&heap_))) &&
++                SUCCEEDED(device->CreateCommittedResource(&readback_heap, D3D12_HEAP_FLAG_NONE,
++                                                          &buffer, D3D12_RESOURCE_STATE_COPY_DEST,
++                                                          nullptr, IID_PPV_ARGS(&readback_)));
++      for (uint32_t i = 0; ok && i < kSlots * 2; ++i) {
++        ok = SUCCEEDED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
++                                                      IID_PPV_ARGS(&allocators_[i]))) &&
++             SUCCEEDED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocators_[i],
++                                                 nullptr, IID_PPV_ARGS(&lists_[i])));
++        if (ok) lists_[i]->Close();
++      }
++      gpu_timing_ = ok;
++      if (!ok) REXLOG_WARN("perf: GPU timestamps unavailable; GPU columns will be -1");
++    }
++    start_us_ = perf::SteadyUs();
++    REXLOG_INFO("perf: per-frame log to {} (GPU timing {})", path, gpu_timing_ ? "on" : "off");
++  }
++
++  void Shutdown() {
++    if (file_) {
++      std::fflush(file_);
++      std::fclose(file_);
++      file_ = nullptr;
++    }
++    for (uint32_t i = 0; i < kSlots * 2; ++i) {
++      if (lists_[i]) { lists_[i]->Release(); lists_[i] = nullptr; }
++      if (allocators_[i]) { allocators_[i]->Release(); allocators_[i] = nullptr; }
++    }
++    if (readback_) { readback_->Release(); readback_ = nullptr; }
++    if (heap_) { heap_->Release(); heap_ = nullptr; }
++    gpu_timing_ = false;
++    queue_ = nullptr;
++  }
++
++  // A submission of the open frame is about to be executed on the queue.
++  void OnSubmission() {
++    if (!file_) return;
++    ++submissions_;
++    if (gpu_timing_ && !begun_) {
++      slot_ = frame_counter_ % kSlots;
++      busy_ = pending_[slot_].used;
++      if (!busy_) {
++        Stamp(slot_ * 2, /*resolve=*/false);
++        begun_ = true;
++      }
++    }
++  }
++
++  // The last submission of the frame has just been executed; `fence_value` is what will be
++  // signaled right after.
++  void OnFrameClosed(uint64_t fence_value) {
++    if (!file_) return;
++    const int64_t now = perf::SteadyUs();
++    Pending record;
++    record.used = true;
++    record.fence_value = fence_value;
++    record.frame = frame_counter_;
++    record.cpu_interval_us = last_close_us_ ? now - last_close_us_ : -1;
++    record.wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
++                         std::chrono::system_clock::now().time_since_epoch())
++                         .count();
++    record.submissions = submissions_;
++    auto& c = perf::Counters();
++    record.draws = c.draws.exchange(0);
++    record.draws_skipped = c.draws_skipped.exchange(0);
++    record.pipelines = c.pipelines.exchange(0);
++    record.shaders = c.shaders.exchange(0);
++    record.texture_loads = c.texture_loads.exchange(0);
++    record.texture_kb = c.texture_kb.exchange(0);
++    record.shared_memory_kb = c.shared_memory_kb.exchange(0);
++    record.fence_wait_us = c.fence_wait_us.exchange(0);
++    record.timed = gpu_timing_ && begun_;
++    if (record.timed) Stamp(slot_ * 2 + 1, /*resolve=*/true);
++    if (record.timed) {
++      pending_[slot_] = record;  // written when the GPU has finished the frame
++    } else {
++      FlushUntimed(record);  // GPU timing off, or its slot was still in use: no GPU columns
++    }
++    last_close_us_ = now;
++    ++frame_counter_;
++    submissions_ = 0;
++    begun_ = false;
++  }
++
++  // The fence reached `completed`: write every frame the GPU has finished.
++  void OnSubmissionCompleted(uint64_t completed) {
++    if (!file_) return;
++    for (uint32_t i = 0; i < kSlots; ++i) {
++      Pending& p = pending_[i];
++      if (!p.used || !p.timed || p.fence_value > completed) continue;
++      uint64_t* ticks = nullptr;
++      D3D12_RANGE range = {i * 16u, i * 16u + 16u};
++      int64_t span_us = -1, idle_us = -1;
++      if (SUCCEEDED(readback_->Map(0, &range, reinterpret_cast<void**>(&ticks)))) {
++        const uint64_t t0 = ticks[i * 2], t1 = ticks[i * 2 + 1];
++        D3D12_RANGE written = {0, 0};
++        readback_->Unmap(0, &written);
++        if (t1 >= t0) span_us = int64_t((t1 - t0) * 1000000ull / frequency_);
++        if (last_end_ticks_ && t0 >= last_end_ticks_)
++          idle_us = int64_t((t0 - last_end_ticks_) * 1000000ull / frequency_);
++        last_end_ticks_ = t1;
++      }
++      Write(p, span_us, idle_us);
++      p.used = false;
++    }
++    if (++flush_counter_ % 120 == 0) std::fflush(file_);
++  }
++
++ private:
++  static constexpr uint32_t kSlots = 16;
++
++  struct Pending {
++    bool used = false;
++    bool timed = false;
++    uint64_t fence_value = 0, frame = 0;
++    int64_t cpu_interval_us = -1, wall_ms = 0;
++    uint32_t submissions = 0;
++    uint64_t draws = 0, draws_skipped = 0, pipelines = 0, shaders = 0, texture_loads = 0,
++             texture_kb = 0, shared_memory_kb = 0, fence_wait_us = 0;
++  };
++
++  void Stamp(uint32_t query, bool resolve) {
++    ID3D12GraphicsCommandList* list = lists_[query];
++    ID3D12CommandAllocator* allocator = allocators_[query];
++    allocator->Reset();
++    list->Reset(allocator, nullptr);
++    list->EndQuery(heap_, D3D12_QUERY_TYPE_TIMESTAMP, query);
++    if (resolve) {
++      const uint32_t slot = query / 2;
++      list->ResolveQueryData(heap_, D3D12_QUERY_TYPE_TIMESTAMP, slot * 2, 2, readback_, slot * 16);
++    }
++    list->Close();
++    ID3D12CommandList* lists[] = {list};
++    queue_->ExecuteCommandLists(1, lists);
++  }
++
++  void FlushUntimed(const Pending& p) { Write(p, -1, -1); }
++
++  void Write(const Pending& p, int64_t span_us, int64_t idle_us) {
++    std::fprintf(file_,
++                 "%llu,%lld,%lld,%lld,%lld,%llu,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
++                 (unsigned long long)p.frame, (long long)p.wall_ms, (long long)p.cpu_interval_us,
++                 (long long)span_us, (long long)idle_us, (unsigned long long)p.fence_wait_us,
++                 p.submissions, (unsigned long long)p.draws, (unsigned long long)p.draws_skipped,
++                 (unsigned long long)p.pipelines, (unsigned long long)p.shaders,
++                 (unsigned long long)p.texture_loads, (unsigned long long)p.texture_kb,
++                 (unsigned long long)p.shared_memory_kb);
++  }
++
++  std::FILE* file_ = nullptr;
++  ID3D12CommandQueue* queue_ = nullptr;
++  ID3D12QueryHeap* heap_ = nullptr;
++  ID3D12Resource* readback_ = nullptr;
++  ID3D12CommandAllocator* allocators_[kSlots * 2] = {};
++  ID3D12GraphicsCommandList* lists_[kSlots * 2] = {};
++  UINT64 frequency_ = 0;
++  bool gpu_timing_ = false;
++  bool begun_ = false;
++  bool busy_ = false;
++  uint32_t slot_ = 0;
++  uint32_t submissions_ = 0;
++  uint64_t frame_counter_ = 0;
++  int64_t start_us_ = 0;
++  int64_t last_close_us_ = 0;
++  uint64_t last_end_ticks_ = 0;
++  uint32_t flush_counter_ = 0;
++  Pending pending_[kSlots];
++};
++
++}  // namespace rex::graphics::d3d12
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+index 0400411..a2ae9b9 100644
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -46,6 +46,12 @@ REXCVAR_DEFINE_BOOL(d3d12_readback_resolve, false, "GPU/D3D12",
+                     "Read render-to-texture results on the CPU")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
++REXCVAR_DEFINE_STRING(perf_frame_csv, "", "GPU/D3D12",
++                      "Write one CSV row per guest frame (CPU interval, GPU time from timestamp "
++                      "queries, draws, skipped draws, pipelines created, uploads) to this file. "
++                      "Empty = off")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++
+ REXCVAR_DEFINE_BOOL(d3d12_submit_on_primary_buffer_end, true, "GPU/D3D12",
+                     "Submit command list when PM4 primary buffer ends")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+@@ -876,6 +882,8 @@ bool D3D12CommandProcessor::SetupContext() {
+   ID3D12Device* device = provider.GetDevice();
+   ID3D12CommandQueue* direct_queue = provider.GetDirectQueue();
+ 
++  perf_frames_.Initialize(device, direct_queue);
++
+   fence_completion_event_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+   if (fence_completion_event_ == nullptr) {
+     REXGPU_ERROR("Failed to create the fence completion event");
+@@ -1638,6 +1646,8 @@ bool D3D12CommandProcessor::SetupContext() {
+ 
+ void D3D12CommandProcessor::ShutdownContext() {
+   AwaitAllQueueOperationsCompletion();
++  perf_frames_.OnSubmissionCompleted(UINT64_MAX);
++  perf_frames_.Shutdown();
+   InvalidateAllVertexBufferResidency();
+   ShutdownOcclusionQueryResources();
+ 
+@@ -2310,6 +2320,7 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type, uint3
+ 
+   ID3D12Device* device = GetD3D12Provider().GetDevice();
+   const RegisterFile& regs = *register_file_;
++  perf::Counters().draws.fetch_add(1, std::memory_order_relaxed);
+ 
+   xenos::EdramMode edram_mode = regs.Get<reg::RB_MODECONTROL>().edram_mode;
+   if (edram_mode == xenos::EdramMode::kCopy) {
+@@ -2465,6 +2476,7 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type, uint3
+   }
+   if (REXCVAR_GET(async_shader_compilation) &&
+       pipeline_cache_->GetD3D12PipelineByHandle(pipeline_handle) == nullptr) {
++    perf::Counters().draws_skipped.fetch_add(1, std::memory_order_relaxed);
+     return true;
+   }
+ 
+@@ -3208,7 +3220,10 @@ void D3D12CommandProcessor::CheckSubmissionFence(uint64_t await_submission) {
+                     SUCCEEDED(queue_operations_since_submission_fence_->SetEventOnCompletion(
+                         fence_value, fence_completion_event_)))) {
+         PROFILE_CMD_BUFFER_STALL();
++        const int64_t wait_start = perf::SteadyUs();
+         WaitForSingleObject(fence_completion_event_, INFINITE);
++        perf::Counters().fence_wait_us.fetch_add(uint64_t(perf::SteadyUs() - wait_start),
++                                                 std::memory_order_relaxed);
+         queue_operations_done_since_submission_signal_ = false;
+       } else {
+         REXGPU_ERROR(
+@@ -3227,7 +3242,10 @@ void D3D12CommandProcessor::CheckSubmissionFence(uint64_t await_submission) {
+     if (SUCCEEDED(
+             submission_fence_->SetEventOnCompletion(await_submission, fence_completion_event_))) {
+       PROFILE_CMD_BUFFER_STALL();
++      const int64_t wait_start = perf::SteadyUs();
+       WaitForSingleObject(fence_completion_event_, INFINITE);
++      perf::Counters().fence_wait_us.fetch_add(uint64_t(perf::SteadyUs() - wait_start),
++                                               std::memory_order_relaxed);
+       submission_completed_ = submission_fence_->GetCompletedValue();
+     }
+   }
+@@ -3239,6 +3257,8 @@ void D3D12CommandProcessor::CheckSubmissionFence(uint64_t await_submission) {
+     return;
+   }
+ 
++  perf_frames_.OnSubmissionCompleted(submission_completed_);
++
+   // Reclaim command allocators.
+   while (command_allocator_submitted_first_) {
+     if (command_allocator_submitted_first_->last_usage_submission > submission_completed_) {
+@@ -3518,7 +3538,13 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+     deferred_command_list_.Execute(command_list_, command_list_1_);
+     command_list_->Close();
+     ID3D12CommandList* execute_command_lists[] = {command_list_};
++    if (frame_open_) {
++      perf_frames_.OnSubmission();  // GPU timestamp before the frame's first work
++    }
+     direct_queue->ExecuteCommandLists(1, execute_command_lists);
++    if (is_closing_frame) {
++      perf_frames_.OnFrameClosed(submission_current_);  // timestamp and resolve after the last
++    }
+     command_allocator_writable_first_->last_usage_submission = submission_current_;
+     if (command_allocator_submitted_last_) {
+       command_allocator_submitted_last_->next = command_allocator_writable_first_;
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+index 8e6b854..54510fc 100644
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -1067,6 +1067,7 @@ bool PipelineCache::TranslateAnalyzedShader(DxbcShaderTranslator& translator,
+     REXGPU_ERROR("Shader {:016X} translation failed; marking as ignored", shader.ucode_data_hash());
+     return false;
+   }
++  perf::Counters().shaders.fetch_add(1, std::memory_order_relaxed);
+ 
+   const char* host_shader_type;
+   if (shader.type() == xenos::ShaderType::kVertex) {
+@@ -2678,6 +2679,7 @@ const std::vector<uint32_t>& PipelineCache::GetGeometryShader(GeometryShaderKey
+ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
+     const PipelineRuntimeDescription& runtime_description) {
+   const PipelineDescription& description = runtime_description.description;
++  perf::Counters().pipelines.fetch_add(1, std::memory_order_relaxed);
+ 
+   if (runtime_description.pixel_shader != nullptr) {
+     REXGPU_DEBUG("Creating graphics pipeline with VS {:016X}, PS {:016X}",
+diff --git a/src/graphics/d3d12/shared_memory.cpp b/src/graphics/d3d12/shared_memory.cpp
+index a5c97a0..98f7521 100644
+--- a/src/graphics/d3d12/shared_memory.cpp
++++ b/src/graphics/d3d12/shared_memory.cpp
+@@ -327,6 +327,8 @@ bool D3D12SharedMemory::UploadRanges(
+       std::memcpy(upload_buffer_mapping,
+                   memory().TranslatePhysical(upload_range_start << page_size_log2()),
+                   upload_buffer_size);
++      perf::Counters().shared_memory_kb.fetch_add(uint64_t(upload_buffer_size >> 10),
++                                                  std::memory_order_relaxed);
+       command_list.D3DCopyBufferRegion(buffer_, upload_range_start << page_size_log2(),
+                                        upload_buffer, UINT64(upload_buffer_offset),
+                                        UINT64(upload_buffer_size));
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+index 5e22619..e1c6753 100644
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -2226,6 +2226,12 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+   // is an extra resource chosen from the content hash.
+   MaybeUpdateReplacement(d3d12_texture);
+ 
++  perf::Counters().texture_loads.fetch_add(1, std::memory_order_relaxed);
++  perf::Counters().texture_kb.fetch_add(
++      ((load_base ? d3d12_texture.GetGuestBaseSize() : 0) +
++       (load_mips ? d3d12_texture.GetGuestMipsSize() : 0)) >> 10,
++      std::memory_order_relaxed);
++
+   return true;
+ }
+ 

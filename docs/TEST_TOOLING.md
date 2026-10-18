@@ -320,3 +320,14 @@ bGodMode (+460, mask 0x40000000) were confirmed by !list in game on
 ## Chapter sweep
 
 `scripts/chapter-sweep.ps1` travels through the chapters one by one (`servertravel` from the main menu works) and records, per chapter, whether the game survived: `ok`, `unregistered 0x82...` (a function codegen missed) or `exit`/`fatal`. It restarts the game after a crash and goes on, so a whole pass finds every missing function that chapter starts reach. With `-AddHints` each new address goes into `hints/runtime.toml`; run `scripts/build.ps1` (it regenerates the code) and sweep again until no chapter reports one. It reaches only the first minutes of each chapter: combat, vehicles and bosses use code it does not run.
+
+## Performance runs
+
+`scripts/perf-run.ps1` measures frame pacing, GPU time and hitches (stutter) in fixed scenes, so a change can be judged by numbers instead of by feel. It needs the build with SDK patch 0017 (`perf_frame_csv`, a row per presented frame). Scenes are in `scripts/perf/scenes.json`: a chapter to travel to, how long it loads, and timed pad input (the `gow2_test_input` format) for the measured part.
+
+    powershell -ExecutionPolicy Bypass -File scripts\perf-run.ps1 -Scene hospital_idle,hospital_walk -Repeat 3 -SaveBaseline
+    powershell -ExecutionPolicy Bypass -File scripts\perf-run.ps1 -Scene all -Compare            # after a change
+    powershell -ExecutionPolicy Bypass -File scripts\perf-run.ps1 -Scene hospital_idle -Set vsync=false -Tag nolimit
+    powershell -ExecutionPolicy Bypass -File scripts\perf-run.ps1 -Interactive -Seconds 900 -SkipSeconds 60   # your own play
+
+Each run leaves `frames.csv`, the game log, `metrics.json`, `report.txt` and `run.json` (exe hash, commit, settings, GPU and clocks) under `out\perf\<stamp>_<tag>\<scene>\run<n>\`, and the median of the repetitions in `<scene>\summary.json`. `-Compare` checks it against `perfaselines\<scene>.json` and exits with 2 when a metric is worse by more than the spread between the repetitions (at least 10 %). `-Cold` starts with an empty shader cache to measure first-visit stutter. Leave the keyboard and mouse alone while a scene runs. `tools/perf/analyze.py` reads any `frames.csv` by itself (`--from-wall-ms`, `--to-wall-ms`, `--json`); `tools/test_perf_analyze.py` tests it. What the numbers showed so far and what to try is in `docs/PERFORMANCE_PLAN.md`.

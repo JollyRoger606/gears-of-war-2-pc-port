@@ -48,9 +48,9 @@ mrt_edram_used_range_clamp_to_min = true
 # ---------- Frame rate ----------
 vsync = true
 # Community patch: lifts the game's 30 fps cap. Turn vsync off too for more than the refresh rate.
-gow2_unlock_fps = false
+gow2_unlock_fps = true
 # Frame rate limit while the frame rate is unlocked (0 = no limit). Takes effect at once.
-# gow2_fps_cap = 0
+gow2_fps_cap = 144
 
 # ---------- Audio ----------
 # Master volume in percent (0-100). Takes effect at once.

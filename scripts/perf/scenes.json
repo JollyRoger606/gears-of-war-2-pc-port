@@ -1,0 +1,72 @@
+{
+  "_comment": "Scenes for scripts/perf-run.ps1. chapter is the human chapter number (1..29, docs/TEST_TOOLING.md); load_seconds is how long the chapter takes to load before the measured part starts; steps run at `at` seconds into the measured part: pad is the text of a gow2_test_input line (A B X Y LB RB LT RT START BACK UP DOWN LEFT RIGHT LS RS LX= LY= RX= RY=), an empty pad releases everything. Enemies may attack an idle player in some chapters: compare a scene only with itself, on the same build and settings.",
+  "scenes": {
+    "hospital_idle": {
+      "note": "Quiet interior, nobody touches anything: the floor for pacing and GPU cost.",
+      "chapter": 2, "load_seconds": 40, "duration": 60, "steps": []
+    },
+    "hospital_walk": {
+      "note": "Same room, walking and turning: camera motion, texture and shadow changes.",
+      "chapter": 2, "load_seconds": 40, "duration": 60,
+      "steps": [
+        {"at": 2, "pad": "LY=1"},
+        {"at": 8, "pad": "LY=1 RX=0.5"},
+        {"at": 12, "pad": "LY=1"},
+        {"at": 20, "pad": "RX=-0.7"},
+        {"at": 22, "pad": "LY=1 LX=0.6"},
+        {"at": 32, "pad": "RX=0.7"},
+        {"at": 34, "pad": "LY=1"},
+        {"at": 46, "pad": "RX=-0.5 LY=0.5"},
+        {"at": 52, "pad": ""}
+      ]
+    },
+    "assault_cinematic": {
+      "note": "Chapter 3 opens on a long in-engine cutscene: no player control, heavy effects and character shaders.",
+      "chapter": 3, "load_seconds": 30, "duration": 75, "steps": []
+    },
+    "outdoor_assault": {
+      "note": "Open street with fire and smoke, walking forward.",
+      "chapter": 4, "load_seconds": 40, "duration": 60,
+      "steps": [
+        {"at": 3, "pad": "LY=1"},
+        {"at": 20, "pad": "LY=1 RX=0.4"},
+        {"at": 30, "pad": "LY=1"},
+        {"at": 50, "pad": ""}
+      ]
+    },
+    "landown": {
+      "note": "Chapter 5, large exterior.",
+      "chapter": 5, "load_seconds": 40, "duration": 60,
+      "steps": [{"at": 3, "pad": "LY=1"}, {"at": 25, "pad": "LY=1 RX=-0.4"}, {"at": 40, "pad": "LY=1"}, {"at": 55, "pad": ""}]
+    },
+    "riftworm": {
+      "note": "Chapter 12, the Riftworm area.",
+      "chapter": 12, "load_seconds": 45, "duration": 60,
+      "steps": [{"at": 3, "pad": "LY=1"}, {"at": 30, "pad": "LY=1 RX=0.3"}, {"at": 55, "pad": ""}]
+    },
+    "outpost": {
+      "note": "Chapter 13, outpost exterior.",
+      "chapter": 13, "load_seconds": 45, "duration": 60,
+      "steps": [{"at": 3, "pad": "LY=1"}, {"at": 25, "pad": "LY=1 RX=0.4"}, {"at": 45, "pad": "LY=1"}, {"at": 58, "pad": ""}]
+    },
+    "mount_kadar": {
+      "note": "Chapter 16, vehicle-sized exterior.",
+      "chapter": 16, "load_seconds": 45, "duration": 60,
+      "steps": [{"at": 3, "pad": "LY=1"}, {"at": 30, "pad": "LY=1 RX=-0.3"}, {"at": 55, "pad": ""}]
+    },
+    "palace": {
+      "note": "Chapter 23, palace interior.",
+      "chapter": 23, "load_seconds": 45, "duration": 60,
+      "steps": [{"at": 3, "pad": "LY=1"}, {"at": 30, "pad": "LY=1 RX=0.4"}, {"at": 55, "pad": ""}]
+    },
+    "sinkhole": {
+      "note": "Chapter 27, sinkhole.",
+      "chapter": 27, "load_seconds": 45, "duration": 60,
+      "steps": [{"at": 3, "pad": "LY=1"}, {"at": 30, "pad": "LY=1 RX=0.4"}, {"at": 55, "pad": ""}]
+    },
+    "chapter_load": {
+      "note": "Nothing measured after the load: travel only, and the whole load is the measured part (load_seconds is 0). Shows the cost of loading and of first-time shaders.",
+      "chapter": 6, "load_seconds": 0, "duration": 45, "steps": []
+    }
+  }
+}
