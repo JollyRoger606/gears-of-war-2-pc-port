@@ -5,10 +5,12 @@
 
 #include <charconv>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <system_error>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -506,6 +508,17 @@ std::filesystem::path TemporaryPath(const std::filesystem::path& path) {
   return tmp;
 }
 
+#ifdef _WIN32
+// MoveFileExW(REPLACE_EXISTING) fails with ERROR_ACCESS_DENIED / ERROR_SHARING_VIOLATION /
+// ERROR_LOCK_VIOLATION when another writer (or an antivirus/indexer) briefly holds the
+// destination open. Those failures are transient: the temp file is complete, so retrying
+// just the replace step is safe and keeps the write atomic.
+bool IsTransientReplaceError(DWORD code) {
+  return code == ERROR_ACCESS_DENIED || code == ERROR_SHARING_VIOLATION ||
+         code == ERROR_LOCK_VIOLATION;
+}
+#endif
+
 std::error_code ReplaceFile(const std::filesystem::path& tmp, const std::filesystem::path& path) {
 #ifdef _WIN32
   if (MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
@@ -543,7 +556,23 @@ bool WriteFileAtomic(const std::filesystem::path& path, std::string_view text, s
     out.close();
     if (!out) return fail("cannot write " + PathUtf8(tmp) + ": write failed");
   }
-  const std::error_code ec = ReplaceFile(tmp, path);
+  std::error_code ec;
+#ifdef _WIN32
+  // Bounded retry of the replace step only (~200 ms total): concurrent savers collide here.
+  constexpr int kReplaceAttempts = 20;
+  constexpr auto kReplaceBackoff = std::chrono::milliseconds(10);
+  for (int attempt = 0;; ++attempt) {
+    ec = ReplaceFile(tmp, path);
+    if (!ec) break;
+    if (!IsTransientReplaceError(static_cast<DWORD>(ec.value())) ||
+        attempt + 1 >= kReplaceAttempts) {
+      break;
+    }
+    std::this_thread::sleep_for(kReplaceBackoff);
+  }
+#else
+  ec = ReplaceFile(tmp, path);
+#endif
   if (ec) return fail("cannot replace " + PathUtf8(path) + ": " + ec.message());
   if (error != nullptr) error->clear();
   return true;
