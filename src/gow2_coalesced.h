@@ -57,4 +57,18 @@ CoalescedOptions CoalescedOptionsFromCvars();
 // True when the runtime routes the device selector to the PC Options menu (patch 0013).
 bool HostUiHooksAvailable();
 
+// Live prompts (gow2_prompt_swap.cpp), Windows with gow2_prompts = auto: the bundles keep the
+// pad glyphs and the strings are rewritten in memory as controllers come and go.
+bool PromptsFollowController();
+bool PhysicalGamepadConnected();
+// Keyboard label per [ControllerFont] key ("Controller_A" -> "[Space]"), from the keybind_* settings.
+std::vector<std::pair<std::string, std::string>> KeyboardPromptLabels();
+// The [ControllerFont] values of every Coalesced bundle in the game folder, by locale. The glyphs
+// differ between locales, so the swap needs the set the running game really loaded.
+struct ControllerFontSet {
+  std::string locale;
+  std::vector<std::pair<std::string, std::u16string>> values;  // key, original text
+};
+std::vector<ControllerFontSet> ReadControllerFontOriginals(const std::filesystem::path& game_root);
+
 }  // namespace rex::glue

@@ -626,6 +626,16 @@ void AddControls(std::vector<Setting>& out) {
           C("controller", "Controller buttons", "Botones del mando"),
       }});
   out.push_back(Setting{
+      .id = "gow2_keycaps",
+      .tab = Tab::kControls,
+      .kind = Kind::kToggle,
+      .apply = Apply::kRestart,
+      .platforms = kWindows,
+      .label_en = "Keycap pictures",
+      .label_es = "Imágenes de teclas",
+      .help_en = "Shows the keys as keycaps (needs the pack from scripts/build-keycaps.ps1) instead of text.",
+      .help_es = "Muestra las teclas como teclas dibujadas (necesita el paquete de scripts/build-keycaps.ps1) en vez de texto."});
+  out.push_back(Setting{
       .id = "pad_right_stick_deadzone",
       .tab = Tab::kControls,
       .kind = Kind::kNumber,
