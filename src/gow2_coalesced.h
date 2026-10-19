@@ -12,6 +12,7 @@
 //   key-prompts  menu prompts show keyboard labels ([Space], [LMB]...) (cvar gow2_prompts)
 //   pc-options-entry  Options > Storage Location becomes the PC Options entry
 //                     (cvar gow2_pc_options_entry, needs SDK patch 0013)
+//   native-keys  the keyboard's own engine bindings (cvar gow2_native_keys, src/gow2_native_keys.cpp)
 //   system-settings  the game's own [SystemSettings] values (Game quality cvars and gow2_system_settings)
 #pragma once
 
@@ -20,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "gow2_native_bindings.h"
 #include "gow2_sha_table.h"
 
 namespace rex::glue {
@@ -28,6 +30,8 @@ struct CoalescedOptions {
   bool mouse_look = false;
   bool native_mouse = false;
   bool pc_options_entry = false;
+  // Keyboard bindings of the engine (cvar gow2_native_keys); empty leaves the game's bindings alone.
+  std::vector<NativeBinding> native_bindings;
   // Key = a name in [ControllerFont] of GearGameUI ("Controller_A"), value = the label shown
   // ("[Space]"). Empty means "leave the pad glyphs alone".
   std::vector<std::pair<std::string, std::string>> prompt_labels;

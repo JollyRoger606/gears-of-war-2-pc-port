@@ -173,8 +173,13 @@ inventory, every preset value, scope of verification, and the bundle size rule.
 | Controller layout | info | in the game's own Options | now | both |
 
 The Key bindings page holds one row per action (`keybind_*`, 24 rows).
-Accept, then press the new key. Default restores the original keys. Menu
-prompts update after a restart.
+Accept, then press the new key. Default restores the original keys. Open it
+with F10 during a level: a new key works as soon as the menu closes. The game
+itself keeps the bindings it was started with, so the port sends each key as
+the key the game still binds to the same action (`RouteKey`,
+`src/gow2_native_bindings.cpp`). One limit: an action that was bound to a
+key combination (`Shift+Up`) at start cannot move to another key until the
+next start. Menu prompts update after a restart.
 
 ## Touch (Android)
 

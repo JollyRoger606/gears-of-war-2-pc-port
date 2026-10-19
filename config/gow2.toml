@@ -82,6 +82,9 @@ texture_replace = false
 # The keyboard and mouse act as an Xbox 360 controller, so every action works as on the console.
 # A real controller can be used at the same time.
 mnk_mode = true
+# While a level is played, keys and mouse buttons reach the game as keys (its own bindings) instead of through the
+# emulated pad; menus, the pause menu and cutscenes keep the pad emulation. Needs mnk_mode and a restart.
+# gow2_native_keys = true
 mnk_mouse = true
 mnk_sensitivity = 1.0
 

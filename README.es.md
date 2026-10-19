@@ -36,7 +36,7 @@ Read in English: [README.md](README.md)
 - [x] Paquetes de texturas: volcar las texturas del juego y cargar tus propias versiones en mayor resolución
 - [x] Puntería con el mouse por los ejes de mouse de PC del propio juego, sin zona muerta de stick (`gow2_mouse_aim`, activado por defecto)
 - [x] Reescalado temporal FSR 4 y FSR 3.1 (`gow2_temporal`, `gow2_upscaler`; apagado por defecto). La versión publicada no trae DLSS
-- [ ] Teclas que el juego reciba como en un PC (todavía pasan por un mando emulado)
+- [x] Teclas y botones del mouse que el juego recibe como en un PC mientras se juega un nivel (`gow2_native_keys`, parche SDK 0022); los menús, el menú de pausa y las escenas siguen pasando por el mando emulado
 - [ ] Campaña completa de principio a fin
 - [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15; Etapa 2 (cambios de capítulo, muertes, salida y reingreso, puntos de control y cinemáticas) verificada con cuatro copias en un mismo PC el 2026-10-16; un teléfono y un PC con 0.2.0 entraron al mismo lobby de System Link el 2026-10-16
 - [x] Juego por internet, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): un teléfono con datos móviles se unió a una campaña alojada en un PC a través de puertos abiertos por UPnP, verificado el 2026-10-15; todavía no se probó con un amigo en otro PC fuera de la red

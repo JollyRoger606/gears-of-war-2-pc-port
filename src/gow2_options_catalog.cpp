@@ -641,11 +641,11 @@ void AddKeybind(std::vector<Setting>& out, std::string_view id, std::string_view
       .label_en = en,
       .label_es = es,
       .help_en =
-          "Accept, then press the new key. Default restores the original keys. Menu prompts update "
-          "after a restart.",
+          "Accept, then press the new key. It works at once, in a level too. Default restores the "
+          "original keys. Menu prompts update after a restart.",
       .help_es =
-          "Acepta y pulsa la nueva tecla. Predeterminado restaura las teclas originales. Las "
-          "indicaciones de los menús cambian al reiniciar."});
+          "Acepta y pulsa la nueva tecla. Funciona al instante, también en un nivel. Predeterminado "
+          "restaura las teclas originales. Las indicaciones de los menús cambian al reiniciar."});
 }
 
 void AddKeybinds(std::vector<Setting>& out) {
