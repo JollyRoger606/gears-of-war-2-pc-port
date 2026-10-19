@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <optional>
 #include <vector>
 
@@ -36,6 +37,10 @@ REXCVAR_DEFINE_BOOL(gow2_ui_projection_fix, true, "Display",
                     "builds its canvas-to-screen projection with a distance that grows with the square of the "
                     "width, which shrinks every menu to (1280 / width) squared. The distance is put back at the "
                     "value that gives one canvas pixel one back buffer pixel.");
+
+REXCVAR_DEFINE_BOOL(gow2_ui_widen, true, "Display",
+                    "With widescreen on, stretch the full-width UI images (title and pause bars, backdrops), which the "
+                    "game authors 1280 pixels wide, to the whole picture.");
 
 namespace rex::glue {
 namespace {
@@ -155,6 +160,48 @@ void FixUiProjectionTick(const PPCContext& ctx, uint8_t* base) {
   };
   (void)guest_call::Guarded(fix);
 }
+
+// Full-width UI images (title and pause bars, backdrops) are authored 0 .. 1280 pixels wide: Position.Value[2]
+// (+68) of the UIImage is 1280. They are widened to the real canvas width. Position.bInvalidated[2] (+82) makes
+// the engine resolve the new value.
+void WidenUiImagesTick(const PPCContext& ctx, uint8_t* base) {
+  (void)ctx;
+  static uint32_t counter = 0;
+  static std::unordered_map<uint32_t, bool> is_image;  // class pointer -> class is UIImage
+  const int width = WidescreenBackBufferWidth();
+  if (width <= 1280 || !REXCVAR_GET(gow2_ui_widen)) return;
+  // Widgets appear when a scene opens: walk when the object table grew, and now and then for reused slots.
+  static uint32_t last_count = 0;
+  const uint32_t table = guest::LoadU32(base, kGObjObjects + 4);
+  const bool periodic = (counter++ % 120) == 0;
+  if (table == last_count && !periodic) return;
+  last_count = table;
+  auto walk = [&] {
+    const uint32_t objects = guest::LoadU32(base, kGObjObjects);
+    const uint32_t count = guest::LoadU32(base, kGObjObjects + 4);
+    if (objects == 0 || count > kMaxObjects) return;
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t object = guest::LoadU32(base, objects + 4 * i);
+      if (object == 0) continue;
+      const uint32_t cls = guest::LoadU32(base, object + kObjClass);
+      auto it = is_image.find(cls);
+      if (it == is_image.end()) it = is_image.emplace(cls, ClassNameOf(base, object) == "UIImage").first;
+      if (!it->second || FloatAt(base, object + 68) != 1280.0f ||
+          FloatAt(base, object + 60) != 0.0f)
+        continue;
+      StoreFloat(base, object + 68, float(width));
+      guest::StoreU8(base, object + 82, 1);
+      static std::atomic<int> logged{0};
+      if (logged.fetch_add(1) < 40)
+        REXLOG_INFO("WIDESCREEN UI image {} widened: L {:.0f} T {:.0f} R {:.0f}->{} B {:.0f} types {:08X}",
+                    ObjectName(base, object), FloatAt(base, object + 60), FloatAt(base, object + 64), 1280.0, width,
+                    FloatAt(base, object + 72), guest::LoadU32(base, object + 76));
+    }
+  };
+  (void)guest_call::Guarded(walk);
+}
+
+[[maybe_unused]] const bool kUiWidenRegistered = (AddEngineTickListener(&WidenUiImagesTick), true);
 
 [[maybe_unused]] const bool kUiTickRegistered = (AddEngineTickListener(&FixUiProjectionTick), true);
 

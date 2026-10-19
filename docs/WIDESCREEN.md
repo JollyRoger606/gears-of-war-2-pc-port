@@ -101,12 +101,18 @@ pitch at five widths (47, 42, 37 and 27 px at 1280, 1360, 1440 and 1680, matchin
 slide-out animation whose positions are pixels of the 1280-wide design; at 1680 wide the slide-out ends at x = 1280, still
 on screen, so the panel stays until the next toast. `src/gow2_toast.cpp` keeps it for `gow2_toast_seconds` (default 3, a
 0.4 s fade at the end) and then hides the scene through its opacity until the next toast; 0 keeps the game's own timing.
-At 16:9 it also shortens the toast (about 7 seconds before). In ultrawide the panel still sits at x = 1280 instead of the
-right edge. Reproduce with the dev verb `!alert 2 1` (see docs/TEST_TOOLING.md); `!ach <id>` shows the host's own
+At 16:9 it also shortens the toast (about 7 seconds before). A 0.25 s fade-in hides the slide-in, which also starts at
+x = 1280, in the middle of an ultrawide picture. The panel's resting place is a percentage of the UI's safe region, so it
+is where the game puts it at 16:9 (about half way across, not at the right edge). Reproduce with the dev verb `!alert 2 1` (see docs/TEST_TOOLING.md); `!ach <id>` shows the host's own
 "Achievement Unlocked" overlay, which was checked and times out normally (4.5 s).
 
-Still wrong at 1680 wide: some full-screen effects cover only the first 1280 pixels, with a hard edge: the pause menu's grey
-dimming of the picture (the right 24 % stays in colour) and a dark band at the top of the title screen.
+**Full-width bars and the pause dimming covered only the first 1280 pixels.** The title and pause bars, the pause menu's grey
+dimming and the main menu backdrop are `UIImage` widgets authored 0 .. 1280 pixels wide (`Position.Value[2]`, at +68 of the
+widget, is 1280.0; Left, at +60, is 0). `WidenUiImagesTick` in `src/gow2_widescreen.cpp` sets Right to the back buffer width
+and Position.bInvalidated[2] (+82) so the engine resolves it again. It walks the object table when it grew, and every 120
+ticks. Found by dumping the vertex constants of the title's solid-fill quads (the matrix maps 1280 canvas pixels to 76 % of
+1680) and then listing the UI objects holding a 1280.0 float. `gow2_ui_widen = false` turns it off. Not checked: other
+aspect ratios than 21:9, lobby and war-journal scenes.
 
 ## What does not work, or was not checked
 

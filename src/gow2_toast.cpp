@@ -34,6 +34,7 @@ constexpr uint32_t kSlotFree = 1568;
 constexpr uint32_t kActiveSlots = 1572;
 constexpr uint32_t kOpacity = 192;
 constexpr float kFadeSeconds = 0.4f;
+constexpr float kFadeInSeconds = 0.25f;  // hides the slide-in starting at x = 1280 in the middle of an ultrawide picture
 
 struct ToastState {
   uint32_t scene = 0;
@@ -58,7 +59,7 @@ void Apply(uint8_t* base, ToastState& st, float limit) {
   if (busy > 0) {
     const float age = std::chrono::duration<float>(now - st.started).count();
     const float fade_from = std::max(0.2f, limit - kFadeSeconds);
-    target = age < fade_from ? 1.0f : std::clamp((limit - age) / kFadeSeconds, 0.0f, 1.0f);
+    target = age < fade_from ? std::min(1.0f, age / kFadeInSeconds) : std::clamp((limit - age) / kFadeSeconds, 0.0f, 1.0f);
   }
   if (target == st.written) return;
   uint32_t bits;
@@ -71,14 +72,13 @@ void ToastTick(const PPCContext& ctx, uint8_t* base) {
   (void)ctx;
   static ToastState st;
   const float limit = float(std::clamp(REXCVAR_GET(gow2_toast_seconds), 0.0, 30.0));
-  if (limit <= 0.0f) return;
   if (st.scene == 0 || (st.counter % 120) == 0) {
     const uint32_t found = FindGuestObject(base, "GearUIScene_Toast", true);
     if (found != st.scene) st.written = -1.0f;
     st.scene = found;
   }
   ++st.counter;
-  if (st.scene == 0) return;
+  if (st.scene == 0 || limit <= 0.0f) return;
   auto body = [&] { Apply(base, st, limit); };
   if (!guest_call::Guarded(body)) st.scene = 0;
 }
