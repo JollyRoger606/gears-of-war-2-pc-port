@@ -69,7 +69,9 @@ gow2_dof_upscaling_fix = true      # depth of field without blur artifacts when 
 # The texture cache can hold more on PC than the console's budget.
 texture_cache_memory_limit_soft = 1024
 texture_cache_memory_limit_hard = 2048
-anisotropic_override = 4
+# Default is automatic: 8x on a dedicated GPU, 2x on an integrated one. To force a value,
+# uncomment the next line:
+# anisotropic_override = 4
 
 # Texture packs (README, "Texture packs"). Dumps go to textures\4D53082D\dump next to gow2.exe;
 # replacements are read from textures\4D53082D\replace (any size, full mip chain).

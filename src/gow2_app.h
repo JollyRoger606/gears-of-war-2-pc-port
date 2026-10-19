@@ -23,6 +23,7 @@
 #include "gow2_audio_volume.h"
 #include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
+#include "gow2_frame_stats.h"
 #include "gow2_gpu_pick.h"
 #include "gow2_machine_xuid.h"
 #include "gow2_mouse_aim.h"
@@ -36,7 +37,6 @@
 #if defined(__ANDROID__)
 #include "gow2_android_devices.h"
 #include "gow2_android_power.h"
-#include "gow2_frame_stats.h"
 #include "gow2_touch_controls.h"
 #endif
 
@@ -242,6 +242,12 @@ class Gow2App : public rex::ReXApp {
     if (gpu.index >= 0 && SetIfUnset("resolution_scale", gpu.integrated ? "1" : "2")) {
       REXLOG_INFO("gow2 resolution_scale -> {} ({}, set resolution_scale in gow2.toml to change)",
                   gpu.integrated ? 1 : 2, gpu.integrated ? "integrated GPU" : "dedicated GPU");
+    }
+    // Anisotropic filtering follows the GPU unless the player set anisotropic_override:
+    // 2x on an integrated GPU, 8x on a dedicated one.
+    if (gpu.index >= 0 && SetIfUnset("anisotropic_override", gpu.integrated ? "2" : "4")) {
+      REXLOG_INFO("gow2 anisotropic_override -> {} ({}, set anisotropic_override in gow2.toml to change)",
+                  gpu.integrated ? 2 : 4, gpu.integrated ? "integrated GPU" : "dedicated GPU");
     }
   }
 
@@ -452,8 +458,8 @@ class Gow2App : public rex::ReXApp {
   void OnPostSetup() override {
     rex::glue::InstallNativeMouseAim(window());
     rex::glue::InstallAudioVolume();
-#if defined(__ANDROID__)
     rex::glue::InstallFrameStats();
+#if defined(__ANDROID__)
     rex::glue::ApplySustainedPerformanceMode();
 #endif
   }

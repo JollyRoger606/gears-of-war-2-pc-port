@@ -301,8 +301,8 @@ void AddGraphicsUpscaling(std::vector<Setting>& out) {
       .platforms = kAllPlatforms,
       .label_en = "Anisotropic filtering",
       .label_es = "Filtrado anisotrópico",
-      .help_en = "Keeps floors and walls sharp at steep angles.",
-      .help_es = "Mantiene nítidos suelos y paredes vistos de lado.",
+      .help_en = "Keeps floors and walls sharp at steep angles. The default is automatic: 8x on a dedicated GPU, 2x on an integrated one.",
+      .help_es = "Mantiene nítidos suelos y paredes vistos de lado. El valor por defecto es automático: 8x con GPU dedicada, 2x con integrada.",
       .choices = {
           C("-1", "Game default", "El del juego"),
           C("0", "Off", "Apagado"),

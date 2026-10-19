@@ -25,6 +25,8 @@ set(GOW2_JNILIBS_DIR "${CMAKE_BINARY_DIR}/jniLibs" CACHE PATH
     "Where the libraries are staged for Gradle (<dir>/arm64-v8a)")
 set(GOW2_RECOMP_DEBUG_INFO "line-tables-only" CACHE STRING
     "Debug info for the recompiled code: line-tables-only, full or none")
+# Opt-in ThinLTO for the game library: -flto=thin plus the linker's ThinLTO cache in the build directory.
+option(GOW2_ANDROID_THINLTO "Enable ThinLTO for the libgow2 game library" OFF)
 
 if(NOT EXISTS "${GOW2_REXSDK_DIR}/CMakeLists.txt" OR
    NOT EXISTS "${GOW2_REXSDK_DIR}/include/rex/main_android.h")
@@ -159,6 +161,10 @@ target_link_options(gow2 PRIVATE -Wl,--no-undefined)
 set(GOW2_EXPORTS_MAP "${CMAKE_CURRENT_SOURCE_DIR}/libgow2.map")
 target_link_options(gow2 PRIVATE "-Wl,--version-script=${GOW2_EXPORTS_MAP}")
 set_property(TARGET gow2 APPEND PROPERTY LINK_DEPENDS "${GOW2_EXPORTS_MAP}")
+if(GOW2_ANDROID_THINLTO)
+    target_compile_options(gow2 PRIVATE -flto=thin)
+    target_link_options(gow2 PRIVATE -flto=thin "-Wl,--thinlto-cache-dir=${CMAKE_BINARY_DIR}/thinlto-cache")
+endif()
 rexglue_configure_target(gow2 GPU_PLUGINS xenos)
 
 #----------------------------------------------------------------------------------------------
