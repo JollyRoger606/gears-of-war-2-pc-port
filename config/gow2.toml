@@ -81,6 +81,9 @@ anisotropic_override = 4
 # digits also work on the keypad). Some in-engine scenes are not covered yet.
 # gow2_skip_cutscene = true
 # gow2_skip_cutscene_key = "9"
+# The Epic and Microsoft Game Studios logo videos at start-up are skipped (your game folder is not touched).
+# Set to false to see them. Takes effect on the next start.
+# gow2_skip_logos = true
 
 # ---------- Ultrawide ----------
 # Draw a really wider picture instead of 16:9 with bars: auto (the default: on when this PC's main display is

@@ -54,6 +54,11 @@ REXCVAR_DEFINE_BOOL(gow2_keycaps, true, "input",
 #else
 #define GOW2_SYSTEM_SETTINGS_DEFAULT ""
 #endif
+REXCVAR_DEFINE_BOOL(gow2_skip_logos, true, "Display",
+                    "Skip the Epic and Microsoft Game Studios logo videos at start-up (the start-up movie "
+                    "list is edited in a cached copy of the Coalesced bundles; the game folder is not "
+                    "touched). Takes effect on the next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_STRING(gow2_system_settings, GOW2_SYSTEM_SETTINGS_DEFAULT, "debug",
                       "Values for the game's own [SystemSettings] (Xe-GearEngine.ini in the "
                       "Coalesced bundles) as Key=Value pairs separated by ';', for example "
@@ -346,6 +351,13 @@ void AddPrompts(std::vector<Edit>* e, const CoalescedOptions& o) {
     e->push_back({Edit::kSet, kUI, "ControllerFont", kv.first, kv.second});
 }
 
+// The start-up movies the engine plays before the front end (Xe-GearEngine.ini, [FullScreenMovie]
+// StartupMovies): the Epic logo and the Microsoft Game Studios logo go; the loading movie stays.
+void AddSkipLogos(std::vector<Edit>* e) {
+  for (const char* movie : {"EpicLogo", "MGSLogo"})
+    e->push_back({Edit::kRemove, "Xe-GearEngine.ini", "FullScreenMovie", "StartupMovies", movie, "", "", false, false});
+}
+
 void AddSystemSettings(std::vector<Edit>* e, const CoalescedOptions& o) {
   for (const auto& kv : o.system_settings)
     e->push_back({Edit::kSet, "Xe-GearEngine.ini", "SystemSettings", kv.first, kv.second});
@@ -470,6 +482,10 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   if (!options.system_settings.empty()) {
     AddSystemSettings(&edits, options);
     groups += "system-settings ";
+  }
+  if (options.skip_logos) {
+    AddSkipLogos(&edits);
+    groups += "skip-logos ";
   }
   if (edits.empty()) return res;
 
@@ -707,6 +723,7 @@ CoalescedOptions CoalescedOptionsFromCvars() {
     o.native_bindings = NativeKeyBindings([](const char* name) { return rex::cvar::Query<std::string>(name); });
   }
   o.pc_options_entry = REXCVAR_GET(gow2_pc_options_entry) && HostUiHooksAvailable();
+  o.skip_logos = REXCVAR_GET(gow2_skip_logos);
   // "0", not "False": an edit that makes a bundle longer than its TOC size is not applied.
   if (!REXCVAR_GET(gow2_motion_blur)) o.system_settings.emplace_back("MotionBlur", "0");
   // Widescreen: the game's own resolution setting follows the back buffer it now builds (same digit

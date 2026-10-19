@@ -14,6 +14,7 @@
 //                     (cvar gow2_pc_options_entry, needs SDK patch 0013)
 //   native-keys  the keyboard's own engine bindings (cvar gow2_native_keys, src/gow2_native_keys.cpp)
 //   system-settings  the game's own [SystemSettings] values (gow2_motion_blur; gow2_system_settings, Android)
+//   skip-logos   the Epic and Microsoft Game Studios start-up videos are dropped (cvar gow2_skip_logos)
 #pragma once
 
 #include <filesystem>
@@ -30,6 +31,7 @@ struct CoalescedOptions {
   bool mouse_look = false;
   bool native_mouse = false;
   bool pc_options_entry = false;
+  bool skip_logos = false;
   // Keyboard bindings of the engine (cvar gow2_native_keys); empty leaves the game's bindings alone.
   std::vector<NativeBinding> native_bindings;
   // Key = a name in [ControllerFont] of GearGameUI ("Controller_A"), value = the label shown
