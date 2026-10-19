@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Santiago Quiroz Upegui and the gow2-recomp contributors
 // PC Options menu data: every row in on-screen order, plus the UI strings.
 #include "gow2_options_catalog.h"
+#include "gow2_graphics_quality.h"
 
 namespace rex::glue::options {
 namespace {
@@ -332,6 +333,71 @@ void AddGraphicsUpscaling(std::vector<Setting>& out) {
       }});
 }
 
+struct QualityLabel {
+  std::string_view key, en, es, help_en, help_es;
+};
+
+constexpr QualityLabel kQualityLabels[] = {
+    {"LightEnvironmentShadows", "Object shadows", "Sombras de objetos", "Shadows from characters and movable objects.", "Sombras de personajes y objetos móviles."},
+    {"DynamicShadows", "Dynamic shadows", "Sombras dinámicas", "Shadows that move with lights and objects.", "Sombras que se mueven con las luces y los objetos."},
+    {"DynamicLights", "Dynamic lights", "Luces dinámicas", "Lighting from moving and changing light sources.", "Iluminación de fuentes de luz móviles y cambiantes."},
+    {"CompositeDynamicLights", "Composite dynamic lights", "Luces dinámicas combinadas", "Combines dynamic lights for cheaper object lighting.", "Combina luces dinámicas para iluminar objetos con menor coste."},
+    {"Bloom", "Bloom", "Resplandor", "Glow around bright lights and highlights.", "Resplandor alrededor de luces y reflejos brillantes."},
+    {"UseHighQualityBloom", "High quality bloom", "Resplandor de alta calidad", "Uses the higher quality bloom filter.", "Usa el filtro de resplandor de mayor calidad."},
+    {"MotionBlur", "Motion blur", "Desenfoque de movimiento", "Blurs movement to soften rapid motion.", "Desenfoca los movimientos rápidos."},
+    {"DepthOfField", "Depth of field", "Profundidad de campo", "Blurs objects outside the camera's focus.", "Desenfoca los objetos fuera del foco de la cámara."},
+    {"AmbientOcclusion", "Ambient occlusion", "Oclusión ambiental", "Adds contact shading in corners and creases.", "Añade sombras de contacto en rincones y pliegues."},
+    {"LensFlares", "Lens flares", "Destellos de lente", "Camera glare from bright light sources.", "Destellos de cámara de las fuentes de luz brillantes."},
+    {"Distortion", "Distortion", "Distorsión", "Heat haze and other screen distortion effects.", "Ondas de calor y otros efectos de distorsión de pantalla."},
+    {"StaticDecals", "Static decals", "Calcomanías estáticas", "Surface details such as stains and marks on scenery.", "Detalles como manchas y marcas sobre el escenario."},
+    {"DynamicDecals", "Dynamic decals", "Calcomanías dinámicas", "Runtime surface marks such as bullet impacts.", "Marcas creadas durante el juego, como impactos de bala."},
+    {"FogVolumes", "Fog volumes", "Volúmenes de niebla", "Local fog volumes used by the game's environments.", "Volúmenes locales de niebla de los escenarios."},
+    {"SpeedTreeLeaves", "Tree leaves", "Hojas de árboles", "Draws leaves on SpeedTree vegetation.", "Dibuja las hojas de la vegetación SpeedTree."},
+    {"SpeedTreeFronds", "Tree fronds", "Frondas de árboles", "Draws fronds on SpeedTree vegetation.", "Dibuja las frondas de la vegetación SpeedTree."},
+    {"ShadowFilterQualityBias", "Shadow filter bias", "Sesgo del filtro de sombras", "Biases the game's shadow filter quality; lower is cheaper.", "Ajusta la calidad del filtro de sombras; menos cuesta menos."},
+    {"DetailMode", "World detail", "Detalle del mundo", "Controls detail objects; higher draws more detail.", "Controla los objetos de detalle; más alto dibuja más detalle."},
+    {"SkeletalMeshLODBias", "Character LOD bias", "Sesgo de detalle de personajes", "Higher values use simpler character meshes sooner.", "Valores mayores usan antes modelos de personajes más simples."},
+    {"ParticleLODBias", "Particle LOD bias", "Sesgo de detalle de partículas", "Higher values use simpler particle effects sooner.", "Valores mayores usan antes efectos de partículas más simples."},
+    {"FoliageDrawRadiusMultiplier", "Foliage draw radius", "Radio de dibujado de vegetación", "Scales how far foliage is drawn; higher costs more.", "Escala la distancia de dibujado de vegetación; más alto cuesta más."},
+    {"MaxShadowResolution", "Maximum shadow resolution", "Resolución máxima de sombras", "Caps shadow map resolution; higher gives sharper shadows.", "Limita la resolución de sombras; más alto da sombras más nítidas."},
+    {"ShadowTexelsPerPixel", "Shadow texels per pixel", "Texeles de sombra por píxel", "Shadow detail relative to screen pixels; higher costs more.", "Detalle de sombras relativo a los píxeles; más alto cuesta más."},
+    {"DecalCullDistanceScale", "Decal draw distance", "Distancia de dibujado de calcomanías", "Scales how far surface marks remain visible.", "Escala la distancia a la que siguen visibles las marcas."},
+};
+
+std::vector<Choice> QualityChoices(const graphics_quality::Setting& setting) {
+  std::vector<Choice> choices{C("auto", "Platform default", "Predeterminado de plataforma")};
+  for (const auto value : setting.choices) {
+    if (value == "auto") continue;
+    if (value == "on") choices.push_back(C(value, "On", "Encendido"));
+    else if (value == "off") choices.push_back(C(value, "Off", "Apagado"));
+    else choices.push_back(V(value));
+  }
+  return choices;
+}
+
+void AddGraphicsQuality(std::vector<Setting>& out) {
+  out.push_back(Setting{.id = "game_quality_group", .tab = Tab::kGraphics,
+      .kind = Kind::kInfo, .label_en = "Game quality", .label_es = "Calidad del juego"});
+  out.push_back(Setting{.id = "gow2_gfx_preset", .tab = Tab::kGraphics,
+      .kind = Kind::kChoice, .apply = Apply::kRestart,
+      .label_en = "Quality preset", .label_es = "Preajuste de calidad",
+      .help_en = "Sets game quality together; individual changes show Custom. Restart required. Raw engine settings take priority.",
+      .help_es = "Ajusta la calidad en conjunto; los cambios individuales muestran Personalizado. Requiere reiniciar. Los ajustes del motor tienen prioridad.",
+      .choices = {C("low", "Low", "Bajo"), C("medium", "Medium", "Medio"),
+                  C("high", "High (retail)", "Alto (original)"), C("custom", "Custom", "Personalizado")}});
+  for (const auto& setting : graphics_quality::Settings()) {
+    for (const auto& label : kQualityLabels) {
+      if (label.key != setting.key) continue;
+      out.push_back(Setting{.id = setting.id, .tab = Tab::kGraphics,
+          .kind = Kind::kChoice, .apply = Apply::kRestart,
+          .label_en = label.en, .label_es = label.es,
+          .help_en = label.help_en, .help_es = label.help_es,
+          .choices = QualityChoices(setting)});
+      break;
+    }
+  }
+}
+
 void AddGraphicsPatches(std::vector<Setting>& out) {
   out.push_back(Setting{
       .id = "gow2_black_shading_fix",
@@ -423,13 +489,13 @@ void AddGraphicsPatches(std::vector<Setting>& out) {
       .tab = Tab::kGraphics,
       .kind = Kind::kText,
       .apply = Apply::kRestart,
-      .platforms = kAndroid,
+      .platforms = kAllPlatforms,
       .advanced = true,
       .label_en = "Engine settings",
       .label_es = "Ajustes del motor",
-      .help_en = "The game's own [SystemSettings], e.g. LightEnvironmentShadows=0;DynamicShadows=0.",
+      .help_en = "Overrides Game quality rows with raw [SystemSettings], e.g. LightEnvironmentShadows=0;DynamicShadows=0.",
       .help_es =
-          "Los [SystemSettings] del propio juego, p. ej. LightEnvironmentShadows=0;DynamicShadows=0.",
+          "Sobrescribe Calidad del juego con [SystemSettings], p. ej. LightEnvironmentShadows=0;DynamicShadows=0.",
       .max_length = 200});
 }
 
@@ -1165,6 +1231,7 @@ std::vector<Setting> BuildCatalog() {
   AddDisplay(out);
   AddGraphicsUpscaling(out);
   AddGraphicsPatches(out);
+  AddGraphicsQuality(out);
   AddControls(out);
   AddKeybinds(out);
   AddTouch(out);

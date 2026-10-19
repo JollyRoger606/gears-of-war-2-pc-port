@@ -268,10 +268,15 @@ shadows removed it; the narrower shadow comparison was:
 | LightEnvironmentShadows=0 | 17.9 | 12.3 | Normal |
 | Both off | 17.9 | 12.3 | Normal |
 
-F3 defaults to `LightEnvironmentShadows=0` on Android because it removes the white objects while
-keeping the world's dynamic shadows. Setting `gow2_system_settings` replaces that default;
-include this pair in a custom value to keep it. Use `0`, not `False`, to avoid growing a
-Coalesced bundle past its TOC size. The Vulkan backend or driver cause remains open.
+F3 defaulted to `LightEnvironmentShadows=0` on Android because it removes the white objects while
+keeping the world's dynamic shadows. In that build, setting `gow2_system_settings` replaced the
+default. The Vulkan backend or driver cause remains open.
+
+Current behavior (2026-10-19): `gow2_gfx_light_environment_shadows = "auto"` keeps
+object shadows off on Android; the raw `gow2_system_settings` default is now empty.
+Raw pairs override the composed platform defaults and quality rows, without removing
+unrelated defaults. Recognized booleans use short `0`/`1` values to avoid bundle growth.
+See [SYSTEM_SETTINGS.md](SYSTEM_SETTINGS.md).
 
 P8/C3 confirmed the panel at 30 Hz with FIFO and `present_android_frame_rate = 30`:
 `ANativeWindow_setFrameRate(30 Hz) returned 0`, SurfaceFlinger reported `vsyncRate=30.00 Hz` and
@@ -468,7 +473,8 @@ The APK from `scripts\build-android.ps1 -LowPriority` at this commit (or later) 
   | `vulkan_android_invariant_position_member` | false | `gl_Position` also gets the `Invariant` member decoration glslang emits (restart) |
   | `vulkan_occlusion_query_precise` | false | Occlusion queries ask for exact sample counts (`VK_QUERY_CONTROL_PRECISE_BIT`) |
   | `vulkan_async_pipeline_placeholders` | true | false: new pipelines are queued without first building a placeholder on the GPU command thread, and pipelines without a pixel shader are built in the background too |
-  | `gow2_system_settings` | "LightEnvironmentShadows=0" | Android default removes the white objects; `Key=Value` pairs separated by `;` for the game's own `[SystemSettings]` (`Xe-GearEngine.ini`); setting this key replaces the default, so include `LightEnvironmentShadows=0` to keep it; use `0` for false (restart) |
+  | `gow2_system_settings` | "" | Advanced `Key=Value` pairs separated by `;` for `[SystemSettings]` in `Xe-GearEngine.ini`; raw pairs override the composed platform defaults and quality rows; recognized booleans become `0`/`1` (restart) |
+  | `gow2_gfx_light_environment_shadows` | "auto" | Platform default: object shadows off on Android, retail on Windows; `on` / `off` explicitly override it (restart) |
   | `clear_memory_page_state` | false on Android | true re-uploads every CPU-written page at each frame end (the SDK's default elsewhere); halves the frame rate here |
   | `vulkan_android_depth_experiment` | 0 | Diagnostic bits, each drawing the scene wrongly: 1 color draws without depth writes pass the depth test, 2 skip every depth-only draw on the float24 depth (the prepass and its depth clears), 4 stencil off for color draws, 8 whole-target scissor, 16 scene draws that pass the depth test painted magenta, 32 face culling off, 64 no user clip planes or vertex kill, 128 skip the prepass meshes but keep the depth clears (rectangle lists), 256 every color draw with a pixel shader on the float24 depth passes the depth test (depth writers too), 512 skip the depth clear rectangles drawn after the frame's first prepass mesh (#575-class; #0 stays), 1024 depth-only draws on the float24 depth with color target 0 bound write magenta (restart) |
   | `vulkan_android_color_depth_bias` | 16 on Qualcomm, 0 otherwise | Unless set, 16 on Qualcomm GPUs (Vulkan vendor ID `0x5143`) and 0 on others, added to the depth bias of color draws with a pixel shader on float24 depth that test GREATER or GEQUAL; 16 units are 16 float32 ULPs of the D32 host depth (float24 is hosted as `D32_SFLOAT_S8_UINT`), about 2 float24 steps, against a measured prepass/base-pass mismatch of up to about one float24 step; fixes the black regions while keeping the prepass, early depth rejection and depth for later passes; 0 turns it off (restart) |

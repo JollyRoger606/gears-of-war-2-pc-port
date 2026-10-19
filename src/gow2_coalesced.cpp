@@ -3,6 +3,7 @@
 
 #include "gow2_coalesced.h"
 #include "gow2_coalesced_text.h"
+#include "gow2_graphics_quality.h"
 
 #include "gow2_mouse_aim.h"
 
@@ -39,19 +40,108 @@
 REXCVAR_DEFINE_STRING(gow2_prompts, "auto", "input", GOW2_PROMPTS_HELP);
 #undef GOW2_PROMPTS_HELP
 
-#if defined(__ANDROID__)
-// Default measured on the S25 Ultra (docs/ANDROID_EXPERIMENTS.md, October 15 second session).
-REXCVAR_DEFINE_STRING(gow2_system_settings, "LightEnvironmentShadows=0", "debug",
-                      "Values for the game's own [SystemSettings] (Xe-GearEngine.ini in the "
-                      "Coalesced bundles) as Key=Value pairs separated by ';', for example "
-                      "AmbientOcclusion=0;MotionBlur=0. Only keys the bundle has are changed, in a "
-                      "cached copy prepared at launch; an edit that makes a bundle longer than its "
-                      "TOC size is not applied, so write 0 rather than False. The Android default "
-                      "turns off light environment shadows, which draw some lit objects solid "
-                      "white on the Adreno 830 and cost about a quarter of the GPU frame there; "
-                      "setting this replaces the default, and \"\" keeps the game's values")
+REXCVAR_DEFINE_STRING(gow2_system_settings, "", "debug",
+                      "Raw engine [SystemSettings] Key=Value pairs separated by ';'. Overrides "
+                      "Game quality rows and platform defaults. Only existing keys are changed; "
+                      "oversized edits keep the retail engine settings.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-#endif
+
+REXCVAR_DEFINE_STRING(gow2_gfx_light_environment_shadows, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_dynamic_shadows, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_dynamic_lights, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_composite_dynamic_lights, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_bloom, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_use_high_quality_bloom, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_motion_blur, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_depth_of_field, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_ambient_occlusion, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_lens_flares, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_distortion, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_static_decals, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_dynamic_decals, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_fog_volumes, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_speed_tree_leaves, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_speed_tree_fronds, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "on", "off"});
+REXCVAR_DEFINE_STRING(gow2_gfx_shadow_filter_quality_bias, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "-1", "0", "1"});
+REXCVAR_DEFINE_STRING(gow2_gfx_detail_mode, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "0", "1", "2"});
+REXCVAR_DEFINE_STRING(gow2_gfx_skeletal_mesh_lod_bias, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "0", "1", "2"});
+REXCVAR_DEFINE_STRING(gow2_gfx_particle_lod_bias, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "0", "1", "2"});
+REXCVAR_DEFINE_STRING(gow2_gfx_foliage_draw_radius_multiplier, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "0.25", "0.5", "1.000000"});
+REXCVAR_DEFINE_STRING(gow2_gfx_max_shadow_resolution, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "256", "512", "800"});
+REXCVAR_DEFINE_STRING(gow2_gfx_shadow_texels_per_pixel, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "0.5", "1", "1.27324"});
+REXCVAR_DEFINE_STRING(gow2_gfx_decal_cull_distance_scale, "auto", "graphics",
+                      "Game quality: auto keeps the platform default; changed at next start.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart)
+    .allowed({"auto", "0.4", "0.7", "1.0"});
 
 REXCVAR_DEFINE_BOOL(gow2_pc_options_entry, true, "UI",
                     "The game's Options > Storage Location button opens the port's PC Options "
@@ -61,7 +151,7 @@ namespace rex::glue {
 
 namespace {
 
-constexpr int kVersion = 8;  // bump when the edit definitions change (invalidates cached copies)
+constexpr int kVersion = 9;  // bump when the edit definitions change (invalidates cached copies)
 
 // Bundle layout: BE u32 file count; per file a name, BE u32 section count; per section a name and
 // BE u32 key count; per key a key and a value. Strings are a BE int32 length, negative = UTF-16LE
@@ -207,9 +297,7 @@ std::unordered_map<std::string, uint64_t> ReadTocFileSizes(const std::filesystem
 // in FBufferReaderWithSHA). A served file of that exact size keeps the read and the hash right; the
 // parser is count driven, so the zero padding is never read as data. A longer edit cannot be served.
 bool PadToSize(std::vector<uint8_t>* bytes, uint64_t size) {
-  if (bytes->size() > size) return false;
-  bytes->resize(size_t(size), 0);
-  return true;
+  return graphics_quality::PadBundleToSize(bytes, size);
 }
 
 std::u16string W(const std::string& s) {
@@ -272,6 +360,7 @@ struct Edit {
   std::string locale;   // only bundles with this locale apply the edit (empty = every locale)
   bool optional = false;
   bool pc_options_entry = false;
+  bool system_settings = false;
 };
 
 const char* const kUI = "GearGameUI.int";
@@ -316,12 +405,10 @@ void AddPrompts(std::vector<Edit>* e, const CoalescedOptions& o) {
     e->push_back({Edit::kSet, kUI, "ControllerFont", kv.first, kv.second});
 }
 
-#if defined(__ANDROID__)
 void AddSystemSettings(std::vector<Edit>* e, const CoalescedOptions& o) {
   for (const auto& kv : o.system_settings)
-    e->push_back({Edit::kSet, "Xe-GearEngine.ini", "SystemSettings", kv.first, kv.second});
+    e->push_back({Edit::kSet, "Xe-GearEngine.ini", "SystemSettings", kv.first, kv.second, "", "", false, false, true});
 }
-#endif
 
 uint64_t Fnv(const std::string& s, uint64_t h = 1469598103934665603ull) {
   for (unsigned char c : s) {
@@ -332,11 +419,13 @@ uint64_t Fnv(const std::string& s, uint64_t h = 1469598103934665603ull) {
 }
 
 int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std::u16string& locale,
-          bool include_optional = true, bool include_pc_options_entry = true) {
+          bool include_optional = true, bool include_pc_options_entry = true,
+          bool include_system_settings = true) {
   int changed = 0;
   for (const Edit& ed : edits) {
     if (ed.optional && !include_optional) continue;
     if (ed.pc_options_entry && !include_pc_options_entry) continue;
+    if (ed.system_settings && !include_system_settings) continue;
     if (!ed.locale.empty() && !EqFold(locale, ed.locale)) continue;
     for (IniFile& f : *files) {
       if (!FileMatches(f.name, ed.file, locale)) continue;
@@ -375,10 +464,11 @@ int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std
 bool RebuildWithoutOptionalEdits(const std::vector<uint8_t>& bytes, const std::vector<Edit>& edits,
                                  const std::u16string& locale, uint64_t size,
                                  std::vector<uint8_t>* patched, int* changed,
-                                 bool include_pc_options_entry = true) {
+                                 bool include_pc_options_entry = true,
+                                 bool include_system_settings = true) {
   std::vector<IniFile> files;
   if (!Parse(bytes, &files)) return false;
-  *changed = Apply(&files, edits, locale, false, include_pc_options_entry);
+  *changed = Apply(&files, edits, locale, false, include_pc_options_entry, include_system_settings);
   *patched = Serialize(files);
   return PadToSize(patched, size);
 }
@@ -412,12 +502,10 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     AddPcOptionsEntry(&edits);
     groups += "pc-options-entry ";
   }
-#if defined(__ANDROID__)
   if (!options.system_settings.empty()) {
     AddSystemSettings(&edits, options);
     groups += "system-settings ";
   }
-#endif
   if (edits.empty()) return res;
 
   uint64_t h = Fnv("v" + std::to_string(kVersion));
@@ -436,6 +524,7 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   int files_done = 0, values = 0, reused = 0, unreadable = 0, unmatched = 0, too_long = 0;
   int without_optional = 0;
   int without_menu_entry = 0;
+  int without_system_settings = 0;
   for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
     const std::filesystem::path src = it->path();
     const std::string name = src.filename().string();
@@ -455,12 +544,13 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     bool fresh = false;
     bool omitted_optional = false;
     bool omitted_menu_entry = false;
+    bool omitted_system_settings = false;
     if (std::filesystem::exists(dst, ec)) {
       std::ifstream sf(stamp_path);
       std::string have;
       std::getline(sf, have);
       fresh = (have == stamp);
-      if (fresh) sf >> omitted_optional >> omitted_menu_entry;
+      if (fresh) sf >> omitted_optional >> omitted_menu_entry >> omitted_system_settings;
     }
     if (fresh) {
       ++reused;
@@ -488,6 +578,15 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
           fits = RebuildWithoutOptionalEdits(bytes, edits, locale, target_size, &patched, &changed,
                                              false);
         }
+        if (!fits && !options.system_settings.empty()) {
+          omitted_system_settings = true;
+          fits = graphics_quality::PadOrKeepRetail(&patched, target_size, [&] {
+            std::vector<uint8_t> retail;
+            RebuildWithoutOptionalEdits(bytes, edits, locale, target_size, &retail, &changed,
+                                       !omitted_menu_entry, false);
+            return retail;
+          });
+        }
         if (!fits) {
           ++too_long;
           continue;
@@ -500,12 +599,13 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
         if (!of) continue;
       }
       std::ofstream sf(stamp_path, std::ios::trunc);
-      sf << stamp << "\n" << omitted_optional << " " << omitted_menu_entry << "\n";
+      sf << stamp << "\n" << omitted_optional << " " << omitted_menu_entry << " " << omitted_system_settings << "\n";
       values += changed;
     }
     ++files_done;
     if (omitted_optional) ++without_optional;
     if (omitted_menu_entry) ++without_menu_entry;
+    if (omitted_system_settings) ++without_system_settings;
     if (!res.overrides.empty()) res.overrides += ";";
     res.overrides += "GearGame/CookedXenon/" + name + "=" + dst.string();
     HashSecEntry entry;
@@ -536,6 +636,9 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
     res.summary += " (" + std::to_string(without_optional) + " without optional descriptions)";
   if (without_menu_entry > 0)
     res.summary += " (" + std::to_string(without_menu_entry) + " without the menu entry)";
+  if (without_system_settings > 0)
+    res.summary += " (" + std::to_string(without_system_settings) +
+                   " without system settings: longer than their TOC size; retail values retained)";
   return res;
 }
 
@@ -617,31 +720,6 @@ std::string KeybindLabel(const char* name, const char* fallback) {
   return "[" + FriendlyKeyName(FirstKey(v)) + "]";
 }
 
-#if defined(__ANDROID__)
-std::string TrimSpaces(const std::string& s) {
-  const size_t first = s.find_first_not_of(" \t");
-  if (first == std::string::npos) return {};
-  const size_t last = s.find_last_not_of(" \t");
-  return s.substr(first, last - first + 1);
-}
-
-// "A=1; B = 2;;C" -> {A,1}, {B,2}; items without '=' or with an empty key are dropped.
-std::vector<std::pair<std::string, std::string>> ParseSettingList(const std::string& list) {
-  std::vector<std::pair<std::string, std::string>> settings;
-  size_t start = 0;
-  while (start <= list.size()) {
-    const size_t end = std::min(list.find(';', start), list.size());
-    const std::string item = list.substr(start, end - start);
-    const size_t eq = item.find('=');
-    const std::string key = TrimSpaces(item.substr(0, eq));
-    if (eq != std::string::npos && !key.empty()) {
-      settings.emplace_back(key, TrimSpaces(item.substr(eq + 1)));
-    }
-    start = end + 1;
-  }
-  return settings;
-}
-#endif
 
 }  // namespace
 
@@ -655,8 +733,13 @@ CoalescedOptions CoalescedOptionsFromCvars() {
   o.native_mouse = NativeMouseAimWanted();
   o.pc_options_entry = REXCVAR_GET(gow2_pc_options_entry) && HostUiHooksAvailable();
 #if defined(__ANDROID__)
-  o.system_settings = ParseSettingList(REXCVAR_GET(gow2_system_settings));
+  constexpr bool android = true;
+#else
+  constexpr bool android = false;
 #endif
+  o.system_settings = graphics_quality::Compose(android, [](std::string_view id) {
+    return rex::cvar::Query<std::string>(id);
+  }, REXCVAR_GET(gow2_system_settings));
   const std::string mode = REXCVAR_GET(gow2_prompts);
   const bool keyboard = mode == "keyboard" || (mode != "controller" && AutoPromptsUseKeyboard());
   if (!keyboard) return o;

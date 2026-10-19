@@ -668,6 +668,10 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
   }
 
   void DrawRow(const RowView& row, int index) {
+    if (row.setting->id == "game_quality_group") {
+      DrawQualityHeading(*row.setting);
+      return;
+    }
     const ImVec2 pos = ImGui::GetCursorScreenPos();
     const float row_height = std::max(44.f,.066f*h_);
     const float row_width = ImGui::GetContentRegionAvail().x;
@@ -714,6 +718,18 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     ImGui::Dummy({row_width,0});
     if (row.selected && scroll_selection_) ImGui::SetScrollHereY(.5f);
     ImGui::PopID();
+  }
+
+  void DrawQualityHeading(const Setting& setting) {
+    const auto pos = ImGui::GetCursorScreenPos();
+    const auto width = ImGui::GetContentRegionAvail().x;
+    const float height = std::max(38.f, .05f * h_);
+    const float inset = .022f * h_;
+    DrawText({pos.x + inset, pos.y + .012f * h_}, Label(setting, context_.ctx.lang),
+             .026f * h_, IM_COL32_WHITE);
+    ImGui::GetWindowDrawList()->AddLine({pos.x + inset, pos.y + height - 2},
+        {pos.x + width - inset, pos.y + height - 2}, kGray);
+    ImGui::Dummy({width, height});
   }
 
   void DrawSelection(ImVec2 pos, ImVec2 size) {

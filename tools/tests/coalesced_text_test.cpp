@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Santiago Quiroz Upegui and the gow2-recomp contributors
 // Host-side test of the Coalesced UTF-8 conversion and locale text (no game data, no SDK).
 #include "gow2_coalesced_text.h"
+#include "gow2_graphics_quality.h"
+#include <unordered_map>
 
 #include <cstdio>
 #include <string>
@@ -140,7 +142,77 @@ void TestLocalizedConversion(bool android) {
   }
 }
 
+void TestGraphicsQuality() {
+  namespace quality = rex::glue::graphics_quality;
+  std::unordered_map<std::string, std::string> values;
+  const auto read = [&](std::string_view id) {
+    const auto found = values.find(std::string(id));
+    return found == values.end() ? std::string("auto") : found->second;
+  };
+  Expect(quality::Settings().size() == 24, "quality metadata includes 24 retail keys");
+  Expect(quality::Compose(false, read, "").empty(), "PC auto leaves every retail value unchanged");
+  Expect(quality::Compose(true, read, "") == quality::Pairs{{"LightEnvironmentShadows", "0"}},
+         "Android auto disables only object shadows");
+  Expect(quality::DetectPreset(read) == "high", "PC default is retail high");
+  Expect(quality::DetectPreset(read, true) == "custom", "Android default is distinct from high");
+  values["gow2_gfx_light_environment_shadows"] = "on";
+  values["gow2_gfx_bloom"] = "off";
+  Expect(quality::Compose(true, read, "") == quality::Pairs{{"LightEnvironmentShadows", "1"}, {"Bloom", "0"}},
+         "explicit rows override platform defaults with shortest booleans");
+  const auto raw = quality::Compose(true, read,
+      " bloom = True ; LIGHTENVIRONMENTSHADOWS=False; Bloom=off;Invalid; =3;UseVsync=TRUE");
+  Expect(raw == quality::Pairs{{"LightEnvironmentShadows", "0"}, {"Bloom", "0"}, {"UseVsync", "1"}},
+         "raw overrides explicit rows case insensitively and last pair wins");
+  Expect(quality::EngineValue("bEnableVSMShadows", "False") == "0",
+         "raw boolean keys outside menu use shortest false value");
+  Expect(quality::EngineValue("OtherKey", "True") == "True", "unknown raw keys stay verbatim");
+  values["gow2_gfx_bloom"] = "invalid";
+  Expect(quality::Compose(false, read, "") == quality::Pairs{{"LightEnvironmentShadows", "1"}},
+         "invalid fixed-choice rows are ignored");
+  for (std::string_view preset : {"low", "medium", "high"}) {
+    for (const auto& setting : quality::Settings()) {
+      const std::string value = quality::PresetValue(setting, preset);
+      Expect(std::find(setting.choices.begin(), setting.choices.end(), value) != setting.choices.end(),
+             "preset uses a supported explicit row value");
+      values[std::string(setting.id)] = value;
+    }
+    Expect(quality::DetectPreset(read) == preset, "preset detection round trips explicit rows");
+    const auto composed = quality::Compose(true, read, "");
+    Expect(composed.size() == quality::Settings().size(), "preset explicitly sets all quality keys");
+    if (preset == "high")
+      Expect(composed.front().second == "1", "high overrides Android object-shadow workaround");
+    values["gow2_gfx_motion_blur"] = "auto";
+    Expect(quality::DetectPreset(read) == "custom", "individual edit switches preset to Custom");
+  }
+}
+
+void TestBundleSizeFallback() {
+  namespace quality = rex::glue::graphics_quality;
+  std::vector<uint8_t> bytes{1, 2};
+  Expect(quality::PadBundleToSize(&bytes, 4) && bytes == std::vector<uint8_t>({1, 2, 0, 0}),
+         "short bundle pads to exact TOC size with zero bytes");
+  Expect(quality::PadBundleToSize(&bytes, 4), "exact-size bundle is accepted");
+  Expect(!quality::PadBundleToSize(&bytes, 3) && bytes.size() == 4,
+         "oversized bundle is rejected without truncation");
+  int rebuilt = 0;
+  Expect(quality::PadOrKeepRetail(&bytes, 4, [&] {
+    ++rebuilt;
+    return std::vector<uint8_t>{9};
+  }) && rebuilt == 0, "fitting edit does not rebuild retail settings");
+  Expect(quality::PadOrKeepRetail(&bytes, 3, [&] {
+    ++rebuilt;
+    return std::vector<uint8_t>{9, 8};
+  }) && rebuilt == 1 && bytes == std::vector<uint8_t>({9, 8, 0}),
+         "production growth fallback serves retail settings padded to TOC size");
+  const auto before = bytes;
+  Expect(!quality::PadOrKeepRetail(&bytes, 1, [] {
+    return std::vector<uint8_t>{7, 6};
+  }) && bytes == before, "even oversized retail rebuild is rejected without corrupting bytes");
+}
+
 int main() {
+  TestGraphicsQuality();
+  TestBundleSizeFallback();
   TestUtf8();
   TestLocales(false);
   TestLocales(true);

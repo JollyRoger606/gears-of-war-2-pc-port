@@ -66,7 +66,10 @@ std::string StepNumber(const Setting& s, std::string_view current, int direction
 }
 
 std::string StepChoice(const Setting& s, std::string_view current, int direction, const Context& ctx) {
-  const auto choices = ChoicesOf(s, ctx);
+  auto choices = ChoicesOf(s, ctx);
+  if (s.id == "gow2_gfx_preset") {
+    std::erase_if(choices, [](const Choice& choice) { return choice.value == "custom"; });
+  }
   if (choices.empty()) return std::string(current);
   const auto found = std::find_if(choices.begin(), choices.end(),
                                 [current](const Choice& c) { return c.value == current; });
@@ -138,11 +141,23 @@ const Setting* FindRow(const std::vector<Setting>& catalog, std::string_view id)
   return found == catalog.end() ? nullptr : &*found;
 }
 
-bool SetValue(State& state, std::string_view id, std::string_view value, Values& values) {
-  if (!values.Set(id, value)) return false;
+void TrackChangedValue(State& state, std::string_view id, const Values& values) {
   const std::string owned_id(id);
   if (values.Get(id) != state.opened[owned_id]) state.touched.insert(owned_id);
   else state.touched.erase(owned_id);
+}
+
+void TrackQualityChanges(State& state, const Values& values) {
+  for (const auto& [quality_id, original] : state.opened) {
+    if (!quality_id.starts_with("gow2_gfx_") || quality_id == "gow2_gfx_preset") continue;
+    TrackChangedValue(state, quality_id, values);
+  }
+}
+
+bool SetValue(State& state, std::string_view id, std::string_view value, Values& values) {
+  if (!values.Set(id, value)) return false;
+  if (id != "gow2_gfx_preset") TrackChangedValue(state, id, values);
+  TrackQualityChanges(state, values);
   return true;
 }
 
@@ -150,9 +165,10 @@ Outcome ChangeValue(State& state, const Setting& s, std::string_view value,
                     const std::vector<Setting>& catalog, Values& values, const Context& ctx) {
   const std::string id(s.id);
   const auto previous = values.Get(id);
+  const auto previously_touched = state.touched;
   if (!SetValue(state, id, value, values)) return {};
   ValidateSelection(state, catalog, values, ctx);
-  if (values.Get(id) == previous) return {};
+  if (values.Get(id) == previous && state.touched == previously_touched) return {};
   return {Outcome::Kind::kChanged, id};
 }
 
@@ -406,6 +422,7 @@ bool CommitKey(State& state, std::string_view id, std::string_view key,
 
 void MarkSaved(State& state, const std::vector<Setting>&, const Values& values) {
   for (const auto& id : state.touched) state.opened[id] = values.Get(id);
+  if (state.opened.contains("gow2_gfx_preset")) state.opened["gow2_gfx_preset"] = values.Get("gow2_gfx_preset");
   state.touched.clear();
 }
 

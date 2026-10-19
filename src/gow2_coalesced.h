@@ -12,7 +12,7 @@
 //   key-prompts  menu prompts show keyboard labels ([Space], [LMB]...) (cvar gow2_prompts)
 //   pc-options-entry  Options > Storage Location becomes the PC Options entry
 //                     (cvar gow2_pc_options_entry, needs SDK patch 0013)
-//   system-settings  the game's own [SystemSettings] values (cvar gow2_system_settings, Android)
+//   system-settings  the game's own [SystemSettings] values (Game quality cvars and gow2_system_settings)
 #pragma once
 
 #include <filesystem>
@@ -31,11 +31,9 @@ struct CoalescedOptions {
   // Key = a name in [ControllerFont] of GearGameUI ("Controller_A"), value = the label shown
   // ("[Space]"). Empty means "leave the pad glyphs alone".
   std::vector<std::pair<std::string, std::string>> prompt_labels;
-#if defined(__ANDROID__)
   // Key = a name in [SystemSettings] of Xe-GearEngine.ini ("AmbientOcclusion"), value = its new
   // value ("False"). Empty means "leave the game's settings alone".
   std::vector<std::pair<std::string, std::string>> system_settings;
-#endif
 };
 
 struct CoalescedResult {

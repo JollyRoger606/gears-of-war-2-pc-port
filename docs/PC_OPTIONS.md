@@ -107,7 +107,56 @@ Defaults keep the original game and crossplay working.
 | Texture packs | `texture_replace` | on, off | restart | Windows |
 | Dump textures | `texture_dump` | on, off (advanced) | restart | Windows |
 | Sustained performance | `gow2_android_sustained_performance` | on, off | restart | Android |
-| Engine settings | `gow2_system_settings` | text (advanced) | restart | Android |
+| Engine settings | `gow2_system_settings` | text (advanced) | restart | both |
+
+
+### Game quality
+
+Graphics includes **Game quality** (**Calidad del juego**) on Windows and Android.
+The **Quality preset** row offers Low / Medium / High (retail) / Custom. Low
+reduces optional effects and shadow/detail settings; Medium is intermediate;
+High sets all 24 controls to retail values. Individual changes display Custom
+when they no longer match a preset. Each row needs a restart. These new rows
+have host-test coverage; the earlier in-game checks at the top of this page do
+not validate the new quality controls or their visual/performance effects.
+
+| Row | Key | Values | Applies | Platforms |
+|---|---|---|---|---|
+| Quality preset | menu action over the 24 keys below | Low, Medium, High (retail), Custom | restart | both |
+| Object shadows | `gow2_gfx_light_environment_shadows` | auto, on, off | restart | both |
+| Dynamic shadows | `gow2_gfx_dynamic_shadows` | auto, on, off | restart | both |
+| Dynamic lights | `gow2_gfx_dynamic_lights` | auto, on, off | restart | both |
+| Composite dynamic lights | `gow2_gfx_composite_dynamic_lights` | auto, on, off | restart | both |
+| Bloom | `gow2_gfx_bloom` | auto, on, off | restart | both |
+| High quality bloom | `gow2_gfx_use_high_quality_bloom` | auto, on, off | restart | both |
+| Motion blur | `gow2_gfx_motion_blur` | auto, on, off | restart | both |
+| Depth of field | `gow2_gfx_depth_of_field` | auto, on, off | restart | both |
+| Ambient occlusion | `gow2_gfx_ambient_occlusion` | auto, on, off | restart | both |
+| Lens flares | `gow2_gfx_lens_flares` | auto, on, off | restart | both |
+| Distortion | `gow2_gfx_distortion` | auto, on, off | restart | both |
+| Static decals | `gow2_gfx_static_decals` | auto, on, off | restart | both |
+| Dynamic decals | `gow2_gfx_dynamic_decals` | auto, on, off | restart | both |
+| Fog volumes | `gow2_gfx_fog_volumes` | auto, on, off | restart | both |
+| Tree leaves | `gow2_gfx_speed_tree_leaves` | auto, on, off | restart | both |
+| Tree fronds | `gow2_gfx_speed_tree_fronds` | auto, on, off | restart | both |
+| Shadow filter bias | `gow2_gfx_shadow_filter_quality_bias` | auto, -1, 0, 1 | restart | both |
+| World detail | `gow2_gfx_detail_mode` | auto, 0, 1, 2 | restart | both |
+| Character LOD bias | `gow2_gfx_skeletal_mesh_lod_bias` | auto, 0, 1, 2 | restart | both |
+| Particle LOD bias | `gow2_gfx_particle_lod_bias` | auto, 0, 1, 2 | restart | both |
+| Foliage draw radius | `gow2_gfx_foliage_draw_radius_multiplier` | auto, 0.25, 0.5, 1.000000 | restart | both |
+| Maximum shadow resolution | `gow2_gfx_max_shadow_resolution` | auto, 256, 512, 800 | restart | both |
+| Shadow texels per pixel | `gow2_gfx_shadow_texels_per_pixel` | auto, 0.5, 1, 1.27324 | restart | both |
+| Decal draw distance | `gow2_gfx_decal_cull_distance_scale` | auto, 0.4, 0.7, 1.0 | restart | both |
+
+`auto` keeps platform defaults: Windows retains retail quality; Android disables
+Object shadows only. High explicitly enables Object shadows on Android. The
+advanced Engine settings row (`gow2_system_settings`, empty by default) applies
+last, so existing raw `Key=Value;OtherKey=Value` pairs override quality rows and
+presets. Clear conflicting raw pairs to give control to the menu. Quality cvars
+are strings in TOML, including numbers (e.g. `gow2_gfx_detail_mode = "1"`).
+
+See [SYSTEM_SETTINGS.md](SYSTEM_SETTINGS.md) for the complete 76-key retail
+inventory, every preset value, scope of verification, and the bundle size rule.
 
 ## Controls
 

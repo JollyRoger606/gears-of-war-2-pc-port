@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Santiago Quiroz Upegui and the gow2-recomp contributors
 // Host-side test of the PC Options catalog data (no game data, no SDK).
 #include "gow2_options_catalog.h"
+#include "gow2_graphics_quality.h"
 
 #include <cstdio>
 #include <string>
@@ -193,7 +194,7 @@ int CountPage(options::Page page) {
 
 void TestCounts() {
   Expect(CountTab(options::Tab::kDisplay) == 8, "display has 8 rows");
-  Expect(CountTab(options::Tab::kGraphics) == 20, "graphics has 20 rows");
+  Expect(CountTab(options::Tab::kGraphics) == 46, "graphics has 46 rows including quality heading, preset and 24 settings");
   Expect(CountTab(options::Tab::kControls) == 10, "controls has 10 rows");
   Expect(CountTab(options::Tab::kTouch) == 6, "touch has 6 rows");
   Expect(CountTab(options::Tab::kMultiplayer) == 10, "multiplayer has 10 rows");
@@ -202,6 +203,37 @@ void TestCounts() {
   Expect(CountTab(options::Tab::kSystem) == 13, "system has 13 rows");
   Expect(CountPage(options::Page::kKeybinds) == 24, "keybinds page has 24 rows");
   Expect(CountPage(options::Page::kHost) == 7, "host page has 7 rows");
+}
+
+void TestGraphicsQualityRows() {
+  namespace quality = rex::glue::graphics_quality;
+  const auto* group = options::FindSetting("game_quality_group");
+  Expect(group && group->kind == options::Kind::kInfo && group->label_en == "Game quality" &&
+             group->label_es == "Calidad del juego", "quality group has a bilingual visible heading");
+  const auto* preset = options::FindSetting("gow2_gfx_preset");
+  Expect(preset && preset->choices.size() == 4 && preset->choices.back().value == "custom",
+         "quality preset exposes Low Medium High and derived Custom");
+  Expect(quality::Settings().size() == 24, "24 verified retail quality settings selected");
+  for (const auto& setting : quality::Settings()) {
+    const auto* row = options::FindSetting(setting.id);
+    Expect(row != nullptr, std::string("quality setting in catalog: ") + std::string(setting.key));
+    if (!row) continue;
+    Expect(row->tab == options::Tab::kGraphics && row->kind == options::Kind::kChoice &&
+               row->apply == options::Apply::kRestart && row->platforms == options::kAllPlatforms &&
+               !row->advanced, "quality rows need restart and are available on both platforms");
+    Expect(!row->help_en.empty() && !row->help_es.empty(), "quality row has help in both languages");
+    Expect(row->choices.front().value == "auto", "quality row starts at platform default");
+    for (std::string_view name : {"low", "medium", "high"}) {
+      bool found = false;
+      for (const auto& choice : row->choices) {
+        if (choice.value == quality::PresetValue(setting, name)) found = true;
+      }
+      Expect(found, "every preset value is one of the row's fixed choices");
+    }
+  }
+  const auto* raw = options::FindSetting("gow2_system_settings");
+  Expect(raw && raw->advanced && raw->platforms == options::kAllPlatforms,
+         "raw engine settings remain advanced on both platforms");
 }
 
 void TestWindowsUpdateRows() {
@@ -231,6 +263,7 @@ int main() {
     TestPlatformMenuNames();
     TestCounts();
     TestWindowsUpdateRows();
+    TestGraphicsQualityRows();
   } catch (const std::exception& e) {
     ++g_checks;
     ++g_failures;

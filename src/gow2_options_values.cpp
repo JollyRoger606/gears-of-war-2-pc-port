@@ -13,6 +13,7 @@
 #include <rex/logging.h>
 
 #include "gow2_mouse_aim.h"
+#include "gow2_graphics_quality.h"
 #include "gow2_options_actions.h"
 #include "gow2_options_values_text.h"
 #include "gow2_script_patch_groups.h"
@@ -66,6 +67,11 @@ bool IsReadOnly(std::string_view id) {
 }
 
 Names CompositeNames(std::string_view id) {
+  if (id == "gow2_gfx_preset") {
+    Names names;
+    for (const auto& setting : graphics_quality::Settings()) names.push_back(setting.id);
+    return names;
+  }
   if (id == "window_mode") return {"fullscreen", "fullscreen_exclusive"};
   if (id == "window_size") return {"window_width", "window_height"};
   if (id == "upscaler" || id == "upscaler_dlss") return {"gow2_temporal", "gow2_upscaler"};
@@ -81,6 +87,13 @@ std::string UpscalerValue(ReadValue read) {
 }
 
 std::string RowValue(std::string_view id, ReadValue read) {
+  if (id == "gow2_gfx_preset") {
+#ifdef __ANDROID__
+    return graphics_quality::DetectPreset(read, true);
+#else
+    return graphics_quality::DetectPreset(read);
+#endif
+  }
   if (id == "window_mode")
     return values_text::WindowMode(read("fullscreen"), read("fullscreen_exclusive"));
   if (id == "window_size")
@@ -130,8 +143,21 @@ bool SetUpscaler(std::string_view value) {
   return false;
 }
 
+bool SetQualityPreset(std::string_view preset) {
+  if (preset != "auto" && preset != "low" && preset != "medium" && preset != "high") return false;
+  for (const auto& setting : graphics_quality::Settings()) {
+    if (!rex::cvar::GetFlagInfo(setting.id)) return false;
+  }
+  for (const auto& setting : graphics_quality::Settings()) {
+    const auto value = preset == "auto" ? "auto" : graphics_quality::PresetValue(setting, preset);
+    if (!SetCvar(setting.id, value)) return false;
+  }
+  return true;
+}
+
 bool SetRow(std::string_view id, std::string_view value) {
   if (IsReadOnly(id)) return false;
+  if (id == "gow2_gfx_preset") return SetQualityPreset(value);
   if (id == "window_mode") return SetWindowMode(value);
   if (id == "window_size") return SetWindowSize(value);
   if (id == "upscaler" || id == "upscaler_dlss") return SetUpscaler(value);
@@ -329,6 +355,7 @@ bool CvarValues::Set(std::string_view id, std::string_view value) {
 
 std::string CvarValues::Default(std::string_view id) const {
   if (IsReadOnly(id)) return {};
+  if (id == "gow2_gfx_preset") return "auto";
   return RowValue(id, DefaultValue);
 }
 

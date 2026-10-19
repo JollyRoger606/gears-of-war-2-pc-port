@@ -16,6 +16,8 @@
     <string name="launch_resolution">Resolución interna</string>
     <string name="launch_filter">Filtro de imagen</string>
     <string name="launch_unlock_fps">Desbloquear la tasa de fotogramas</string>
+    <string name="launch_shadows">Sombras de objetos</string>
+    <string name="launch_shadows_hint">Activadas se ven mejor y cuestan algo de GPU.</string>
     <string name="launch_auto">Automático</string>
     <string name="launch_on">Activado</string>
     <string name="launch_off">Desactivado</string>

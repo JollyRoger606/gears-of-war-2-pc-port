@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Santiago Quiroz Upegui and the gow2-recomp contributors
 // Host tests of option values, visibility, navigation, and editing.
 #include "gow2_options_model.h"
+#include "gow2_graphics_quality.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -629,6 +630,95 @@ void TestRestartPending() {
   Expect(RestartPending(f.state, f.catalog, f.values, f.context).empty(), "pending excludes incompatible platform");
 }
 
+class QualityValues final : public Values {
+ public:
+  std::map<std::string, std::string, std::less<>> current;
+
+  QualityValues() {
+    for (const auto& setting : rex::glue::graphics_quality::Settings()) current[std::string(setting.id)] = "auto";
+  }
+
+  std::string Get(std::string_view id) const override {
+    if (id == "gow2_gfx_preset")
+      return rex::glue::graphics_quality::DetectPreset([this](std::string_view key) { return Get(key); });
+    const auto found = current.find(id);
+    return found == current.end() ? "" : found->second;
+  }
+
+  bool Set(std::string_view id, std::string_view value) override {
+    if (id != "gow2_gfx_preset") { current[std::string(id)] = value; return true; }
+    if (value != "auto" && value != "low" && value != "medium" && value != "high") return false;
+    for (const auto& setting : rex::glue::graphics_quality::Settings()) {
+      current[std::string(setting.id)] = value == "auto" ? "auto" :
+          rex::glue::graphics_quality::PresetValue(setting, value);
+    }
+    return true;
+  }
+
+  std::string Default(std::string_view) const override { return "auto"; }
+};
+
+void TestQualityPresetTransactions() {
+  namespace quality = rex::glue::graphics_quality;
+  const auto& catalog = Catalog();
+  QualityValues values;
+  Context context;
+  State state;
+  values.current["gow2_gfx_bloom"] = "off";
+  values.current["gow2_gfx_max_shadow_resolution"] = "512";
+  const auto original = values.current;
+  CaptureLaunch(state, catalog, values);
+  Open(state, catalog, values, context);
+  SelectTab(state, 1, catalog, values, context);
+  const auto rows = PageRows(catalog, Tab::kGraphics, Page::kMain, values, context);
+  const auto index_of = [&](std::string_view id) {
+    const auto found = std::find_if(rows.begin(), rows.end(), [id](const Setting* row) { return row->id == id; });
+    return static_cast<int>(found - rows.begin());
+  };
+  const int preset = index_of("gow2_gfx_preset");
+  const auto* preset_setting = FindSetting("gow2_gfx_preset");
+  Expect(StepValue(*preset_setting, "high", 1, context) == "low", "derived Custom is skipped when cycling presets");
+  Expect(StepValue(*preset_setting, "custom", -1, context) == "high", "Custom can step backwards to High");
+  Step(state, preset, 1, catalog, values, context);
+  Expect(values.Get("gow2_gfx_preset") == "low", "choosing Low replaces a custom combination");
+  Expect(!state.touched.contains("gow2_gfx_preset"), "derived preset is never persisted or restored as a separate value");
+  for (const auto& setting : quality::Settings()) {
+    const auto id = std::string(setting.id);
+    Expect(values.Get(id) == quality::PresetValue(setting, "low"), "Low updates every quality constituent");
+    Expect(state.touched.contains(id) == (values.Get(id) != original.at(id)), "preset dirty state tracks each actual constituent change");
+  }
+  Expect(!RestartPending(state, catalog, values, context).empty(), "preset raises restart notice");
+  Discard(state, values);
+  Expect(values.current == original && state.touched.empty(), "discard restores the exact original custom combination");
+
+  Step(state, preset, 1, catalog, values, context);
+  MarkSaved(state, catalog, values);
+  const auto saved_low = values.current;
+  Expect(state.opened.at("gow2_gfx_preset") == "low", "save refreshes the derived preset baseline");
+  Step(state, index_of("gow2_gfx_motion_blur"), 1, catalog, values, context);
+  Expect(values.Get("gow2_gfx_preset") == "custom", "manual quality change shows Custom immediately");
+  Expect(Rows(state, catalog, values, context)[preset].changed, "derived preset shows unsaved change after manual edit");
+  Discard(state, values);
+  Expect(values.current == saved_low && values.Get("gow2_gfx_preset") == "low", "discard after saving restores all saved Low values");
+  Expect(!RestartPending(state, catalog, values, context).empty(), "save and discard preserve restart notice relative to launch");
+
+  state.row = preset;
+  Handle(state, Command::kResetRow, catalog, values, context);
+  for (const auto& setting : quality::Settings()) Expect(values.Get(setting.id) == "auto", "reset preset restores platform defaults for every row");
+  Expect(!state.touched.empty(), "reset preset tracks changes even when the derived label matches a default");
+  Discard(state, values);
+  Expect(values.current == saved_low, "discard after default restores the saved explicit values");
+
+  values.Set("gow2_gfx_preset", "auto");
+  Open(state, catalog, values, context);
+  Step(state, preset, -1, catalog, values, context);
+  Expect(values.Get("gow2_gfx_preset") == "medium", "automatic desktop High cycles to Medium");
+  Step(state, preset, 1, catalog, values, context);
+  Expect(values.Get("gow2_gfx_light_environment_shadows") == "on", "High explicitly enables retail object shadows");
+  Discard(state, values);
+  for (const auto& setting : quality::Settings()) Expect(values.Get(setting.id) == "auto", "discard explicit High restores all automatic values");
+}
+
 int main() {
   TestVisibility();
   TestUpscalerVisibility();
@@ -644,6 +734,7 @@ int main() {
   TestPointerCommandsAndRows();
   TestInfoAndActionRowsNeverShowChanged();
   TestRestartPending();
+  TestQualityPresetTransactions();
   std::printf("options_model_test: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

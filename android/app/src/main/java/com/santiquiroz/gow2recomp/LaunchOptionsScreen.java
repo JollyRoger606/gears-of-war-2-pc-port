@@ -82,6 +82,10 @@ final class LaunchOptionsScreen {
         addChoice(column, R.string.launch_unlock_fps, "gow2_unlock_fps",
                 new int[]{R.string.launch_auto, R.string.launch_on, R.string.launch_off},
                 new String[]{null, "true", "false"});
+        addChoice(column, R.string.launch_shadows, "gow2_gfx_light_environment_shadows",
+                new int[]{R.string.launch_auto, R.string.launch_on, R.string.launch_off},
+                new String[]{null, "\"on\"", "\"off\""});
+        column.addView(text(activity.getString(R.string.launch_shadows_hint), 14));
         column.addView(button(R.string.launch_play, v -> start(false)), spaced());
         column.addView(button(R.string.launch_safe_mode, v -> start(true)), spaced());
         column.addView(button(R.string.launch_reset, v -> reset()), spaced());
@@ -163,7 +167,8 @@ final class LaunchOptionsScreen {
     private static String safeSettings(String toml) {
         String updated = TomlRows.set(toml, "vulkan_sparse_shared_memory", "false");
         updated = TomlRows.set(updated, "resolution_scale", "1");
-        return TomlRows.set(updated, "present_effect", "\"bilinear\"");
+        updated = TomlRows.set(updated, "present_effect", "\"bilinear\"");
+        return TomlRows.set(updated, "gow2_gfx_light_environment_shadows", "\"off\"");
     }
 
     private void writeSettings(String updated) throws IOException {

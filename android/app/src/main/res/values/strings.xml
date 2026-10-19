@@ -17,6 +17,8 @@
     <string name="launch_resolution">Internal resolution</string>
     <string name="launch_filter">Image filter</string>
     <string name="launch_unlock_fps">Unlock frame rate</string>
+    <string name="launch_shadows">Object shadows</string>
+    <string name="launch_shadows_hint">On looks better and costs some GPU.</string>
     <string name="launch_auto">Auto</string>
     <string name="launch_on">On</string>
     <string name="launch_off">Off</string>
