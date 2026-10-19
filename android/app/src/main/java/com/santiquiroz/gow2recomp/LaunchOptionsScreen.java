@@ -17,6 +17,9 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import com.santiquiroz.gow2recomp.update.UpdateChecker;
+import com.santiquiroz.gow2recomp.update.UpdateInfo;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -31,6 +34,8 @@ final class LaunchOptionsScreen {
     private final Runnable play;
     private final ScrollView root;
     private final TextView status;
+    private final TextView updateStatus;
+    private final Button updateButton;
     private final List<Choice> choices = new ArrayList<>();
     private String original = "";
     private boolean loaded;
@@ -41,6 +46,8 @@ final class LaunchOptionsScreen {
         this.play = play;
         status = text("", 16);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        updateStatus = text("", 16);
+        updateButton = button(R.string.update_check_now, v -> checkForUpdates());
         root = new ScrollView(activity);
         root.addView(column(crashed));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -79,7 +86,10 @@ final class LaunchOptionsScreen {
         column.addView(button(R.string.launch_safe_mode, v -> start(true)), spaced());
         column.addView(button(R.string.launch_reset, v -> reset()), spaced());
         column.addView(button(R.string.launch_share_log, v -> shareLog()), spaced());
+        column.addView(updateStatus, spaced());
+        column.addView(updateButton, spaced());
         column.addView(status, spaced());
+        refreshUpdateLine();
         return column;
     }
 
@@ -207,6 +217,33 @@ final class LaunchOptionsScreen {
 
     private void showError(int message, Exception error) {
         status.setText(activity.getString(message, error.getMessage()));
+    }
+
+    private void refreshUpdateLine() {
+        UpdateInfo pending =
+                UpdateChecker.pendingUpdate(activity, BuildConfig.VERSION_NAME);
+        if (pending != null) {
+            updateStatus.setText(activity.getString(R.string.update_available, pending.tag()));
+        } else {
+            updateStatus.setText(R.string.update_up_to_date);
+        }
+    }
+
+    private void checkForUpdates() {
+        updateButton.setEnabled(false);
+        updateStatus.setText(R.string.update_checking);
+        UpdateChecker.refreshNow(activity.getApplicationContext(), BuildConfig.VERSION_NAME,
+                (ok, info, newer) -> activity.runOnUiThread(() -> {
+                    updateButton.setEnabled(true);
+                    if (!ok) {
+                        updateStatus.setText(R.string.update_check_failed);
+                    } else if (newer && info != null) {
+                        updateStatus.setText(
+                                activity.getString(R.string.update_available, info.tag()));
+                    } else {
+                        updateStatus.setText(R.string.update_up_to_date);
+                    }
+                }));
     }
 
     private Button button(int label, View.OnClickListener listener) {

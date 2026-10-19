@@ -2,6 +2,7 @@
 // Copyright (c) 2026, Santiago Quiroz Upegui and the gow2-recomp contributors
 package com.santiquiroz.gow2recomp;
 
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
@@ -12,6 +13,8 @@ import android.view.WindowManager;
 
 import com.santiquiroz.gow2recomp.setup.GameInstaller;
 import com.santiquiroz.gow2recomp.setup.GameSetupException;
+import com.santiquiroz.gow2recomp.update.UpdateChecker;
+import com.santiquiroz.gow2recomp.update.UpdateInfo;
 
 import org.libsdl.app.SDLActivity;
 
@@ -59,12 +62,21 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
         if (mBrokenLibraries || isFinishing()) {
             return;
         }
-        if (needsGameSetup()) {
-            showGameSetup();
-        } else if (shouldShowLaunchOptions(previousLaunchCrashed)) {
-            showLaunchOptions(previousLaunchCrashed);
+        UpdateChecker.refreshIfStale(getApplicationContext(), BuildConfig.VERSION_NAME);
+        Runnable continueLaunch = () -> {
+            if (needsGameSetup()) {
+                showGameSetup();
+            } else if (shouldShowLaunchOptions(previousLaunchCrashed)) {
+                showLaunchOptions(previousLaunchCrashed);
+            } else {
+                markNativeStarted();
+            }
+        };
+        UpdateInfo pendingUpdate = UpdateChecker.pendingUpdate(this, BuildConfig.VERSION_NAME);
+        if (pendingUpdate != null && !isFinishing()) {
+            showUpdateDialog(pendingUpdate, continueLaunch);
         } else {
-            markNativeStarted();
+            continueLaunch.run();
         }
     }
 
@@ -265,6 +277,35 @@ public class Gow2Activity extends SDLActivity implements GameSetupScreen.Actions
             return;
         }
         startNativeSide();
+    }
+
+    private void showUpdateDialog(UpdateInfo pending, Runnable continueLaunch) {
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_title, pending.tag()))
+                .setPositiveButton(R.string.update_download, (dialog, which) -> {
+                    openUpdateUrl(pending.downloadUrl());
+                    continueLaunch.run();
+                })
+                .setNegativeButton(R.string.update_later, (dialog, which) -> continueLaunch.run())
+                .setNeutralButton(R.string.update_skip, (dialog, which) -> {
+                    UpdateChecker.skipVersion(this, pending.tag());
+                    continueLaunch.run();
+                })
+                .setCancelable(false)
+                .show();
+    }
+
+    private void openUpdateUrl(String url) {
+        // Only this repository's releases, whatever the API response says.
+        if (url == null || !url.startsWith("https://github.com/santiquiroz/gears-of-war-2-pc-port/releases/")) {
+            Log.w(TAG, "ignoring an update link outside the project's releases: " + url);
+            return;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (RuntimeException e) {
+            Log.w(TAG, "no browser for the update link", e);
+        }
     }
 
     private void startNativeSide() {

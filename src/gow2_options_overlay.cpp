@@ -5,6 +5,9 @@
 #include "gow2_host_ui.h"
 #include "gow2_options_actions.h"
 #include "gow2_options_input.h"
+#ifdef _WIN32
+#include "gow2_update_check.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -260,6 +263,9 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
  public:
   OptionsOverlay(rex::ui::ImGuiDrawer* drawer, GamePaths paths, bool touch)
       : ImGuiDialog(drawer), values_(std::move(paths)), touch_(touch) {
+#ifdef _WIN32
+    update::Start(values_.paths().user_data_root);
+#endif
     BuildContext(touch_, &context_);
     CaptureLaunch(state_, Catalog(), values_);
     reader_.Reset(CurrentPad());
@@ -331,12 +337,22 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     if (reader_.ToggleChord(pad_, now)) Toggle(OpenSource::kChord);
     ObserveHostResult();
     CheckInputRelease(io, now);
-    if (!open_) { RetirePopups(); DrawToast(io); return; }
+    if (!open_) {
+      RetirePopups();
+      DrawToast(io);
+#ifdef _WIN32
+      DrawUpdateNotice(io, now);
+#endif
+      return;
+    }
     TrackDevice(io);
     if (popup_id_.empty()) ReadMenuInput(now);
     if (!open_) { RetirePopups(); return; }
     DrawMenu(io);
     DrawToast(io);
+#ifdef _WIN32
+    DrawUpdateNotice(io, now);
+#endif
   }
 
  private:
@@ -405,6 +421,15 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
 
   void RunAction(const std::string& id) {
     REXLOG_INFO("PCOPTIONS action {}", id);
+#ifdef _WIN32
+    if (id == "update_download") { update::OpenDownload(); return; }
+    if (id == "update_check_now") { update::CheckNow(); return; }
+    if (id == "update_dismiss") {
+      update::Dismiss();
+      update_notice_until_ = 0;
+      return;
+    }
+#endif
     if (id == "runtime_settings") {
       CloseMenu();
       auto* runtime = rex::Runtime::instance();
@@ -1122,6 +1147,36 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
     ImGui::EndChild();
   }
 
+#ifdef _WIN32
+  void DrawUpdateNotice(const ImGuiIO& io, int64_t now) {
+    if (!rex::cvar::Query<bool>("gow2_update_check")) {
+      update_notice_until_ = 0;
+      return;
+    }
+    if (update::TakeNotice()) {
+      const auto snapshot = update::GetSnapshot();
+      const bool spanish = MenuLang() == Lang::kEs;
+      update_notice_ = (spanish ? "Actualización disponible: " : "Update available: ") +
+          snapshot.release.tag + (spanish ? " — Opciones > Opciones de PC > Sistema" :
+                                            " — Options > PC Options > System");
+      update_notice_until_ = now + 8000;
+    }
+    const auto remaining = update_notice_until_ - now;
+    if (remaining <= 0 || update_notice_.empty()) return;
+    const float alpha = std::min(1.f,static_cast<float>(remaining)/500.f);
+    ImGui::SetNextWindowPos({io.DisplaySize.x*.96f,io.DisplaySize.y*.04f},ImGuiCond_Always,{1,0});
+    ImGui::SetNextWindowBgAlpha(.95f*alpha);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha,alpha);
+    ImGui::Begin("##update-notice",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|
+        ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoFocusOnAppearing);
+    PushFont(.024f*io.DisplaySize.y);
+    ImGui::TextUnformatted(update_notice_.c_str());
+    ImGui::PopFont();
+    ImGui::End();
+    ImGui::PopStyleVar();
+  }
+#endif
+
   void DrawToast(const ImGuiIO& io) {
     const auto remaining = toast_until_ - NowMs();
     if (remaining <= 0 || toast_.empty()) return;
@@ -1174,6 +1229,10 @@ class OptionsOverlay final : public rex::ui::ImGuiDialog {
   float left_ = 0;
   std::string toast_;
   int64_t toast_until_ = 0;
+#ifdef _WIN32
+  std::string update_notice_;
+  int64_t update_notice_until_ = 0;
+#endif
 };
 
 void RunModal() {

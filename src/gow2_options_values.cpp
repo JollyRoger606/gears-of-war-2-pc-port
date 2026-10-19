@@ -20,6 +20,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include "gow2_update_check.h"
 #elif defined(__ANDROID__)
 #include <sys/system_properties.h>
 #endif
@@ -177,6 +178,17 @@ std::string HostStatus() {
   return HostResultText(*last);
 }
 
+#ifdef _WIN32
+std::string UpdateStatus() {
+  const auto snapshot = update::GetSnapshot();
+  if (update::IsNewer(snapshot.release.tag, update::CurrentVersion()))
+    return snapshot.release.tag + Localized(" available", " disponible");
+  if (snapshot.failed) return Localized("Check failed (offline?)", "Error al buscar (¿sin conexión?)");
+  if (!snapshot.checked) return Localized("Not checked yet", "Sin comprobar todavía");
+  return Localized("Up to date (v", "Al día (v") + update::CurrentVersion() + ")";
+}
+#endif
+
 std::optional<toml_edit::ValueKind> PersistKind(rex::cvar::FlagType type) {
   using enum rex::cvar::FlagType;
   using enum toml_edit::ValueKind;
@@ -294,6 +306,9 @@ std::string CvarValues::Get(std::string_view id) const {
                                      Environment("GOW2_TARGET_W"), Environment("GOW2_TARGET_H"));
   if (id == "coop_check") return CoopCheck();
   if (id == "host_status") return HostStatus();
+#ifdef _WIN32
+  if (id == "update_status") return UpdateStatus();
+#endif
   if (id == "save_dir_effective") return Utf8Path(paths_.user_data_root);
   if (id == "config_path") return Utf8Path(paths_.config_path);
   if (id == "version") return GOW2_VERSION;

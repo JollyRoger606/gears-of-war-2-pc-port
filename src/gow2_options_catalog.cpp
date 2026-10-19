@@ -1024,6 +1024,51 @@ void AddAudio(std::vector<Setting>& out) {
 
 void AddSystem(std::vector<Setting>& out) {
   out.push_back(Setting{
+      .id = "update_status",
+      .tab = Tab::kSystem,
+      .kind = Kind::kInfo,
+      .platforms = kWindows,
+      .label_en = "Updates",
+      .label_es = "Actualizaciones",
+      .help_en = "Latest GitHub release status.",
+      .help_es = "Estado de la última versión en GitHub."});
+  out.push_back(Setting{
+      .id = "gow2_update_check",
+      .tab = Tab::kSystem,
+      .kind = Kind::kToggle,
+      .platforms = kWindows,
+      .label_en = "Check for updates",
+      .label_es = "Buscar actualizaciones",
+      .help_en = "Checks GitHub at most twice a day. Sends no other data.",
+      .help_es = "Consulta GitHub como máximo dos veces al día. No envía otros datos."});
+  out.push_back(Setting{
+      .id = "update_download",
+      .tab = Tab::kSystem,
+      .kind = Kind::kAction,
+      .platforms = kWindows,
+      .label_en = "Download",
+      .label_es = "Descargar",
+      .help_en = "Opens the latest release page in your browser.",
+      .help_es = "Abre la página de la última versión en el navegador."});
+  out.push_back(Setting{
+      .id = "update_check_now",
+      .tab = Tab::kSystem,
+      .kind = Kind::kAction,
+      .platforms = kWindows,
+      .label_en = "Check now",
+      .label_es = "Buscar ahora",
+      .help_en = "Checks GitHub now when update checks are enabled.",
+      .help_es = "Consulta GitHub ahora si la búsqueda de actualizaciones está activada."});
+  out.push_back(Setting{
+      .id = "update_dismiss",
+      .tab = Tab::kSystem,
+      .kind = Kind::kAction,
+      .platforms = kWindows,
+      .label_en = "Skip this version",
+      .label_es = "Omitir esta versión",
+      .help_en = "Hides the notice for this release; a newer release will show again.",
+      .help_es = "Oculta el aviso de esta versión; una versión posterior volverá a avisar."});
+  out.push_back(Setting{
       .id = "gow2_menu_language",
       .tab = Tab::kSystem,
       .kind = Kind::kChoice,

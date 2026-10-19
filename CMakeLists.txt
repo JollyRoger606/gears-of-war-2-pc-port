@@ -66,7 +66,7 @@ set(GOW2_SOURCES
 # The .rc names the .ico by path, so OBJECT_DEPENDS rebuilds the resource when the icon changes.
 if(WIN32)
     enable_language(RC)
-    list(APPEND GOW2_SOURCES src/gow2.rc)
+    list(APPEND GOW2_SOURCES src/gow2.rc src/gow2_update_check.cpp)
     set_source_files_properties(src/gow2.rc PROPERTIES
         OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/gow2.ico)
 endif()
@@ -74,6 +74,9 @@ endif()
 add_executable(gow2 WIN32 ${GOW2_SOURCES})
 
 rexglue_setup_target(gow2 GPU_PLUGINS xenos)
+if(WIN32)
+    target_link_libraries(gow2 PRIVATE winhttp shell32)
+endif()
 
 # Shown in the PC Options menu; scripts/package.ps1 names the release zip with the same version.
 set(GOW2_VERSION "0.2.2" CACHE STRING "Port version shown in game")
@@ -150,11 +153,13 @@ add_executable(gow2_options_actions_test EXCLUDE_FROM_ALL
 add_executable(gow2_fps_cap_test EXCLUDE_FROM_ALL tools/tests/fps_cap_test.cpp)
 add_executable(gow2_gpu_pick_test EXCLUDE_FROM_ALL tools/tests/gpu_pick_test.cpp)
 add_executable(gow2_frame_stats_test EXCLUDE_FROM_ALL tools/tests/frame_stats_test.cpp)
+add_executable(gow2_update_check_test EXCLUDE_FROM_ALL tools/tests/update_check_test.cpp)
 add_executable(gow2_audio_volume_test EXCLUDE_FROM_ALL tools/tests/audio_volume_test.cpp)
 add_executable(gow2_coalesced_text_test EXCLUDE_FROM_ALL tools/tests/coalesced_text_test.cpp)
 foreach(_options_test gow2_toml_edit_test gow2_options_catalog_test gow2_options_model_test
         gow2_options_input_test gow2_options_values_test gow2_options_actions_test gow2_fps_cap_test
-        gow2_audio_volume_test gow2_coalesced_text_test gow2_gpu_pick_test gow2_frame_stats_test)
+        gow2_audio_volume_test gow2_coalesced_text_test gow2_gpu_pick_test gow2_frame_stats_test
+        gow2_update_check_test)
     target_include_directories(${_options_test} PRIVATE src)
 endforeach()
 

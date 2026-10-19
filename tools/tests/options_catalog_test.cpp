@@ -199,9 +199,21 @@ void TestCounts() {
   Expect(CountTab(options::Tab::kMultiplayer) == 10, "multiplayer has 10 rows");
   Expect(CountTab(options::Tab::kSaves) == 5, "saves has 5 rows");
   Expect(CountTab(options::Tab::kAudio) == 3, "audio has 3 rows");
-  Expect(CountTab(options::Tab::kSystem) == 8, "system has 8 rows");
+  Expect(CountTab(options::Tab::kSystem) == 13, "system has 13 rows");
   Expect(CountPage(options::Page::kKeybinds) == 24, "keybinds page has 24 rows");
   Expect(CountPage(options::Page::kHost) == 7, "host page has 7 rows");
+}
+
+void TestWindowsUpdateRows() {
+  for (const auto id : {"update_status", "gow2_update_check", "update_download",
+                        "update_check_now", "update_dismiss"}) {
+    const auto* setting = options::FindSetting(id);
+    Expect(setting != nullptr, std::string("update row exists: ") + id);
+    if (!setting) continue;
+    Expect(setting->platforms == options::kWindows, "update rows only appear on Windows");
+    Expect(setting->tab == options::Tab::kSystem && setting->page == options::Page::kMain,
+           "update rows appear on the main System tab");
+  }
 }
 
 int main() {
@@ -218,6 +230,7 @@ int main() {
     TestUiTexts();
     TestPlatformMenuNames();
     TestCounts();
+    TestWindowsUpdateRows();
   } catch (const std::exception& e) {
     ++g_checks;
     ++g_failures;

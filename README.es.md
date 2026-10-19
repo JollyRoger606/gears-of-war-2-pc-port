@@ -128,6 +128,8 @@ Todo esto se puede cambiar en el juego desde Opciones > Opciones de PC (o F10, o
 
 Los parches comunitarios vienen de [xenia-canary/game-patches](https://github.com/xenia-canary/game-patches) (autores illusion y boma); los sitios y valores parcheados para este XEX se aplican al código generado, cada uno detrás de su ajuste `gow2_*`.
 
+En Windows, el juego consulta GitHub para buscar una nueva versión como máximo dos veces al día y no envía ningún otro dato. Puedes desactivarlo en Opciones de PC > Sistema o poner `gow2_update_check = false` en `gow2.toml`.
+
 ## Rendimiento
 
 Medido en un Ryzen 9 7900X3D + Radeon RX 7800 XT, Acto 1, `resolution_scale = 2` (1440p interno): unos 90 cuadros presentados por segundo en promedio, 1% bajo en 55, GPU unos 6 ms por cuadro (PresentMon 2.6, captura de 30 s). Estas cifras son cuadros presentados.

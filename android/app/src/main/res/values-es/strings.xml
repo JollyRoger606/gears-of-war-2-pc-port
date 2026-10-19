@@ -35,4 +35,13 @@
     <string name="launch_reset_failed">No se pudieron restablecer los ajustes: %1$s</string>
     <string name="launch_share_failed">No se pudo compartir el registro: %1$s</string>
     <string name="launch_share_title">Compartir último registro</string>
+    <string name="update_title">Actualización disponible: %1$s</string>
+    <string name="update_download">Descargar</string>
+    <string name="update_later">Más tarde</string>
+    <string name="update_skip">Omitir esta versión</string>
+    <string name="update_available">%1$s disponible</string>
+    <string name="update_up_to_date">Actualizado</string>
+    <string name="update_check_now">Buscar actualizaciones</string>
+    <string name="update_checking">Buscando actualizaciones…</string>
+    <string name="update_check_failed">No se pudo buscar actualizaciones.</string>
 </resources>

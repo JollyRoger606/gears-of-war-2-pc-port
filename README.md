@@ -128,6 +128,8 @@ Everything here can be changed in game from Options > PC Options (or F10, or Bac
 
 The community patches come from [xenia-canary/game-patches](https://github.com/xenia-canary/game-patches) (authors illusion and boma); the patched sites and values for this XEX are applied to the generated code, each behind its `gow2_*` setting.
 
+On Windows, the game checks GitHub for a new release at most twice a day and sends nothing else. Turn this off in PC Options > System, or set `gow2_update_check = false` in `gow2.toml`.
+
 ## Performance
 
 Measured on a Ryzen 9 7900X3D + Radeon RX 7800 XT, Act 1, `resolution_scale = 2` (1440p internal): about 90 presented frames per second on average, 1% low 55, GPU about 6 ms per frame (PresentMon 2.6, 30 s capture). These numbers are presented frames.
