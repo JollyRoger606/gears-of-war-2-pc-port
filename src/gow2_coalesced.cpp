@@ -55,7 +55,8 @@ REXCVAR_DEFINE_BOOL(gow2_keycaps, true, "input",
 #define GOW2_SYSTEM_SETTINGS_DEFAULT ""
 #endif
 REXCVAR_DEFINE_BOOL(gow2_skip_logos, true, "Display",
-                    "Skip the Epic and Microsoft Game Studios logo videos at start-up (the start-up movie "
+                    "Skip the start-up videos before the title screen: the Epic and Microsoft Game Studios "
+                    "logos and the Gears of War 2 logo movie (the start-up movie "
                     "list is edited in a cached copy of the Coalesced bundles; the game folder is not "
                     "touched). Takes effect on the next start.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
@@ -352,9 +353,11 @@ void AddPrompts(std::vector<Edit>* e, const CoalescedOptions& o) {
 }
 
 // The start-up movies the engine plays before the front end (Xe-GearEngine.ini, [FullScreenMovie]
-// StartupMovies): the Epic logo and the Microsoft Game Studios logo go; the loading movie stays.
+// StartupMovies): the Epic logo, the Microsoft Game Studios logo and the Gears of War 2 loading movie (the
+// logo and gear that show for about three seconds before the title screen) all go. The loading movie the
+// engine shows between chapters is a different setting ([FullScreenMovie] LoadingMovie) and stays.
 void AddSkipLogos(std::vector<Edit>* e) {
-  for (const char* movie : {"EpicLogo", "MGSLogo"})
+  for (const char* movie : {"EpicLogo", "MGSLogo", "LoadingMovie"})
     e->push_back({Edit::kRemove, "Xe-GearEngine.ini", "FullScreenMovie", "StartupMovies", movie, "", "", false, false});
 }
 
