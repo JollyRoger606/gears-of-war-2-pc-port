@@ -75,7 +75,7 @@ void FpsCapTick(const PPCContext& ctx, uint8_t* base) {
   (void)base;
   static FramePacer pacer;
   static int logged_cap = 0;
-  const int cap = rex::cvar::Query<bool>("gow2_unlock_fps") ? REXCVAR_GET(gow2_fps_cap) : 0;
+  const int cap = EffectiveFpsCap(rex::cvar::Query<bool>("gow2_unlock_fps"), REXCVAR_GET(gow2_fps_cap));
   if (cap <= 0) {
     if (logged_cap != 0) {
       pacer.SleepNanos(0, 0);

@@ -7,6 +7,14 @@
 
 namespace rex::glue {
 
+// The retail game runs at 30 fps; its own cap rests on the guest vblank, which vsync = false
+// removes, so with the frame rate locked the limiter keeps 30 fps itself.
+inline constexpr int kLockedFps = 30;
+
+inline constexpr int EffectiveFpsCap(bool unlocked, int unlocked_cap) {
+  return unlocked ? unlocked_cap : kLockedFps;
+}
+
 class FramePacer {
  public:
   int64_t SleepNanos(int64_t now_ns, int cap) {

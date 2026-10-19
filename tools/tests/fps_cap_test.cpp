@@ -113,7 +113,15 @@ void TestDisabledCap() {
   Expect(p.SleepNanos(2000, 60) == kPeriod60, "after cap 0 next sleep is a full period");
 }
 
+void TestEffectiveCap() {
+  Expect(rex::glue::EffectiveFpsCap(false, 0) == 30, "locked frame rate keeps 30 fps without vsync");
+  Expect(rex::glue::EffectiveFpsCap(false, 144) == 30, "locked frame rate ignores the unlocked limit");
+  Expect(rex::glue::EffectiveFpsCap(true, 0) == 0, "unlocked with no limit runs free");
+  Expect(rex::glue::EffectiveFpsCap(true, 60) == 60, "unlocked uses the chosen limit");
+}
+
 int main() {
+  TestEffectiveCap();
   TestFirstFrame();
   TestSteadyFrames();
   TestSlightlyLateFrame();
