@@ -40,6 +40,10 @@
   Delete out\sdk-build\ and the output folder (out\sdk\, or out\sdk-nodlss\ with
   -NoDlss) first.
 
+.PARAMETER Vulkan
+  Build both Vulkan and D3D12 without DLSS in out\sdk-build-vulkan\ and install
+  the development DLLs in out\sdk-vulkan\. Can be combined with -Dev.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\build-sdk.ps1
 
@@ -49,6 +53,7 @@
 param(
     [switch]$Dev,
     [switch]$NoDlss,
+    [switch]$Vulkan,
     [switch]$Clean
 )
 
@@ -90,6 +95,7 @@ function Import-VcVars($vsPath) {
 . (Join-Path $PSScriptRoot 'ngx-scan.ps1')
 
 if ($NoDlss -and $Dev) { Fail '-NoDlss builds the release DLLs, which leave the development tools out; drop -Dev.' }
+$withoutDlss = $NoDlss -or $Vulkan
 
 function Find-ClangDir($vsPath) {
     foreach ($dir in @((Join-Path $vsPath 'VC\Tools\Llvm\x64\bin'), (Join-Path $env:ProgramFiles 'LLVM\bin'))) {
@@ -114,8 +120,8 @@ $env:PATH = "$llvm;$env:PATH"
 Write-Host "Visual Studio: $vsPath"
 Write-Host "clang:         $llvm"
 
-$work = Join-Path $root 'out\sdk-build'
-$outDir = if ($NoDlss) { Join-Path $root 'out\sdk-nodlss' } else { Join-Path $root 'out\sdk' }
+$work = Join-Path $root $(if ($Vulkan) { 'out\sdk-build-vulkan' } else { 'out\sdk-build' })
+$outDir = Join-Path $root $(if ($Vulkan) { 'out\sdk-vulkan' } elseif ($NoDlss) { 'out\sdk-nodlss' } else { 'out\sdk' })
 if ($Clean) {
     Step 'Cleaning'
     foreach ($d in $work, $outDir) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
@@ -134,11 +140,11 @@ try {
 
 # ---- public upscaler SDKs (not redistributed) --------------------------------------------------
 $dlss = Join-Path $work 'dlss-sdk'
-# The SDK turns DLSS on only when this folder holds include\nvsdk_ngx.h; -NoDlss names one that never
+# The SDK turns DLSS on only when this folder holds include\nvsdk_ngx.h; no-DLSS builds name one that never
 # exists, so a DLSS SDK fetched by an earlier run is not picked up.
-$dlssForCmake = if ($NoDlss) { Join-Path $work 'dlss-sdk-left-out' } else { $dlss }
-if ($NoDlss -and (Test-Path $dlssForCmake)) { Fail "$dlssForCmake must not exist for a -NoDlss build; delete it." }
-if (-not $NoDlss -and -not (Test-Path (Join-Path $dlss 'include\nvsdk_ngx.h'))) {
+$dlssForCmake = if ($withoutDlss) { Join-Path $work 'dlss-sdk-left-out' } else { $dlss }
+if ($withoutDlss -and (Test-Path $dlssForCmake)) { Fail "$dlssForCmake must not exist for a build without DLSS; delete it." }
+if (-not $withoutDlss -and -not (Test-Path (Join-Path $dlss 'include\nvsdk_ngx.h'))) {
     Step 'Fetching the NVIDIA DLSS SDK headers'
     Run 'git clone DLSS' { git clone --depth 1 https://github.com/NVIDIA/DLSS.git $dlss }
 }
@@ -160,10 +166,12 @@ Repair-SymlinkStubs $sdk
 
 Step 'Configuring'
 $devFlag = if ($Dev) { 'ON' } else { 'OFF' }
+$vulkanFlag = if ($Vulkan) { 'ON' } else { 'OFF' }
 Push-Location $sdk
 try {
     Run 'cmake configure' {
         cmake --preset win-amd64 -DREXGLUE_ENABLE_FIDELITYFX=ON "-DGOW2_DEV_TOOLS=$devFlag" `
+            -DREXGLUE_USE_D3D12=ON "-DREXGLUE_USE_VULKAN=$vulkanFlag" `
             "-DGOW2_DLSS_SDK=$($dlssForCmake.Replace([string][char]92, '/'))" `
             "-DGOW2_FFX_SDK=$($ffx.Replace([string][char]92, '/'))/Kits/FidelityFX"
     }
@@ -187,7 +195,7 @@ foreach ($dll in 'rexruntime.dll', 'rexgpu-xenos.dll') {
 }
 # The official, signed temporal-upscaler libraries the game loads at run time (see
 # THIRD_PARTY_NOTICES.md; nvngx_dlss.dll is for local builds only and never ships in a release).
-if (-not $NoDlss) {
+if (-not $withoutDlss) {
     $ngx = Join-Path $dlss 'lib\Windows_x86_64\rel\nvngx_dlss.dll'
     if (-not (Test-Path $ngx)) { Fail "nvngx_dlss.dll was not produced in the DLSS SDK ($ngx)." }
     Copy-Item $ngx $outDir -Force
@@ -207,16 +215,17 @@ if (-not $ffxRuntime) { Fail "amd_fidelityfx_dx12.dll was not built in $sdk\bin 
 Copy-Item $ffxRuntime.FullName $outDir -Force
 Write-Host "  amd_fidelityfx_dx12.dll <- $($ffxRuntime.FullName)"
 
-if ($NoDlss) {
+if ($withoutDlss) {
     Step 'Checking that no NVIDIA NGX code was built in'
     $withNgx = @(Find-NgxBinaries $outDir)
     foreach ($b in $withNgx) { Write-Host "  $($b.Path): $($b.Markers)" -ForegroundColor Red }
-    if ($withNgx.Count) { Fail "NGX names found in $($withNgx.Count) DLL(s) of a -NoDlss build." }
+    if ($withNgx.Count) { Fail "NGX names found in $($withNgx.Count) DLL(s) of a build without DLSS." }
     Write-Host "  No NGX names in $outDir"
 }
 
 Step 'Done'
 Write-Host "Self-built SDK DLLs: $outDir" -ForegroundColor Green
 Get-ChildItem $outDir -Filter *.dll | ForEach-Object { Write-Host "  $($_.Name)" }
-if ($NoDlss) { Write-Host 'Run scripts\package.ps1 -Version <version> to package them.' }
+if ($Vulkan) { Write-Host 'Run scripts\make-vulkan-run.ps1, then out\vulkan-run\gow2.exe --gpu_backend=vulkan.' }
+elseif ($NoDlss) { Write-Host 'Run scripts\package.ps1 -Version <version> to package them.' }
 else { Write-Host 'Run scripts\build.ps1 to build the game with them.' }
