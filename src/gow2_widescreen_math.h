@@ -56,6 +56,25 @@ inline int MaxShadowResolution(int width, int height) {
   return size < 128 ? 128 : size;
 }
 
+// EDRAM tiles (80x16 samples at 32 bits) the game's per-frame layout reaches at a back buffer of width x height:
+// scene colour and depth, then the half-resolution passes behind them (a depth buffer and two colour targets, each
+// half the size with the pitch rounded up to whole tiles). Measured with the GPU trace: 1680x704 sets render target
+// bases up to tile 2332 and ends at 2574; 1360x704 ends at 2090. The console has 2048 tiles; the pixel shader
+// interlock path of sdk/patches/0021 emulates 4096.
+constexpr int kConsoleEdramTiles = 2048;
+constexpr int kVirtualEdramTiles = 4096;
+inline int EdramTilesNeeded(int width, int height) {
+  const auto tiles = [](int w, int h) { return ((w + kTileWidth - 1) / kTileWidth) * ((h + 15) / 16); };
+  return 2 * tiles(width, height) + 3 * tiles(width / 2, height / 2);
+}
+
+// The widest multiple of 80 whose layout fits the given number of EDRAM tiles.
+inline int MaxWidthForEdram(int edram_tiles, int height) {
+  int w = kTileWidth;
+  while (EdramTilesNeeded(w + kTileWidth, height) <= edram_tiles) w += kTileWidth;
+  return w;
+}
+
 // The camera's half field of view (radians) widened for a back buffer of the given width: the tangent
 // grows by width / 1280 so the vertical view stays the one of the 16:9 game.
 inline double WidenHalfFov(double half_fov, int width) {

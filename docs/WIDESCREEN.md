@@ -15,7 +15,7 @@ gow2_widescreen = "auto"     # auto (default) | off | 21:9 | 16:10 | 2.39 ...
 | What you get | A back buffer up to 1680x704 (21:9). The vertical view stays the one of the 16:9 game; the horizontal view grows. |
 | Cost | Frame time unchanged (60 fps, p99 19.3-19.5 ms in two test scenes). GPU time per frame about 13-15 % higher. |
 | Cap | 1680 pixels wide. A 32:9 screen gets 21:9 with side bars. |
-| Side effect | The shadow map is made smaller (800 -> 480 px) so it fits the console's 10 MB EDRAM next to the wider picture. |
+| Side effect | The shadow map is made smaller (800 -> 480 px) so it fits the console's 10 MB EDRAM next to the wider picture. The ROV render target path (NVIDIA, Intel; AMD with `render_target_path_d3d12 = "rov"`) emulates 20 MB for the game's half-resolution passes. |
 | Not covered | Videos (stay 16:9), HUD and menu placement were only partly checked (see "What does not work"). |
 
 Screenshots (3440x1440 monitor, window 21:9): [hospital, chapter 2](screenshots/ultrawide-hospital-21x9.jpg),
@@ -37,11 +37,31 @@ The game was built for 16:9 at 1280x720 (704 lines with the AO upscaling fix). T
 
 ### The EDRAM limit
 
-The Xbox 360 draws into 10 MB of EDRAM and the recompilation emulates that. Scene colour plus depth use
+The Xbox 360 draws into 10 MB of EDRAM (2048 tiles of 80x16 samples) and the recompilation emulates that. Scene colour plus depth use
 `8 x W x H` bytes: 9.5 MB at 1680x704. The game's 800x800 shadow map (32-bit depth, 2.4 MB) then overlapped
 the scene and left dark rectangles on characters. `gow2_system_settings` edits in the Coalesced bundle
-(`ResX`, `ResY`, `MaxShadowResolution`) now size the shadow map to what is left: 480 px at 1680x704. Wider than
-1680 does not fit, which is why 32:9 is held at 21:9.
+(`ResX`, `ResY`, `MaxShadowResolution`) now size the shadow map to what is left: 480 px at 1680x704.
+
+**The half-resolution passes need more than that.** After the lighting the game draws its smoke and particles at half size into three more
+surfaces (a depth buffer and two colour targets, each half the scene's size) placed behind the scene colour and depth, and
+it sets their render target bases as 12-bit tile numbers: at 1680x704 the last one starts at tile 2332 and the layout ends at tile 2574 (`EdramTilesNeeded` in
+`src/gow2_widescreen_math.h`). The console's 11-bit addressing wraps those past tile 2048 onto tile 0, which is where the *scene depth* lives, so
+everything that tests against it afterwards read garbage: the translucent light shafts and haze of the lighting pass came out as hard-edged
+rectangles (hospital, chapter 2) or were cut off in horizontal bands. The layout needs 1936 tiles at 1280 (it fits), 2090 at 1360, 2178 at 1440, 2332 at 1520,
+2420 at 1600 and 2574 at 1680, so the tiles past 2048 landed on tile 0 onwards: tiles 0-41 at 1360 (the top two or three rows of the picture), 0-129 at 1440
+(the top seven rows: the haze above y = 112 was missing), 0-283 at 1520, 0-371 at 1600 and 0-525 at 1680 (the top 25 rows, 400 px). Skipping the half-resolution
+draws, or turning the depth test of the haze draw off, removed the artifact at 1440 and 1680.
+
+The SDK now honours bit 11 of those bases (patch `sdk/patches/0021-edram-virtual-tiles.patch`): the pixel-shader-interlock (ROV) render
+target path, which NVIDIA and Intel GPUs use by default, emulates 4096 tiles (20 MB, times the resolution scale squared). Draws address all of
+them, and a resolve of a target in the second 2048 tiles reads them through extra views of the second half (the resolve shaders only
+address 2048 tiles from the start of their view). 4096 tiles hold up to 2640x704.
+
+**Host render targets (`render_target_path_d3d12 = "rtv"`, the default on AMD) still emulate 2048 tiles** and show the artifact above 1280. On AMD set
+`render_target_path_d3d12 = "rov"` in `gow2.toml` for widescreen, or `gow2_widescreen = "off"`.
+
+Wider than 1680 is still held at 1680: the width limit is now the game's own layout (2640 at most), not the EDRAM, but nothing wider
+was tested, and the shadow map has to keep shrinking as the scene grows.
 
 ## Settings
 
@@ -71,7 +91,7 @@ itself did not change.
 - **Videos** (Games for Windows logos, pre-rendered cutscenes) are 16:9 and are shown as they are.
 - **HUD and menus.** The title screen looked right. The in-game HUD (ammo, health) did not show in my
   captures, and the pause menu was not captured at 21:9, so their placement is **not verified**. I have not looked at where they land.
-- **Wider than 1680.** Needs more than the 10 MB of EDRAM; not possible without tiling the scene.
+- **Wider than 1680.** Held at 1680 (see above); not tested.
 - **Shadows** are lower resolution (480 px instead of 800 px) while widescreen is on.
 - **DLSS / upscaler** combinations were not tested with widescreen on. AMD and Intel GPUs untested.
 - `auto` was checked on this 3440x1440 monitor (same picture as `21:9`).

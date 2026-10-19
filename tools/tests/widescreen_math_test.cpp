@@ -56,6 +56,18 @@ int main() {
   Expect(MaxShadowResolution(1600, 704) > MaxShadowResolution(1680, 704), "less width leaves more");
   Expect(MaxShadowResolution(1760, 704) >= 128, "never below 128");
 
+  // EDRAM layout: scene colour and depth plus the half-resolution passes (depth and two colour targets)
+  Expect(EdramTilesNeeded(1280, 704) == 1936, "1280x704 needs 1936 tiles");
+  Expect(EdramTilesNeeded(1360, 704) == 2090, "1360x704 needs 2090 tiles: 42 past the console's 2048");
+  Expect(EdramTilesNeeded(1440, 704) == 2178, "1440x704 needs 2178 tiles");
+  Expect(EdramTilesNeeded(1680, 704) == 2574, "1680x704 needs 2574 tiles (the last render target starts at 2332)");
+  Expect(MaxWidthForEdram(kConsoleEdramTiles, 704) == 1280, "the console's 2048 tiles hold 1280 wide");
+  Expect(MaxWidthForEdram(kVirtualEdramTiles, 704) == 2640, "4096 virtual tiles hold 2640 wide");
+  Expect(EdramTilesNeeded(kMaxWidth, 704) <= kVirtualEdramTiles, "the widest supported buffer fits the virtual EDRAM");
+  for (int w = kMinWidth; w <= kMaxWidth; w += kTileWidth) {
+    Expect(EdramTilesNeeded(w, 704) > EdramTilesNeeded(w - kTileWidth, 704), "more width needs more tiles");
+  }
+
   // Field of view
   Expect(Near(WidenHalfFov(0.7854, 0), 0.7854, 1e-12), "off keeps the angle");
   Expect(Near(WidenHalfFov(0.7854, 1280), 0.7854, 1e-3), "1280 wide keeps the angle");
