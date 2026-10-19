@@ -41,6 +41,11 @@ Read in English: [README.md](README.md)
 - [x] Campaña cooperativa por System Link de hasta cuatro jugadores (`gow2_coop_players`, apagada por defecto): cuatro copias en un mismo PC (loopback) y un PC con un teléfono Android en la misma LAN para dos jugadores, verificado el 2026-10-14 y el 2026-10-15; Etapa 2 (cambios de capítulo, muertes, salida y reingreso, puntos de control y cinemáticas) verificada con cuatro copias en un mismo PC el 2026-10-16; un teléfono y un PC con 0.2.0 entraron al mismo lobby de System Link el 2026-10-16
 - [x] Juego por internet, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): un teléfono con datos móviles se unió a una campaña alojada en un PC a través de puertos abiertos por UPnP, verificado el 2026-10-15; todavía no se probó con un amigo en otro PC fuera de la red
 - [x] Menú de opciones en el juego (Opciones de PC; Opciones del dispositivo en Android) ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): verificado en un PC y en un Galaxy S25 Ultra el 2026-10-16
+- [x] Opciones de calidad del juego: Gráficos > Calidad del juego con perfiles Bajo/Medio/Alto/Personalizado y 24 ajustes del motor del propio juego (sombras, luces, bloom, desenfoque de movimiento, profundidad de campo, oclusión ambiental, destellos, distorsión, calcomanías, niebla, vegetación, nivel de detalle); las 76 claves en [docs/SYSTEM_SETTINGS.md](docs/SYSTEM_SETTINGS.md)
+- [x] Comprobación de actualizaciones en PC y Android (GitHub Releases, como máximo dos veces al día, `gow2_update_check`)
+- [x] Ajustes automáticos para GPU integradas (720p interno, filtrado anisotrópico 2x, sin re-subida de memoria guest por cuadro) para portátiles y consolas portátiles
+- [x] Android: los objetos/efectos blancos del renderizador Vulkan están corregidos (0.2.3); las sombras de objetos son una opción, apagada por defecto en Android
+- [x] VSync espera a la pantalla en D3D12 y el límite de 30 fps se mantiene con VSync apagado (0.2.4)
 - [ ] Horda y Versus por System Link
 - [ ] Android: una compilación del repositorio llega a jugar y se une a la campaña de un PC por System Link, pero todavía no está terminado; cada versión desde la v0.1.2 trae un APK experimental (ver [Android](#android-experimental)). Toda la escena se dibuja desde el 15 de octubre; corre a unos 30 fps durante los primeros minutos desde un arranque en frío y baja a unos 10-12,5 fps cuando el teléfono está caliente ([docs/ANDROID.md](docs/ANDROID.md))
 
@@ -134,7 +139,7 @@ En Windows, el juego consulta GitHub para buscar una nueva versión como máximo
 
 ## Rendimiento
 
-Medido en un Ryzen 9 7900X3D + Radeon RX 7800 XT, Acto 1, `resolution_scale = 2` (1440p interno): unos 90 cuadros presentados por segundo en promedio, 1% bajo en 55, GPU unos 6 ms por cuadro (PresentMon 2.6, captura de 30 s). Estas cifras son cuadros presentados.
+Medido en un Ryzen 9 7900X3D + Radeon RX 7800 XT, Acto 1, `resolution_scale = 2` (1440p interno): unos 90 cuadros presentados por segundo en promedio, 1% bajo en 55, GPU unos 6 ms por cuadro (PresentMon 2.6, captura de 30 s). Estas cifras son cuadros presentados. Para reportes de errores, `gow2_frame_log = true` registra los tiempos de cuadro FRAMESTATS cada 5 s y `d3d12_stats_log = true` registra los contadores D3D12.
 
 ## Mejoras modernas
 
@@ -184,6 +189,10 @@ Ver [BUILDING.md](BUILDING.md). Los scripts principales son `scripts/build.ps1`,
 ## Cómo encontrar las funciones que codegen no detecta
 
 `tools/harvest_hints.py` analiza la imagen descifrada (exportada desde Ghidra con `tools/ghidra/ExportImage.java`) contra una generación de código base sin pistas (`scripts/codegen-baseline.sh`) y emite `hints/harvested.toml`: thunks de ajuste, entradas `.pdata`, punteros de código guardados en `.rdata`/`.data` y direcciones construidas en el código con `lis`+`addi`/`ori`. Las pistas que dividirían una función existente se detectan desde el registro de codegen con `tools/hint_fixpoint.py` y se excluyen mediante `hints/denylist.txt`. Lo que siga faltando se encuentra en tiempo de ejecución con `scripts/run-harvest-loop.sh` (arrancar, leer el FATAL de "unregistered function", añadirlo a `hints/runtime.toml`, recompilar).
+
+## Contribuir
+
+Las contribuciones son bienvenidas mediante pull requests en GitHub, un pull request por función o corrección. Ver [CONTRIBUTING.md](CONTRIBUTING.md) para las reglas. Los errores se reportan en issues con el `gow2_*.log` más reciente adjunto (en Android: Opciones de inicio > Compartir último registro).
 
 ## Créditos
 

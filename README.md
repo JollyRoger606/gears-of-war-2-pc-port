@@ -41,6 +41,11 @@ Leer en español: [README.es.md](README.es.md)
 - [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four copies on one PC (loopback), and a PC with an Android phone on one LAN for two players, verified 2026-10-14 and 2026-10-15; Stage 2 (chapter changes, deaths, leave/rejoin, checkpoints, cinematics) verified with four copies on one PC on 2026-10-16; a phone and a PC on 0.2.0 joined one System Link lobby on 2026-10-16
 - [x] Internet play, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): a phone on mobile data joined a PC-hosted campaign through ports opened by UPnP, verified 2026-10-15; a PC friend outside the network has not been tried yet
 - [x] In-game options menu (PC Options; Device Options on Android) ([docs/PC_OPTIONS.md](docs/PC_OPTIONS.md)): verified on a PC and on a Galaxy S25 Ultra on 2026-10-16
+- [x] Game quality options: Graphics > Game quality with Low/Medium/High/Custom presets and 24 of the game's own engine settings (shadows, lights, bloom, motion blur, depth of field, ambient occlusion, flares, distortion, decals, fog, foliage, level of detail); all 76 keys in [docs/SYSTEM_SETTINGS.md](docs/SYSTEM_SETTINGS.md)
+- [x] Update checker on PC and Android (GitHub Releases, at most twice a day, `gow2_update_check`)
+- [x] Automatic settings for integrated GPUs (720p internal, 2x anisotropic filtering, no per-frame guest memory re-upload) for handhelds and laptops
+- [x] Android: the white objects/effects of the Vulkan renderer are fixed (0.2.3); object shadows are an option, off by default on Android
+- [x] VSync waits for the display on D3D12 and the 30 fps cap holds with VSync off (0.2.4)
 - [ ] System Link Horde and Versus
 - [ ] Android: a build from the repository reaches gameplay and joins a PC's System Link campaign, but is not finished yet; an experimental APK has been attached to every release since v0.1.2 (see [Android](#android-experimental)). The whole scene has drawn since October 15; it runs at about 30 fps for the first minutes from a cool start, falling to about 10-12.5 fps once the phone is warm ([docs/ANDROID.md](docs/ANDROID.md))
 
@@ -134,7 +139,7 @@ On Windows, the game checks GitHub for a new release at most twice a day and sen
 
 ## Performance
 
-Measured on a Ryzen 9 7900X3D + Radeon RX 7800 XT, Act 1, `resolution_scale = 2` (1440p internal): about 90 presented frames per second on average, 1% low 55, GPU about 6 ms per frame (PresentMon 2.6, 30 s capture). These numbers are presented frames.
+Measured on a Ryzen 9 7900X3D + Radeon RX 7800 XT, Act 1, `resolution_scale = 2` (1440p internal): about 90 presented frames per second on average, 1% low 55, GPU about 6 ms per frame (PresentMon 2.6, 30 s capture). These numbers are presented frames. For bug reports, `gow2_frame_log = true` logs FRAMESTATS frame times every 5 s and `d3d12_stats_log = true` logs D3D12 counters.
 
 ## Modern enhancements
 
@@ -184,6 +189,10 @@ See [BUILDING.md](BUILDING.md). The main scripts are `scripts/build.ps1`, `scrip
 ## Finding the functions codegen misses
 
 `tools/harvest_hints.py` scans the decrypted image (exported from Ghidra with `tools/ghidra/ExportImage.java`) against a baseline codegen without hints (`scripts/codegen-baseline.sh`) and emits `hints/harvested.toml`: adjustor thunks, `.pdata` entries, code pointers stored in `.rdata`/`.data` and addresses built in code with `lis`+`addi`/`ori`. Hints that split an existing function are detected from the codegen log by `tools/hint_fixpoint.py` and kept out through `hints/denylist.txt`. Anything still missing is found at runtime by `scripts/run-harvest-loop.sh` (boot, read the "unregistered function" FATAL, add it to `hints/runtime.toml`, rebuild).
+
+## Contributing
+
+Contributions are welcome through pull requests on GitHub, one pull request per feature or fix. See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules. Bug reports go through issues with the newest `gow2_*.log` attached (on Android: Launch options > Share last log).
 
 ## Credits
 
