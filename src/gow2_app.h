@@ -249,6 +249,11 @@ class Gow2App : public rex::ReXApp {
       REXLOG_INFO("gow2 anisotropic_override -> {} ({}, set anisotropic_override in gow2.toml to change)",
                   gpu.integrated ? 2 : 4, gpu.integrated ? "integrated GPU" : "dedicated GPU");
     }
+    // Re-uploading every CPU-written page each frame costs ~180 MB/s of guest uploads; on an
+    // integrated GPU that bandwidth is shared with the CPU (measured: -98 % uploads, +4 % fps).
+    if (gpu.index >= 0 && gpu.integrated && SetIfUnset("clear_memory_page_state", "false")) {
+      REXLOG_INFO("gow2 clear_memory_page_state -> false (integrated GPU, set it in gow2.toml to change)");
+    }
   }
 
   // Coalesced tweaks (mouse look, key prompts) work on a cached copy of the player's own bundles.
@@ -324,6 +329,8 @@ class Gow2App : public rex::ReXApp {
     AddTouchControls(config);
     const bool unlock_fps = rex::cvar::Query<bool>("gow2_unlock_fps");
     if (unlock_fps) SetLaunchDefault("present_android_frame_rate", "0");
+    // Each occlusion query ends the render pass twice; off cut GPU work 6-12 % with no visible change.
+    SetIfUnset("occlusion_query_enable", "false");
     REXLOG_INFO("DISPLAY frame rate hint {} Hz (gow2_unlock_fps {})",
                 rex::cvar::Query<int32_t>("present_android_frame_rate"), unlock_fps);
 #else
