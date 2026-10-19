@@ -64,6 +64,32 @@ run, a fraction of a second for the one or two a normal game moment needs) the o
 Also added: `SLOWPIPE` (a pipeline call over 15 ms on the command thread, with whether it was async, whether it had a pixel
 shader, and the shader hashes) and `SUBMITWAIT` lines in the game log, 200 at most each.
 
+## Measured on real play: the same hospital level, before and after
+
+Both runs: the player at the keyboard, 21:9, ROV path, no upscaler, logging as above. The second run was on the fixed build
+(patch 0024) and 7 minutes long, the first 12.
+
+| | Before the fix | After |
+|---|---|---|
+| Gameplay frames over 40 ms | 126 | 4 |
+| ...worst gameplay frame | 3,945 ms | 63 ms |
+| Time lost to them | about 42 s | about 0.2 s |
+| Gameplay frame time p99.9 | 321 ms | 20.5 ms |
+| Pipelines built during play | 530 | 228 |
+| Frames that built a pipeline | 226, stalling 300 ms or more | 130, median 16.9 ms |
+| System (GPU clocks, other programs, memory) | clean | clean |
+
+The second run was not on a cold cache: the first run had already put its 530 pipelines in the game's storage and the driver cache,
+yet it still built 228 more (parts of the level the first run had not reached), and none of them stalled.
+
+Cost of the fix, as seen in the second run: draws were skipped in 63 episodes (gaps under 0.3 s merged), 18.5 s in all of 420 s, the
+longest 2 s, usually a handful of draws of the 1,700 a frame (up to 75 in one frame): a character, a prop or an effect missing for a
+fraction of a second as it appears. The first run skipped as many draws, hidden inside frames that were frozen anyway.
+
+What is left in the log: a 3 s frame at start-up (the title screen loading), 50-66 ms frames for 5 s at about 7 s (a 20 fps video:
+the analysis tool calls them cpu/game hitches), and 3 frames of 42-49 ms during play with no pipeline built (large texture and
+shared memory uploads at a streaming moment, 28-46 MB in the frame).
+
 ## Not done, and what is next
 
 - The remaining 100 ms frames of the cold run are GPU-bound frames of the 5x scale and a few creations the command thread still does
