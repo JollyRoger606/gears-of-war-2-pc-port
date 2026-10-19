@@ -35,10 +35,14 @@
   "mnk_mode is on), keyboard or controller."
 #else
 #define GOW2_PROMPTS_HELP                                                         \
-  "Menu button prompts: auto (keyboard labels unless a controller is connected at " \
-  "launch), keyboard or controller."
+  "Menu button prompts: auto (keyboard labels while no controller is connected, switching " \
+  "live when one is plugged in or removed), keyboard or controller (both fixed at launch)."
 #endif
 REXCVAR_DEFINE_STRING(gow2_prompts, "auto", "input", GOW2_PROMPTS_HELP);
+REXCVAR_DEFINE_BOOL(gow2_keycaps, true, "input",
+                    "Show keyboard prompts as keycap pictures when the keycap pack is installed "
+                    "(tools/keycaps, scripts/build-keycaps.ps1), else as text such as [Space]. "
+                    "Takes effect on the next start.");
 #undef GOW2_PROMPTS_HELP
 
 REXCVAR_DEFINE_STRING(gow2_system_settings, "", "debug",
@@ -692,9 +696,6 @@ namespace {
 
 #ifdef _WIN32
 bool AnyPhysicalGamepad() {
-  HMODULE m = LoadLibraryW(L"xinput1_4.dll");
-  if (!m) m = LoadLibraryW(L"xinput9_1_0.dll");
-  if (!m) return false;
   struct State {
     DWORD packet;
     WORD buttons;
@@ -702,16 +703,18 @@ bool AnyPhysicalGamepad() {
     SHORT lx, ly, rx, ry;
   };
   using Fn = DWORD(WINAPI*)(DWORD, State*);
-  auto fn = reinterpret_cast<Fn>(GetProcAddress(m, "XInputGetState"));
-  bool any = false;
-  if (fn) {
-    for (DWORD i = 0; i < 4 && !any; ++i) {
-      State s{};
-      any = fn(i, &s) == ERROR_SUCCESS;
-    }
+  // Loaded once and kept: the live prompts poll this about twice a second.
+  static const Fn fn = [] {
+    HMODULE m = LoadLibraryW(L"xinput1_4.dll");
+    if (!m) m = LoadLibraryW(L"xinput9_1_0.dll");
+    return m ? reinterpret_cast<Fn>(GetProcAddress(m, "XInputGetState")) : nullptr;
+  }();
+  if (!fn) return false;
+  for (DWORD i = 0; i < 4; ++i) {
+    State s{};
+    if (fn(i, &s) == ERROR_SUCCESS) return true;
   }
-  FreeLibrary(m);
-  return any;
+  return false;
 }
 #endif
 
@@ -789,10 +792,61 @@ CoalescedOptions CoalescedOptionsFromCvars() {
   o.system_settings = graphics_quality::Compose(android, [](std::string_view id) {
     return rex::cvar::Query<std::string>(id);
   }, REXCVAR_GET(gow2_system_settings));
+  // The live swap (gow2_prompt_swap.cpp) rewrites the strings in memory: leave the bundles alone.
+  if (PromptsFollowController()) return o;
   const std::string mode = REXCVAR_GET(gow2_prompts);
   const bool keyboard = mode == "keyboard" || (mode != "controller" && AutoPromptsUseKeyboard());
   if (!keyboard) return o;
-  o.prompt_labels = {
+  o.prompt_labels = KeyboardPromptLabels();
+  return o;
+}
+
+bool PromptsFollowController() {
+#ifdef _WIN32
+  return REXCVAR_GET(gow2_prompts) != "controller";  // auto follows the pad, keyboard stays put
+#else
+  return false;
+#endif
+}
+
+bool PhysicalGamepadConnected() {
+#ifdef _WIN32
+  return AnyPhysicalGamepad();
+#else
+  return false;
+#endif
+}
+
+std::vector<ControllerFontSet> ReadControllerFontOriginals(const std::filesystem::path& game_root) {
+  std::vector<ControllerFontSet> sets;
+  std::error_code ec;
+  const std::filesystem::path dir = game_root / "GearGame" / "CookedXenon";
+  for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+    const std::string name = it->path().filename().string();
+    if (name.rfind("Coalesced_", 0) != 0 || it->path().extension() != ".bin") continue;
+    std::vector<uint8_t> bytes;
+    std::vector<IniFile> files;
+    if (!ReadAll(it->path(), &bytes) || !Parse(bytes, &files)) continue;
+    ControllerFontSet set;
+    set.locale = LowerA(name.substr(10, name.size() - 14));
+    for (const IniFile& f : files) {
+      if (f.name.find(u"GearGameUI") == std::u16string::npos) continue;
+      for (const Section& s : f.sections) {
+        if (!EqFold(s.name, "ControllerFont")) continue;
+        for (const Entry& e : s.entries) {
+          std::string key;
+          for (char16_t c : e.key) key.push_back(char(c));
+          set.values.emplace_back(std::move(key), e.value);
+        }
+      }
+    }
+    if (!set.values.empty()) sets.push_back(std::move(set));
+  }
+  return sets;
+}
+
+std::vector<std::pair<std::string, std::string>> KeyboardPromptLabels() {
+  return {
       {"Controller_A", KeybindLabel("keybind_a", "Space")},
       {"Controller_B", KeybindLabel("keybind_b", "F,V")},
       {"Controller_X", KeybindLabel("keybind_x", "E")},
@@ -820,7 +874,6 @@ CoalescedOptions CoalescedOptionsFromCvars() {
       {"Controller_UpDown", "[W/S]"},
       {"Controller_UpDownLeftRight", "[WASD]"},
   };
-  return o;
 }
 
 }  // namespace rex::glue

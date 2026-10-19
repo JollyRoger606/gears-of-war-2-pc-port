@@ -22,6 +22,7 @@
 #include "gow2_coalesced.h"
 #include "gow2_audio_volume.h"
 #include "gow2_native_keys.h"
+#include "gow2_prompt_swap.h"
 #include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
 #include "gow2_frame_stats.h"
@@ -341,6 +342,9 @@ class Gow2App : public rex::ReXApp {
 #endif
     rex::glue::PrepareNativeMouseAim();
     PrepareCoalesced();
+#ifdef _WIN32
+    rex::glue::PrepareKeycapPack();
+#endif
     PickRenderGpu();
     SetUpscaleTarget();
     rex::glue::EnableSystemLinkForCoop();
@@ -470,6 +474,9 @@ class Gow2App : public rex::ReXApp {
     rex::glue::InstallNativeKeys(window());
     rex::glue::InstallAudioVolume();
     rex::glue::InstallFrameStats();
+#ifdef _WIN32
+    rex::glue::InstallPromptSwap(game_data_root_);
+#endif
 #if defined(__ANDROID__)
     rex::glue::ApplySustainedPerformanceMode();
 #endif

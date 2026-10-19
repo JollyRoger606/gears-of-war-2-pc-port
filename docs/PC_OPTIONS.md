@@ -168,6 +168,7 @@ inventory, every preset value, scope of verification, and the bundle size rule.
 | Invert mouse Y | `gow2_mouse_invert_y` | on, off | now | both |
 | Aim assist with the mouse | `gow2_mouse_aim_assist` | on, off | now | both |
 | Button prompts | `gow2_prompts` | automatic, keyboard, controller | restart | both |
+| Keycap pictures | `gow2_keycaps` | on, off | restart | Windows |
 | Controller look dead zone | `pad_right_stick_deadzone` | 0 ... 0.9 | now | both |
 | Key bindings | opens the page below | | now | both |
 | Controller layout | info | in the game's own Options | now | both |
