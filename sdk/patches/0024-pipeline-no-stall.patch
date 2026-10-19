@@ -1,5 +1,4 @@
 diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
-index 8e6b854..b90c8f8 100644
 --- a/src/graphics/d3d12/pipeline_cache.cpp
 +++ b/src/graphics/d3d12/pipeline_cache.cpp
 @@ -14,6 +14,7 @@
@@ -10,10 +9,11 @@ index 8e6b854..b90c8f8 100644
  #include <cmath>
  #include <cstring>
  #include <deque>
-@@ -59,6 +60,14 @@ REXCVAR_DEFINE_INT32(d3d12_pipeline_creation_threads, -1, "GPU/D3D12",
+@@ -58,6 +59,14 @@
+                      "Number of pipeline creation threads (-1 for auto)")
      .range(-1, 32)
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
- 
++
 +REXCVAR_DEFINE_BOOL(d3d12_pipeline_wait_at_submission_end, false, "GPU/D3D12",
 +                    "Make the command thread create the queued pipelines itself and wait for all of them at the "
 +                    "end of every submission (the original behaviour: a frame that needs a new, heavy pipeline "
@@ -21,11 +21,10 @@ index 8e6b854..b90c8f8 100644
 +                    "in the background; draws that need a pipeline that is not ready are skipped until it is "
 +                    "(async_shader_compilation).")
 +    .lifecycle(rex::cvar::Lifecycle::kHotReload);
-+
+ 
  REXCVAR_DEFINE_BOOL(d3d12_tessellation_wireframe, false, "GPU/D3D12",
                      "Render tessellation as wireframe");
- 
-@@ -762,7 +771,18 @@ void PipelineCache::EndSubmission() {
+@@ -762,7 +771,18 @@
      shader_storage_file_flush_needed_ = false;
      pipeline_storage_file_flush_needed_ = false;
    }
@@ -45,7 +44,7 @@ index 8e6b854..b90c8f8 100644
      CreateQueuedPipelinesOnProcessorThread();
      // Await creation of all queued pipelines.
      bool await_creation_completion_event;
-@@ -909,8 +929,29 @@ bool PipelineCache::ConfigurePipeline(
+@@ -909,8 +929,29 @@
    assert_not_null(pipeline_handle_out);
    assert_not_null(root_signature_out);
  
@@ -77,7 +76,7 @@ index 8e6b854..b90c8f8 100644
  
    // Ensure shaders are translated - needed now for GetCurrentStateDescription.
    // Edge flags are not supported yet (because polygon primitives are not).
-@@ -928,6 +969,7 @@ bool PipelineCache::ConfigurePipeline(
+@@ -928,6 +969,7 @@
    if (!vertex_shader->is_translated() && !use_async) {
      std::lock_guard<std::mutex> lock(translation_request_lock_);
      if (!vertex_shader->is_translated()) {
@@ -85,7 +84,7 @@ index 8e6b854..b90c8f8 100644
        if (!TranslateAnalyzedShader(*shader_translator_, *vertex_shader, dxbc_converter_, dxc_utils_,
                                     dxc_compiler_)) {
          REXGPU_ERROR("Failed to translate the vertex shader!");
-@@ -954,6 +996,7 @@ bool PipelineCache::ConfigurePipeline(
+@@ -954,6 +996,7 @@
      if (!pixel_shader->is_translated() && !use_async) {
        std::lock_guard<std::mutex> lock(translation_request_lock_);
        if (!pixel_shader->is_translated()) {
@@ -93,7 +92,7 @@ index 8e6b854..b90c8f8 100644
          pixel_shader->shader().AnalyzeUcode(ucode_disasm_buffer_);
          if (!TranslateAnalyzedShader(*shader_translator_, *pixel_shader, dxbc_converter_,
                                       dxc_utils_, dxc_compiler_)) {
-@@ -1009,6 +1052,7 @@ bool PipelineCache::ConfigurePipeline(
+@@ -1009,6 +1052,7 @@
    }
    PROFILE_PIPELINE_CACHE_MISS();
  
@@ -101,7 +100,7 @@ index 8e6b854..b90c8f8 100644
    Pipeline* new_pipeline = new Pipeline;
    std::memcpy(&new_pipeline->description, &runtime_description, sizeof(runtime_description));
    new_pipeline->root_signature.store(runtime_description.root_signature, std::memory_order_release);
-@@ -1033,6 +1077,7 @@ bool PipelineCache::ConfigurePipeline(
+@@ -1033,6 +1077,7 @@
      }
      creation_request_cond_.notify_one();
    } else {
@@ -109,19 +108,3 @@ index 8e6b854..b90c8f8 100644
      new_pipeline->state.store(CreateD3D12Pipeline(runtime_description), std::memory_order_release);
    }
  
-@@ -1067,6 +1112,7 @@ bool PipelineCache::TranslateAnalyzedShader(DxbcShaderTranslator& translator,
-     REXGPU_ERROR("Shader {:016X} translation failed; marking as ignored", shader.ucode_data_hash());
-     return false;
-   }
-+  perf::Counters().shaders.fetch_add(1, std::memory_order_relaxed);
- 
-   const char* host_shader_type;
-   if (shader.type() == xenos::ShaderType::kVertex) {
-@@ -2678,6 +2724,7 @@ const std::vector<uint32_t>& PipelineCache::GetGeometryShader(GeometryShaderKey
- ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
-     const PipelineRuntimeDescription& runtime_description) {
-   const PipelineDescription& description = runtime_description.description;
-+  perf::Counters().pipelines.fetch_add(1, std::memory_order_relaxed);
- 
-   if (runtime_description.pixel_shader != nullptr) {
-     REXGPU_DEBUG("Creating graphics pipeline with VS {:016X}, PS {:016X}",
