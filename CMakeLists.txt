@@ -147,11 +147,12 @@ add_executable(gow2_options_values_test EXCLUDE_FROM_ALL
 add_executable(gow2_options_actions_test EXCLUDE_FROM_ALL
     tools/tests/options_actions_test.cpp src/gow2_host_line.cpp)
 add_executable(gow2_fps_cap_test EXCLUDE_FROM_ALL tools/tests/fps_cap_test.cpp)
+add_executable(gow2_gpu_pick_test EXCLUDE_FROM_ALL tools/tests/gpu_pick_test.cpp)
 add_executable(gow2_audio_volume_test EXCLUDE_FROM_ALL tools/tests/audio_volume_test.cpp)
 add_executable(gow2_coalesced_text_test EXCLUDE_FROM_ALL tools/tests/coalesced_text_test.cpp)
 foreach(_options_test gow2_toml_edit_test gow2_options_catalog_test gow2_options_model_test
         gow2_options_input_test gow2_options_values_test gow2_options_actions_test gow2_fps_cap_test
-        gow2_audio_volume_test gow2_coalesced_text_test)
+        gow2_audio_volume_test gow2_coalesced_text_test gow2_gpu_pick_test)
     target_include_directories(${_options_test} PRIVATE src)
 endforeach()
 

@@ -15,7 +15,7 @@ class FramePacer {
       last_cap_ = 0;
       return 0;
     }
-    const int64_t period = 1000000000LL / cap;
+    const int64_t period = PeriodNanos(cap);
     if (!has_deadline_ || cap != last_cap_) {
       last_cap_ = cap;
       deadline_ = now_ns + period;
@@ -27,18 +27,17 @@ class FramePacer {
       deadline_ += period;
       return sleep;
     }
-    if (now_ns > deadline_ + period) {
-      // Too far behind to catch up without a burst, so restart the clock.
-      deadline_ = now_ns + period;
-      return 0;
-    }
-    int64_t next = deadline_ + period;
-    if (next < now_ns) next = now_ns;
-    deadline_ = next;
+    deadline_ = now_ns + period;
     return 0;
   }
 
+  void RecordFrameStart(int64_t now_ns) {
+    if (has_deadline_) deadline_ = now_ns + PeriodNanos(last_cap_);
+  }
+
  private:
+  static int64_t PeriodNanos(int cap) { return (1000000000LL + cap - 1) / cap; }
+
   int64_t deadline_ = 0;
   int last_cap_ = 0;
   bool has_deadline_ = false;

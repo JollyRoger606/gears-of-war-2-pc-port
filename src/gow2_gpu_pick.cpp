@@ -1,6 +1,8 @@
 // gow2 - ReXGlue Recompiled Project
 #include "gow2_gpu_pick.h"
 
+#include <optional>
+
 #include <rex/cvar.h>
 
 REXCVAR_DEFINE_STRING(gow2_gpu, "auto", "UI/D3D12",
@@ -93,7 +95,7 @@ std::vector<LUID> HighPerformanceOrder(IDXGIFactory1* factory) {
 }
 
 // D3D12 reports UMA for integrated GPUs even when Windows no longer classifies them as integrated.
-bool IsUmaAdapter(IDXGIFactory1* factory, LUID luid) {
+std::optional<bool> QueryUma(IDXGIFactory1* factory, LUID luid) {
   using CreateDeviceFn = HRESULT(WINAPI*)(IUnknown*, D3D_FEATURE_LEVEL, REFIID, void**);
   static HMODULE d3d12 = LoadLibraryA("d3d12.dll");
   auto create = d3d12 ? reinterpret_cast<CreateDeviceFn>(GetProcAddress(d3d12, "D3D12CreateDevice"))
@@ -101,21 +103,28 @@ bool IsUmaAdapter(IDXGIFactory1* factory, LUID luid) {
   IDXGIFactory4* factory4 = nullptr;
   if (!create ||
       FAILED(factory->QueryInterface(__uuidof(IDXGIFactory4), reinterpret_cast<void**>(&factory4)))) {
-    return false;
+    return std::nullopt;
   }
   IDXGIAdapter1* adapter = nullptr;
   ID3D12Device* device = nullptr;
   D3D12_FEATURE_DATA_ARCHITECTURE arch{};
+  std::optional<bool> uma;
   if (SUCCEEDED(factory4->EnumAdapterByLuid(luid, __uuidof(IDXGIAdapter1),
                                             reinterpret_cast<void**>(&adapter))) &&
       SUCCEEDED(create(adapter, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device),
-                       reinterpret_cast<void**>(&device)))) {
-    device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE, &arch, sizeof(arch));
+                       reinterpret_cast<void**>(&device))) &&
+      SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE, &arch, sizeof(arch)))) {
+    uma = arch.UMA != FALSE;
   }
   if (device) device->Release();
   if (adapter) adapter->Release();
   factory4->Release();
-  return arch.UMA != FALSE;
+  return uma;
+}
+
+bool QueryIntegrated(IDXGIFactory1* factory, const Adapter& adapter) {
+  const std::optional<bool> uma = QueryUma(factory, adapter.luid);
+  return LooksIntegrated(uma.has_value(), uma.value_or(false), uint64_t(adapter.dedicated));
 }
 
 const Adapter* FindByLuid(const std::vector<Adapter>& adapters, LUID luid) {
@@ -159,7 +168,7 @@ GpuChoice ChooseAuto(IDXGIFactory1* factory, const std::vector<Adapter>& adapter
   const std::vector<LUID> order = HighPerformanceOrder(factory);
   for (const LUID& luid : order) {
     const Adapter* a = FindByLuid(adapters, luid);
-    if (a && !IsUmaAdapter(factory, luid)) return ToChoice(a, "first dedicated GPU in Windows' high-performance order");
+    if (a && !QueryUma(factory, luid).value_or(false)) return ToChoice(a, "first dedicated GPU in Windows' high-performance order");
   }
   if (!order.empty()) {
     if (const Adapter* a = FindByLuid(adapters, order.front())) return ToChoice(a, "Windows high-performance GPU");
@@ -183,7 +192,13 @@ GpuChoice ChooseRenderGpu() {
   IDXGIFactory1* factory = CreateFactory();
   if (!factory) return {};
   const std::vector<Adapter> adapters = ListHardwareAdapters(factory);
-  const GpuChoice choice = ChooseFromSetting(factory, adapters, REXCVAR_GET(gow2_gpu));
+  GpuChoice choice = ChooseFromSetting(factory, adapters, REXCVAR_GET(gow2_gpu));
+  for (const Adapter& adapter : adapters) {
+    if (choice.index >= 0 && adapter.index == choice.index) {
+      choice.integrated = QueryIntegrated(factory, adapter);
+      break;
+    }
+  }
   factory->Release();
   return choice;
 }

@@ -48,9 +48,8 @@ void BulkSleepNanos(int64_t nanos) {
     LARGE_INTEGER due;
     due.QuadPart = -(nanos / 100);
     if (due.QuadPart == 0) return;
-    SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
-    WaitForSingleObject(timer, INFINITE);
-    return;
+    if (SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE) &&
+        WaitForSingleObject(timer, INFINITE) == WAIT_OBJECT_0) return;
   }
   const DWORD ms = static_cast<DWORD>(nanos / 1000000);
   if (ms > 0) Sleep(ms);
@@ -64,9 +63,6 @@ void BulkSleepNanos(int64_t nanos) {
 
 void PreciseSleepNanos(int64_t nanos) {
   if (nanos <= 0) return;
-  // A bad clock must not freeze the game.
-  constexpr int64_t kMax = 100000000;
-  if (nanos > kMax) nanos = kMax;
   constexpr int64_t kSpin = 500000;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(nanos);
   if (nanos > kSpin) BulkSleepNanos(nanos - kSpin);
@@ -93,6 +89,7 @@ void FpsCapTick(const PPCContext& ctx, uint8_t* base) {
     REXLOG_INFO("FPSCAP limit {} fps", cap);
   }
   PreciseSleepNanos(pacer.SleepNanos(SteadyNowNanos(), cap));
+  pacer.RecordFrameStart(SteadyNowNanos());
 }
 
 [[maybe_unused]] const bool kFpsCapRegistered = (AddEngineTickListener(&FpsCapTick), true);

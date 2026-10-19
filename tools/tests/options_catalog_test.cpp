@@ -83,6 +83,19 @@ void TestVisibleIf() {
   }
 }
 
+void TestFpsCapHelp() {
+  const options::Setting* cap = options::FindSetting("gow2_fps_cap");
+  const options::Setting* unlock = options::FindSetting("gow2_unlock_fps");
+  Expect(cap != nullptr, "frame rate limit setting exists");
+  Expect(unlock != nullptr, "unlock frame rate setting exists");
+  if (!cap || !unlock) return;
+  Expect(cap->visible_if_id.empty(), "frame rate limit remains visible while locked");
+  Expect(cap->help_en.find(unlock->label_en) != std::string_view::npos,
+         "English limit help names the required unlock setting");
+  Expect(cap->help_es.find(unlock->label_es) != std::string_view::npos,
+         "Spanish limit help names the required unlock setting");
+}
+
 void TestPageTabs() {
   for (const options::Setting& s : options::Catalog()) {
     if (s.page == options::Page::kKeybinds) {
@@ -200,6 +213,7 @@ int main() {
     TestNumbers();
     TestTexts();
     TestVisibleIf();
+    TestFpsCapHelp();
     TestPageTabs();
     TestUiTexts();
     TestPlatformMenuNames();

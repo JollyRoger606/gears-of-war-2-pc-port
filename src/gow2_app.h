@@ -231,10 +231,17 @@ class Gow2App : public rex::ReXApp {
   }
 
   // An explicit d3d12_adapter in gow2.toml or on the command line wins over gow2_gpu.
+  // Off Windows ChooseRenderGpu picks nothing (index -1), so this stays a no-op there.
   static void PickRenderGpu() {
     const rex::glue::GpuChoice gpu = rex::glue::ChooseRenderGpu();
     if (gpu.index >= 0 && SetIfUnset("d3d12_adapter", std::to_string(gpu.index))) {
       REXLOG_INFO("gow2 d3d12_adapter -> {} ({}; {})", gpu.index, gpu.name, gpu.reason);
+    }
+    // Internal resolution follows the GPU unless the player set resolution_scale:
+    // 720p on an integrated GPU, 1440p on a dedicated one.
+    if (gpu.index >= 0 && SetIfUnset("resolution_scale", gpu.integrated ? "1" : "2")) {
+      REXLOG_INFO("gow2 resolution_scale -> {} ({}, set resolution_scale in gow2.toml to change)",
+                  gpu.integrated ? 1 : 2, gpu.integrated ? "integrated GPU" : "dedicated GPU");
     }
   }
 

@@ -31,7 +31,9 @@ fullscreen = true
 # Internal render resolution as a multiple of the game's 1280x720:
 # 1 = 720p (original), 2 = 1440p, 3 = 2160p (4K). Higher values sharpen everything at a GPU
 # cost; resolution fixes below keep the post-processing correct when this is above 1.
-resolution_scale = 2
+# Default is automatic: 2 on a dedicated GPU, 1 on an integrated one. To force a value,
+# uncomment the next line:
+# resolution_scale = 2
 
 # How the final image is scaled to the window: "bilinear" with the stock runtime. Builds made
 # with scripts/build-sdk.ps1 (AMD FidelityFX) also accept "cas", "fsr" (FSR 1 spatial) and the

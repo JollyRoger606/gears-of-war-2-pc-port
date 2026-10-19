@@ -116,8 +116,8 @@ void AddDisplay(std::vector<Setting>& out) {
       .platforms = kAllPlatforms,
       .label_en = "Frame rate limit",
       .label_es = "Límite de FPS",
-      .help_en = "Highest frame rate while the frame rate is unlocked.",
-      .help_es = "FPS máximos cuando el juego está desbloqueado.",
+      .help_en = "Requires Unlock frame rate. Limits game frames; VSync and performance can lower FPS.",
+      .help_es = "Requiere Desbloquear FPS. Limita los cuadros del juego; VSync y el rendimiento pueden bajar los FPS.",
       .choices = {
           C("0", "Off", "Sin límite"),
           V("30"),
@@ -128,9 +128,7 @@ void AddDisplay(std::vector<Setting>& out) {
           V("144"),
           V("165"),
           V("240"),
-      },
-      .visible_if_id = "gow2_unlock_fps",
-      .visible_if_value = "true"});
+      }});
   out.push_back(Setting{
       .id = "present_android_frame_rate",
       .tab = Tab::kDisplay,
@@ -159,9 +157,9 @@ void AddGraphicsUpscaling(std::vector<Setting>& out) {
       .platforms = kAllPlatforms,
       .label_en = "Internal resolution",
       .label_es = "Resolución interna",
-      .help_en = "Resolution the game renders at. Higher is sharper and costs more GPU time.",
+      .help_en = "Resolution the game renders at. Higher is sharper and costs more GPU time. The default is automatic: 1440p on a dedicated GPU, 720p on an integrated one.",
       .help_es =
-          "Resolución a la que se dibuja el juego. Más alta se ve más nítida y cuesta más GPU.",
+          "Resolución a la que se dibuja el juego. Más alta se ve más nítida y cuesta más GPU. El valor por defecto es automático: 1440p con GPU dedicada, 720p con integrada.",
       .choices = {
           C("1", "720p (original)", "720p (original)"),
           C("2", "1440p"),
@@ -1075,7 +1073,7 @@ void AddSystem(std::vector<Setting>& out) {
       .tab = Tab::kSystem,
       .kind = Kind::kAction,
       .apply = Apply::kNow,
-      .platforms = kAndroid,
+      .platforms = kAllPlatforms,
       .label_en = "Quit the game",
       .label_es = "Salir del juego",
       .help_en = "Closes the game; open it again to apply restart options.",
