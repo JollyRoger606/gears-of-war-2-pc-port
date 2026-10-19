@@ -33,6 +33,13 @@ int WidescreenMaxShadowResolution();
 // tangent grows by W / 1280, so the vertical field of view is the one of the 16:9 game.
 double WidescreenHalfFov(double half_fov, int site);
 
+// Dev aid: calls GearAlertManager.MadeProgress(type, id) so the in-game toast scene shows a progress alert.
+std::string DevAlert(const PPCContext& ctx, uint8_t* base, uint32_t type, uint32_t id);
+
+// The first live (not Default__) guest object whose class is exactly class_name and, when scene_only is set,
+// that has a scene client (offset 424), or 0.
+uint32_t FindGuestObject(const uint8_t* base, const char* class_name, bool scene_only);
+
 // A one-paragraph description of the viewport sizes and camera aspect values the game uses now.
 std::string ViewInfo(const PPCContext& ctx, uint8_t* base);
 

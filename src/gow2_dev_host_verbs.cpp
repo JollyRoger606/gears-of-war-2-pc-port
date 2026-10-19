@@ -11,12 +11,14 @@
 #include "gow2_guest.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include <rex/logging.h>
 #include <rex/ppc.h>
+#include <rex/system/achievements.h>
 
 namespace rex::glue::dev_verbs {
 namespace {
@@ -350,6 +352,13 @@ VerbResult CallVerb(const PPCContext& ctx, uint8_t* base, uint32_t engine,
   return Ok(function + " on " + who + " (parameters zero)");
 }
 
+VerbResult AchVerb(const dev_commands::Command& command) {
+  const uint32_t id = command.args.empty() ? 0 : uint32_t(std::strtoul(command.args[0].c_str(), nullptr, 0));
+  const bool unlocked = rex::system::UnlockAchievement(id, true);
+  REXLOG_INFO("DEVCMD ach {} -> {}", id, unlocked ? "unlocked, toast shown" : "not unlocked (already, or unknown)");
+  return Ok(unlocked ? "unlocked " + std::to_string(id) : "not unlocked " + std::to_string(id));
+}
+
 VerbResult MarkVerb(const dev_commands::Command& command) {
   const std::string text = command.args.empty() ? "" : command.args[0];
   REXLOG_INFO("DEVCMD mark {}", text);
@@ -396,6 +405,14 @@ VerbResult RunHostVerb(const PPCContext& ctx, uint8_t* base, uint32_t engine,
   if (verb == "call") return CallVerb(ctx, base, engine, command, false);
   if (verb == "callpawn") return CallVerb(ctx, base, engine, command, true);
   if (verb == "mark") return MarkVerb(command);
+  if (verb == "ach") return AchVerb(command);
+  if (verb == "alert") {
+    const uint32_t type = command.args.size() > 0 ? uint32_t(std::strtoul(command.args[0].c_str(), nullptr, 0)) : 0;
+    const uint32_t id = command.args.size() > 1 ? uint32_t(std::strtoul(command.args[1].c_str(), nullptr, 0)) : 0;
+    const std::string result = rex::glue::DevAlert(ctx, base, type, id);
+    REXLOG_INFO("DEVCMD alert {} {} -> {}", type, id, result);
+    return Ok(result);
+  }
   if (verb == "skipcutscene") return Ok(rex::glue::SkipCutsceneNow(ctx, base));
   if (verb == "viewinfo") return Ok(rex::glue::ViewInfo(ctx, base));
   if (verb == "listmapchanges") return ListMapChanges(ctx, base, engine, command);

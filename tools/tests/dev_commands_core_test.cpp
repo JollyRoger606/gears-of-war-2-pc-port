@@ -284,6 +284,14 @@ void TestParseHostVerbs() {
   Check(shout.text == "god" && shout.args.size() == 1 && shout.args[0] == "off",
         "!GOD P3 OFF normalizes case");
   Check(ParseCommandLine("!god P3 maybe").kind == CommandKind::kError, "!god rejects maybe");
+  const Command ach = ParseCommandLine("!ach 7");
+  Check(ach.kind == CommandKind::kHostVerb && ach.text == "ach", "!ach is a host verb");
+  Check(ach.args.size() == 1 && ach.args[0] == "7", "!ach keeps the id");
+  Check(ParseCommandLine("!ach").kind == CommandKind::kError, "!ach needs an id");
+  const Command alert = ParseCommandLine("!alert 2 1");
+  Check(alert.kind == CommandKind::kHostVerb && alert.text == "alert", "!alert is a host verb");
+  Check(alert.args.size() == 2 && alert.args[0] == "2" && alert.args[1] == "1", "!alert keeps type and id");
+  Check(ParseCommandLine("!alert 2").kind == CommandKind::kError, "!alert needs two numbers");
   Check(ParseCommandLine("!kill").kind == CommandKind::kError, "!kill needs a target");
   Check(ParseCommandLine("!kill P2 extra").kind == CommandKind::kError, "!kill rejects extras");
   const Command bad_call = ParseCommandLine("!call P1 Bad-Name");

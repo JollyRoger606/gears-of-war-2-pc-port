@@ -20,6 +20,7 @@
 
 #include "gow2_dev_commands.h"
 #include "gow2_dev_guest_calls.h"
+#include "gow2_engine_tick.h"
 #include "gow2_guest.h"
 #include "gow2_widescreen_math.h"
 
@@ -29,6 +30,12 @@ REXCVAR_DEFINE_STRING(gow2_widescreen, "auto", "Display",
                       "field of view is widened to keep the vertical view. Takes effect on the next "
                       "start. Videos and some menus are still 16:9 stretched.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_BOOL(gow2_ui_projection_fix, true, "Display",
+                    "With widescreen on, keep the menus the size they have at 16:9: the game's UI scene client "
+                    "builds its canvas-to-screen projection with a distance that grows with the square of the "
+                    "width, which shrinks every menu to (1280 / width) squared. The distance is put back at the "
+                    "value that gives one canvas pixel one back buffer pixel.");
 
 namespace rex::glue {
 namespace {
@@ -97,6 +104,62 @@ float BE32ToFloat(const std::vector<uint8_t>& v, size_t at) {
 
 }  // namespace
 
+namespace {
+
+float FloatAt(const uint8_t* base, uint32_t addr) { return LoadFloat(base, addr); }
+
+void StoreFloat(uint8_t* base, uint32_t addr, float v) {
+  uint32_t bits;
+  std::memcpy(&bits, &v, 4);
+  guest::StoreU32(base, addr, bits);
+}
+
+// The UI scene client's canvas-to-screen matrix (client + 112): m00 = 1.8182 / aspect and m11 = -1.8182 fix the
+// scale, and the translation row (+160 .. +172) ends with the perspective distance D (+172). A canvas pixel is
+// one pixel on screen when D = |m11| * height / 2 (640 at 704 lines). The game computes D = (width / 2) / m00,
+// which is that only at 1280 wide: at 1680 the whole UI is drawn at 640 / 1102 = 0.58 of its size.
+void FixUiProjectionTick(const PPCContext& ctx, uint8_t* base) {
+  (void)ctx;
+  static uint32_t client = 0;
+  static uint32_t counter = 0;
+  if (WidescreenBackBufferWidth() <= 0 || !REXCVAR_GET(gow2_ui_projection_fix)) return;
+  auto find_client = [&] {
+    const uint32_t objects = guest::LoadU32(base, kGObjObjects);
+    const uint32_t count = guest::LoadU32(base, kGObjObjects + 4);
+    if (objects == 0 || count > kMaxObjects) return;
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t object = guest::LoadU32(base, objects + 4 * i);
+      if (object == 0) continue;
+      if (ClassNameOf(base, object).find("GameUISceneClient") == std::string::npos) continue;
+      if (ObjectName(base, object).rfind("Default__", 0) == 0) continue;
+      client = object;
+      break;
+    }
+  };
+  if (client == 0) {
+    if ((counter++ % 120) != 0) return;
+    (void)guest_call::Guarded(find_client);
+    if (client == 0) return;
+  }
+  auto fix = [&] {
+    const float m00 = FloatAt(base, client + 112), m11 = FloatAt(base, client + 132);
+    const float tz = FloatAt(base, client + 168), tw = FloatAt(base, client + 172);
+    if (!(m00 > 0.01f) || !(m11 < -0.01f)) return;
+    const float wanted = std::fabs(m11) * 0.5f * float(WidescreenBackBufferHeight());
+    if (std::fabs(tw - wanted) < 0.25f) return;
+    StoreFloat(base, client + 172, wanted);
+    StoreFloat(base, client + 168, tz + (wanted - tw));
+    static std::atomic<int> logged{0};
+    if (logged.fetch_add(1) < 6)
+      REXLOG_INFO("WIDESCREEN UI projection distance {:.1f} -> {:.1f} (m00 {:.4f}, m11 {:.4f})", tw, wanted, m00, m11);
+  };
+  (void)guest_call::Guarded(fix);
+}
+
+[[maybe_unused]] const bool kUiTickRegistered = (AddEngineTickListener(&FixUiProjectionTick), true);
+
+}  // namespace
+
 double WidescreenAspect() {
   static const double aspect = widescreen::ParseAspect(REXCVAR_GET(gow2_widescreen), DisplayAspect());
   return aspect;
@@ -147,6 +210,52 @@ double WidescreenHalfFov(double half_fov, int site) {
   return widened;
 }
 
+uint32_t FindGuestObject(const uint8_t* base, const char* class_name, bool scene_only) {
+  uint32_t found = 0;
+  auto walk = [&] {
+    const uint32_t objects = guest::LoadU32(base, kGObjObjects);
+    const uint32_t count = guest::LoadU32(base, kGObjObjects + 4);
+    if (objects == 0 || count > kMaxObjects) return;
+    for (uint32_t i = 0; i < count && found == 0; ++i) {
+      const uint32_t object = guest::LoadU32(base, objects + 4 * i);
+      if (object == 0) continue;
+      if (ClassNameOf(base, object) != class_name) continue;
+      if (ObjectName(base, object).rfind("Default__", 0) == 0) continue;
+      if (scene_only && guest::LoadU32(base, object + 424) == 0) continue;
+      found = object;
+    }
+  };
+  (void)guest_call::Guarded(walk);
+  return found;
+}
+
+std::string DevAlert(const PPCContext& ctx, uint8_t* base, uint32_t type, uint32_t id) {
+  uint32_t manager = 0;
+  auto find = [&] {
+    const uint32_t objects = guest::LoadU32(base, kGObjObjects);
+    const uint32_t count = guest::LoadU32(base, kGObjObjects + 4);
+    if (objects == 0 || count > kMaxObjects) return;
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t object = guest::LoadU32(base, objects + 4 * i);
+      if (object == 0) continue;
+      if (ClassNameOf(base, object) != "GearAlertManager") continue;
+      if (ObjectName(base, object).rfind("Default__", 0) == 0) continue;
+      manager = object;
+    }
+  };
+  if (!guest_call::Guarded(find) || manager == 0) return "no GearAlertManager object";
+  const std::optional<uint64_t> name = guest_call::MakeName(ctx, base, "MadeProgress", false);
+  if (!name) return "no name MadeProgress";
+  const uint32_t fn = guest_call::FindFunction(ctx, base, manager, *name);
+  if (fn == 0) return "no function MadeProgress";
+  std::vector<uint8_t> parms(8, 0);
+  parms[0] = uint8_t(type);
+  parms[4] = uint8_t(id >> 24); parms[5] = uint8_t(id >> 16); parms[6] = uint8_t(id >> 8); parms[7] = uint8_t(id);
+  std::vector<uint8_t> out;
+  const bool ok = guest_call::ProcessEventWithParms(ctx, base, manager, fn, parms, &out, 8);
+  return std::string("MadeProgress ") + (ok ? "called" : "failed");
+}
+
 std::string ViewInfo(const PPCContext& ctx, uint8_t* base) {
   std::string out = "VIEWINFO";
   uint32_t w = 0, h = 0;
@@ -183,6 +292,87 @@ std::string ViewInfo(const PPCContext& ctx, uint8_t* base) {
       std::snprintf(text, sizeof text, " size=%.0fx%.0f", BE32ToFloat(parms_out, 0), BE32ToFloat(parms_out, 4));
       out += text;
     }
+  }
+  // The UI scale natives: where their code is (the UFunction's words that point into the game's code).
+  auto native_ptrs = [&](const char* function_name) {
+    std::string text;
+    auto walk_fn = [&] {
+      const uint32_t objects = guest::LoadU32(base, kGObjObjects);
+      const uint32_t count = guest::LoadU32(base, kGObjObjects + 4);
+      if (objects == 0 || count > kMaxObjects) return;
+      for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t object = guest::LoadU32(base, objects + 4 * i);
+        if (object == 0) continue;
+        if (ObjectName(base, object).rfind(function_name, 0) != 0) continue;
+        if (ClassNameOf(base, object) != "Function") continue;
+        char t[64];
+        std::snprintf(t, sizeof t, " %s@%08X:", function_name, object);
+        text += t;
+        for (uint32_t off = 56; off < 200; off += 4) {
+          const uint32_t w = guest::LoadU32(base, object + off);
+          if (w >= 0x82000000 && w < 0x83000000) {
+            std::snprintf(t, sizeof t, " +%u=%08X", off, w);
+            text += t;
+          }
+        }
+      }
+    };
+    (void)guest_call::Guarded(walk_fn);
+    return text;
+  };
+  out += " | natives:" + native_ptrs("GetAspectRatioAutoScaleFactor") + native_ptrs("GetViewportSize") + native_ptrs("GetCanvasToScreen") + native_ptrs("CanvasToScreen") + native_ptrs("GetAutoScaleValue") + native_ptrs("SetAutoScaling");
+  // UI scenes: the viewport size a scene hands to its widgets (UIScreenObject::GetViewportSize reads two floats
+  // at +1104 / +1108 of the scene).
+  {
+    std::string scenes;
+    auto walk_scenes = [&] {
+      const uint32_t objects = guest::LoadU32(base, kGObjObjects);
+      const uint32_t count = guest::LoadU32(base, kGObjObjects + 4);
+      if (objects == 0 || count > kMaxObjects) return;
+      int shown = 0;
+      for (uint32_t i = 0; i < count && shown < 8; ++i) {
+        const uint32_t object = guest::LoadU32(base, objects + 4 * i);
+        if (object == 0) continue;
+        const std::string cls = ClassNameOf(base, object);
+        if (cls.find("UIScene") == std::string::npos && cls.find("SceneClient") == std::string::npos) continue;
+        const std::string name = ObjectName(base, object);
+        if (name.rfind("Default__", 0) == 0) continue;
+        if (guest::LoadU32(base, object + 424) == 0) continue;  // not set up (no scene client): not on screen
+        char t[200];
+        std::snprintf(t, sizeof t, " [%s %s %.1fx%.1f|%u,%u]", cls.c_str(), name.c_str(),
+                      LoadFloat(base, object + 1104), LoadFloat(base, object + 1108),
+                      guest::LoadU32(base, object + 1104), guest::LoadU32(base, object + 1108));
+        scenes += t;
+        ++shown;
+      }
+    };
+    (void)guest_call::Guarded(walk_scenes);
+    out += " | ui scenes:" + scenes;
+    // Debug aid: the raw words of every active scene and scene client, one UIDUMP line each, to compare two runs.
+    auto dump_objects = [&] {
+      const uint32_t objects = guest::LoadU32(base, kGObjObjects);
+      const uint32_t count = guest::LoadU32(base, kGObjObjects + 4);
+      if (objects == 0 || count > kMaxObjects) return;
+      for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t object = guest::LoadU32(base, objects + 4 * i);
+        if (object == 0) continue;
+        const std::string cls = ClassNameOf(base, object);
+        const bool client = cls.find("UISceneClient") != std::string::npos;
+        const bool scene = cls.find("UIScene") != std::string::npos;
+        if (!client && !scene) continue;
+        const std::string name = ObjectName(base, object);
+        if (name.rfind("Default__", 0) == 0) continue;
+        if (!client && scene && guest::LoadU32(base, object + 424) == 0) continue;
+        std::string hex;
+        char t[16];
+        for (uint32_t off = 0; off < 0xA00; off += 4) {
+          std::snprintf(t, sizeof t, "%08X", guest::LoadU32(base, object + off));
+          hex += t;
+        }
+        REXLOG_INFO("UIDUMP {} {} {}", cls, name, hex);
+      }
+    };
+    (void)guest_call::Guarded(dump_objects);
   }
   out += " | fov sites:";
   for (int i = 1; i < 8; ++i) {

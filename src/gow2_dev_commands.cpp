@@ -108,20 +108,22 @@ Target ParseTargetToken(std::string_view token) {
 bool IsKnownVerb(std::string_view verb) {
   return verb == "list" || verb == "selftest" || verb == "listmapchanges" || verb == "god" ||
          verb == "kill" || verb == "call" || verb == "callpawn" || verb == "mapchange" ||
-         verb == "mapcommit" || verb == "mark" || verb == "skipcutscene" || verb == "viewinfo";
+         verb == "mapcommit" || verb == "mark" || verb == "ach" || verb == "alert" || verb == "skipcutscene" || verb == "viewinfo";
 }
 
 bool ArityOk(std::string_view verb, size_t nargs) {
   if (verb == "mark") return true;
   if (verb == "mapchange" || verb == "mapcommit") return nargs <= 1;
-  if (verb == "kill") return nargs == 1;
+  if (verb == "alert") return nargs == 2;
+  if (verb == "kill" || verb == "ach") return nargs == 1;
   if (verb == "god" || verb == "call" || verb == "callpawn") return nargs == 2;
   return nargs == 0;
 }
 
 std::string_view ArityText(std::string_view verb) {
   if (verb == "mapchange" || verb == "mapcommit") return "0 or 1";
-  if (verb == "kill") return "1";
+  if (verb == "alert") return "2";
+  if (verb == "kill" || verb == "ach") return "1";
   if (verb == "god" || verb == "call" || verb == "callpawn") return "2";
   return "0";
 }
@@ -211,6 +213,8 @@ Command ParseHostVerb(std::string_view trimmed) {
   Command out;
   out.kind = CommandKind::kHostVerb;
   out.text = verb;
+  if (verb == "ach") out.args.push_back(tokens[1]);
+  if (verb == "alert") { out.args.push_back(tokens[1]); out.args.push_back(tokens[2]); }
   return out;
 }
 

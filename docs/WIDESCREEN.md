@@ -86,10 +86,32 @@ The pixel count grows by 31 %, the GPU time by about 14 %, and the game stays at
 `gpu_ms.p50` as WORSE (its threshold is 10 %) and 0.5-1.0 hitches per minute in outdoor_assault; the frame pacing
 itself did not change.
 
+## Menus and the unlock toast (found after the first release)
+
+**Menus were drawn at (1280 / width) squared of their size** (0.58 at 1680 wide) in the main menu, the pause menu and the
+title screen. The game's UI scene client (`GearGameUISceneClient`) keeps a canvas-to-screen matrix at offset 112:
+`m00 = 1.8182 / aspect`, `m11 = -1.8182`, and a perspective distance D in the last word of its translation row (+172).
+For a canvas pixel to be one screen pixel D must be `|m11| * height / 2` (640 at 704 lines). The game computes
+`D = (width / 2) / m00`, which is that only at 1280 wide, so at 1680 wide everything shrank by the square of 1280 / 1680.
+`src/gow2_widescreen.cpp` (`FixUiProjectionTick`, an engine tick listener) puts D back, and the matching depth word,
+whenever the game rewrites them. `gow2_ui_projection_fix = false` turns it off. Measured with the pause menu's line
+pitch at five widths (47, 42, 37 and 27 px at 1280, 1360, 1440 and 1680, matching `47 * (1280 / width)^2`).
+
+**The unlock toast stayed on screen.** The in-game "NEW ITEM UNLOCKED" panel (`GearUIScene_Toast`) plays a slide-in, hold and
+slide-out animation whose positions are pixels of the 1280-wide design; at 1680 wide the slide-out ends at x = 1280, still
+on screen, so the panel stays until the next toast. `src/gow2_toast.cpp` keeps it for `gow2_toast_seconds` (default 3, a
+0.4 s fade at the end) and then hides the scene through its opacity until the next toast; 0 keeps the game's own timing.
+At 16:9 it also shortens the toast (about 7 seconds before). In ultrawide the panel still sits at x = 1280 instead of the
+right edge. Reproduce with the dev verb `!alert 2 1` (see docs/TEST_TOOLING.md); `!ach <id>` shows the host's own
+"Achievement Unlocked" overlay, which was checked and times out normally (4.5 s).
+
+Still wrong at 1680 wide: some full-screen effects cover only the first 1280 pixels, with a hard edge: the pause menu's grey
+dimming of the picture (the right 24 % stays in colour) and a dark band at the top of the title screen.
+
 ## What does not work, or was not checked
 
 - **Videos** (Games for Windows logos, pre-rendered cutscenes) are 16:9 and are shown as they are.
-- **HUD and menus.** The title screen looked right. The in-game HUD (ammo, health) did not show in my
+- **HUD and menus.** The title screen, main menu and pause menu are checked (see above). The in-game HUD (ammo, health) did not show in my
   captures, and the pause menu was not captured at 21:9, so their placement is **not verified**. I have not looked at where they land.
 - **Wider than 1680.** Held at 1680 (see above); not tested.
 - **Shadows** are lower resolution (480 px instead of 800 px) while widescreen is on.

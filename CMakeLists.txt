@@ -66,6 +66,7 @@ set(GOW2_SOURCES
     src/gow2_native_keys.cpp
     src/gow2_skip_cutscene.cpp
     src/gow2_widescreen.cpp
+    src/gow2_toast.cpp
     src/gow2_atlas_image.cpp
     src/gow2_prompt_swap.cpp
 )
