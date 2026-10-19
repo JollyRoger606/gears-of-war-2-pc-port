@@ -37,6 +37,7 @@ Leer en español: [README.es.md](README.es.md)
 - [x] Mouse aim through the game's own PC mouse axes, with no stick dead zone (`gow2_mouse_aim`, on by default)
 - [x] FSR 4 and FSR 3.1 temporal upscaling (`gow2_temporal`, `gow2_upscaler`; off by default). The release has no DLSS
 - [ ] Keyboard keys handled as on a PC (they still pass through an emulated controller)
+- [x] Ultrawide: a really wider picture (Hor+) instead of 16:9 with bars, up to 1680 pixels wide (`gow2_widescreen`, see [docs/WIDESCREEN.md](docs/WIDESCREEN.md)); needs the ROV render target path (NVIDIA and Intel by default)
 - [ ] Full campaign play-through
 - [x] System Link campaign co-op for up to four players (`gow2_coop_players`, off by default): four copies on one PC (loopback), and a PC with an Android phone on one LAN for two players, verified 2026-10-14 and 2026-10-15; Stage 2 (chapter changes, deaths, leave/rejoin, checkpoints, cinematics) verified with four copies on one PC on 2026-10-16; a phone and a PC on 0.2.0 joined one System Link lobby on 2026-10-16
 - [x] Internet play, experimental (`net_peers`, `net_public_address`, `net_allow_peers`): a phone on mobile data joined a PC-hosted campaign through ports opened by UPnP, verified 2026-10-15; a PC friend outside the network has not been tried yet

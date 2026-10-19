@@ -20,6 +20,7 @@
 #include <rex/system.h>
 
 #include "gow2_coalesced.h"
+#include "gow2_widescreen.h"
 #include "gow2_audio_volume.h"
 #include "gow2_coop_network.h"
 #include "gow2_crash_watch.h"
@@ -337,6 +338,7 @@ class Gow2App : public rex::ReXApp {
     SetIfUnset("mnk_mode", "true");
 #endif
     rex::glue::PrepareNativeMouseAim();
+    rex::glue::PrepareWidescreen();
     PrepareCoalesced();
     PickRenderGpu();
     SetUpscaleTarget();
