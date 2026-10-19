@@ -492,7 +492,9 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   }
   if (edits.empty()) return res;
 
-  uint64_t h = Fnv("v" + std::to_string(kVersion));
+  // The build date is part of the stamp: a cached copy made by an older build (before an edit was fixed or
+  // added) is never trusted by a newer one, even when the edit list looks the same.
+  uint64_t h = Fnv("v" + std::to_string(kVersion) + " " + __DATE__ + " " + __TIME__);
   for (const Edit& e : edits)
     h = Fnv(e.file + "|" + e.section + "|" + e.key + "|" + e.value + "|" + e.match + "|" +
                 e.locale + "|" +
