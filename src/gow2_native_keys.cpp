@@ -6,6 +6,7 @@
 #include <windows.h>
 #endif
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -37,8 +38,12 @@
 
 REXCVAR_DEFINE_BOOL(gow2_native_keys, true, "input",
                     "While a level is played, send keys and mouse buttons to the game as keys "
-                    "(its own bindings) instead of through the emulated pad. Menus and the pause "
-                    "menu still use the pad emulation. Takes effect on the next start.");
+                    "(its own bindings) instead of through the emulated pad. Takes effect on the next start.");
+REXCVAR_DEFINE_BOOL(gow2_native_menus, true, "input",
+                    "Menus and the pause menu also take the keyboard as keys, with no emulated pad: arrows, Enter, "
+                    "the mouse buttons and the wheel as themselves, Escape as Back, and the keybind_* keys as the pad "
+                    "buttons the menu scripts read. Off: the emulated pad drives the menus. Needs gow2_native_keys; "
+                    "takes effect on the next start.");
 
 namespace rex::glue {
 namespace {
@@ -63,6 +68,9 @@ std::vector<KeyEvent> g_queue;
 std::atomic<bool> g_installed{false};
 std::atomic<bool> g_active{false};
 std::atomic<bool> g_gameplay{false};  // written by the engine tick, read by the input hook
+bool g_logged_gameplay = false;       // engine tick only
+
+bool MenusWanted() { return rex::cvar::Query<bool>("gow2_native_menus") && NativeKeysWanted(); }
 std::atomic<std::thread::id> g_game_thread{};
 
 void Push(uint16_t vk, bool down) {
@@ -96,9 +104,10 @@ class KeyListener : public rex::ui::WindowInputListener {
       case Button::kX2: vk = 0x06; break;
       default: return;
     }
-    // A click outside the mouse capture (menus, the overlay) is not the game's.
+    // A click outside the mouse capture is the game's only in its own menus (native menus), never in the PC Options overlay.
     rex::ui::Window* window = e.target();
-    if (down && (!window || !window->IsMouseCaptureRequested())) return;
+    const bool in_menu = MenusWanted() && !g_gameplay.load(std::memory_order_acquire) && !HostUiOpen();
+    if (down && !in_menu && (!window || !window->IsMouseCaptureRequested())) return;
     Push(vk, down);
   }
 };
@@ -183,11 +192,67 @@ bool SendKey(Delivery& d, const std::string& engine_name, int event) {
   return SafeCall(d.fn, &call, d.base);
 }
 
+// ---- menus -------------------------------------------------------------------------------------
+// The game's menu scripts read pad button names (Back is XboxTypeS_B, Pause XboxTypeS_Start...), its widgets also take a few
+// real keys through the Engine.UIInputConfiguration aliases (arrows, Enter, left mouse button, Home, End, paging). Keys the widgets
+// already know go as themselves; the others are sent as the pad button their keybind_* setting stands for.
+const char* PadNameForCommand(const std::string& cmd) {
+  static const std::pair<const char*, const char*> kMap[] = {
+      {"GBA_MoveAction", "XboxTypeS_A"},          {"GBA_Melee", "XboxTypeS_B"},
+      {"GBA_Pickup", "XboxTypeS_X"},              {"GBA_POI", "XboxTypeS_Y"},
+      {"GBA_Taccom", "XboxTypeS_LeftShoulder"},   {"GBA_Reload", "XboxTypeS_RightShoulder"},
+      {"GBA_Target", "XboxTypeS_LeftTrigger"},    {"GBA_Shoot", "XboxTypeS_RightTrigger"},
+      {"GBA_Crouch", "XboxTypeS_LeftThumbstick"}, {"GBA_Zoom", "XboxTypeS_RightThumbstick"},
+      {"GBA_Grenades", "XboxTypeS_DPad_Up"},      {"GBA_Weap1", "XboxTypeS_DPad_Right"},
+      {"GBA_Pistols", "XboxTypeS_DPad_Down"},     {"GBA_Weap2", "XboxTypeS_DPad_Left"},
+      {"GBA_Pause", "XboxTypeS_Start"},           {"GBA_Scoreboard", "XboxTypeS_Back"},
+      {"GBA_MoveForward", "Gamepad_LeftStick_Up"},    {"GBA_MoveBackward", "Gamepad_LeftStick_Down"},
+      {"GBA_StrafeLeft", "Gamepad_LeftStick_Left"},   {"GBA_StrafeRight", "Gamepad_LeftStick_Right"},
+      {"GBA_TurnLeft", "Gamepad_RightStick_Left"},    {"GBA_TurnRight", "Gamepad_RightStick_Right"},
+  };
+  for (const auto& [command, pad] : kMap)
+    if (cmd == command) return pad;
+  return nullptr;
+}
+
+// The engine keys sent for a physical key while a menu is up.
+std::vector<std::string> MenuRoutes(uint16_t vk) {
+  std::vector<std::string> out;
+  const char* raw = EngineNameOf(vk);
+  if (!raw) return out;
+  const std::string name = raw;
+  const auto add = [&](const std::string& n) {
+    if (std::find(out.begin(), out.end(), n) == out.end()) out.push_back(n);
+  };
+  static const std::set<std::string> kWidgetKeys = {"Up",  "Down",   "Left",   "Right",     "Home",
+                                                    "End", "PageUp", "PageDown", "Delete", "BackSpace",
+                                                    "MouseScrollUp", "MouseScrollDown"};
+  if (kWidgetKeys.count(name)) {
+    add(name);
+    return out;
+  }
+  // The mouse buttons are the triggers (keybind_left_trigger / keybind_right_trigger), as the prompts of the journal and the
+  // lobbies show them: they go through the keybinds below like any other key.
+  if (name == "Escape") {  // Back
+    add("XboxTypeS_B");
+    return out;
+  }
+  if (name == "Enter") add("Enter");  // widgets click on it; the title screen and Start screens read the pad button below
+  for (const NativeBinding& b : NativeKeyBindings([](const char* n) { return rex::cvar::Query<std::string>(n); }))
+    if (b.key == name && !b.shift && !b.control && !b.alt)
+      if (const char* pad = PadNameForCommand(b.command)) add(pad);
+  if (out.empty() && name != "SpaceBar") add(name);  // text entry and the rest: as itself; Space only as the key bound to A
+  return out;
+}
+
 std::set<uint16_t> g_held;                        // keys the user holds (every mode; game thread)
 std::map<uint16_t, std::vector<std::string>> g_routed;  // physical key -> engine keys sent for it
 std::map<std::string, int> g_down;                // engine key -> physical keys holding it down
 
-bool Held(uint16_t left, uint16_t right) { return g_held.count(left) || g_held.count(right); }
+// The window reports Shift, Ctrl and Alt as one key for both sides (0x10..0x12); the sided codes are kept for other hosts.
+bool Held(uint16_t either, uint16_t left, uint16_t right) {
+  return g_held.count(either) || g_held.count(left) || g_held.count(right);
+}
 
 // The keys the player set in the options now, read when a key goes down so a change made while
 // playing applies at once (the bundle itself keeps the bindings of the start).
@@ -195,11 +260,19 @@ void Press(Delivery& d, uint16_t vk) {
   std::vector<std::string> routes;
   if (const char* name = EngineNameOf(vk)) {
     const auto current = NativeKeyBindings([](const char* n) { return rex::cvar::Query<std::string>(n); });
-    routes = RouteKey(g_baked, current, name, Held(0xA0, 0xA1), Held(0xA2, 0xA3), Held(0xA4, 0xA5));
+    routes = RouteKey(g_baked, current, name, Held(0x10, 0xA0, 0xA1), Held(0x11, 0xA2, 0xA3),
+                      Held(0x12, 0xA4, 0xA5));
   }
   if (const char* name = EngineNameOf(vk); name && (routes.size() != 1 || routes[0] != name))
     REXLOG_INFO("NATIVEKEYS rebound key {} sends {} key(s){}{}", name, routes.size(),
                 routes.empty() ? "" : ": ", routes.empty() ? "" : routes[0]);
+  for (const std::string& name : routes)
+    if (++g_down[name] == 1) SendKey(d, name, kEventPressed);
+  g_routed[vk] = std::move(routes);
+}
+
+void PressMenu(Delivery& d, uint16_t vk) {
+  std::vector<std::string> routes = MenuRoutes(vk);
   for (const std::string& name : routes)
     if (++g_down[name] == 1) SendKey(d, name, kEventPressed);
   g_routed[vk] = std::move(routes);
@@ -232,9 +305,14 @@ void OnProcessInput(PPCContext& ctx, uint8_t* base, uint32_t viewport, double) {
     std::lock_guard<std::mutex> lock(g_queue_mutex);
     events.swap(g_queue);
   }
-  const bool native = g_gameplay.load(std::memory_order_acquire) && !HostUiOpen();
+  const bool gameplay = g_gameplay.load(std::memory_order_acquire) && !HostUiOpen();
+  const bool menus = MenusWanted() && !gameplay && !HostUiOpen();
+  const bool native = gameplay || menus;
   Delivery d{&ctx, base, viewport};
   const bool ready = PrepareDelivery(&d);
+  static bool last_menus = false;
+  if (ready && native && menus != last_menus) ReleaseSent(d);  // held keys are sent again under the other routing below
+  if (native) last_menus = menus;
   for (const KeyEvent& e : events) {
     if (e.vk == kReleaseAll) {
       g_held.clear();
@@ -252,7 +330,7 @@ void OnProcessInput(PPCContext& ctx, uint8_t* base, uint32_t viewport, double) {
     else g_held.erase(e.vk);
     if (!native || !ready) continue;
     if (e.down) {
-      if (!g_routed.count(e.vk)) Press(d, e.vk);
+      if (!g_routed.count(e.vk)) menus ? PressMenu(d, e.vk) : Press(d, e.vk);
     } else {
       Release(d, e.vk);
     }
@@ -261,7 +339,7 @@ void OnProcessInput(PPCContext& ctx, uint8_t* base, uint32_t viewport, double) {
   if (native) {
     // Entering native mode with keys already held: the game learns of them now.
     for (uint16_t vk : g_held)
-      if (!g_routed.count(vk)) Press(d, vk);
+      if (!g_routed.count(vk)) menus ? PressMenu(d, vk) : Press(d, vk);
   } else if (!g_routed.empty()) {
     ReleaseSent(d);
   }
@@ -315,13 +393,16 @@ void GateTick(const PPCContext& ctx, uint8_t* base) {
         *r->out = GameplayNow(*r->a->first, r->a->second);
       },
       &run);
-  const bool was = g_gameplay.exchange(gameplay, std::memory_order_acq_rel);
-  if (was == gameplay) return;
-  // The pad emulation and the native path never run together.
-  (void)rex::cvar::SetFlagByName("mnk_keys", gameplay ? "false" : "true");
-  g_active.store(gameplay, std::memory_order_release);
-  REXLOG_INFO("NATIVEKEYS {}", gameplay ? "on (gameplay): keys go to the game as keys"
-                                        : "off: the pad emulation takes the keys");
+  g_gameplay.store(gameplay, std::memory_order_release);
+  // The pad emulation and the native path never run together: with native menus the pad emulation stays off for good.
+  const bool native = gameplay || MenusWanted();
+  if (native == g_active.load(std::memory_order_acquire) && gameplay == g_logged_gameplay) return;
+  g_logged_gameplay = gameplay;
+  (void)rex::cvar::SetFlagByName("mnk_keys", native ? "false" : "true");
+  g_active.store(native, std::memory_order_release);
+  REXLOG_INFO("NATIVEKEYS {}", native ? (gameplay ? "on (gameplay): keys go to the game as keys"
+                                                  : "on (menus): keys go to the game as keys, no emulated pad")
+                                      : "off: the pad emulation takes the keys");
 }
 
 [[maybe_unused]] const bool kGateRegistered = (AddEngineTickListener(&GateTick), true);
@@ -332,7 +413,9 @@ bool NativeKeysWanted() {
   return rex::cvar::Query<bool>("gow2_native_keys") && NativeMouseAimInstalled();
 }
 
+
 bool NativeKeysActive() { return g_active.load(std::memory_order_acquire); }
+
 
 void RememberBakedBindings(std::vector<NativeBinding> bindings) { g_baked = std::move(bindings); }
 

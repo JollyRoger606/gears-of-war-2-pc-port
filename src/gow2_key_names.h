@@ -18,6 +18,9 @@ const char* EngineNameForVk(uint16_t vk);
 // {"LeftShift", "RightShift"}. Empty for names the game has no key for (PrintScreen, F13...).
 std::vector<std::string> EngineNamesForBind(std::string_view sdk_name);
 
+// Every engine key name a keybind_* value can stand for, once each ("SpaceBar", "LeftShift", "LeftMouseButton"...).
+std::vector<std::string> AllBindableEngineNames();
+
 // One alternative of a keybind_* value with its modifier prefixes ("Shift+Up").
 struct Chord {
   std::vector<std::string> engine_names;  // the key itself

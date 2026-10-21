@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Santiago Quiroz Upegui and the gow2-recomp contributors
 #include "gow2_key_names.h"
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 
@@ -26,6 +27,7 @@ constexpr Named kFixed[] = {
     {0x24, "Home"}, {0x25, "Left"}, {0x26, "Up"}, {0x27, "Right"}, {0x28, "Down"},
     {0x2D, "Insert"}, {0x2E, "Delete"}, {0x6A, "Multiply"}, {0x6B, "Add"}, {0x6D, "Subtract"},
     {0x6E, "Decimal"}, {0x6F, "Divide"}, {0x90, "NumLock"}, {0x91, "ScrollLock"},
+    {0x10, "LeftShift"}, {0x11, "LeftControl"}, {0x12, "LeftAlt"},  // the window reports one key for both sides
     {0xA0, "LeftShift"}, {0xA1, "RightShift"}, {0xA2, "LeftControl"}, {0xA3, "RightControl"},
     {0xA4, "LeftAlt"}, {0xA5, "RightAlt"}, {0xBA, "Semicolon"}, {0xBB, "Equals"},
     {0xBC, "Comma"}, {0xBD, "Underscore"}, {0xBE, "Period"}, {0xBF, "Slash"}, {0xC0, "Tilde"},
@@ -119,6 +121,14 @@ const char* EngineNameForVk(uint16_t vk) {
 std::vector<std::string> EngineNamesForBind(std::string_view sdk_name) {
   const auto it = BindTable().find(sdk_name);
   return it == BindTable().end() ? std::vector<std::string>{} : it->second;
+}
+
+std::vector<std::string> AllBindableEngineNames() {
+  std::vector<std::string> out;
+  for (const auto& entry : BindTable())
+    for (const std::string& name : entry.second)
+      if (std::find(out.begin(), out.end(), name) == out.end()) out.push_back(name);
+  return out;
 }
 
 std::vector<Chord> ParseChords(std::string_view value) {

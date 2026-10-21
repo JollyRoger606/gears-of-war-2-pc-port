@@ -6,6 +6,7 @@
 
 #include "gow2_mouse_aim.h"
 #include "gow2_host_ui.h"
+#include "gow2_mouse_feel.h"
 
 #if !defined(__ANDROID__)
 #include <windows.h>
@@ -35,6 +36,25 @@ REXCVAR_DEFINE_DOUBLE(gow2_mouse_scale, 1.0, "input", "Multiplier on native mous
 REXCVAR_DEFINE_BOOL(gow2_mouse_invert_y, false, "input", "Invert native mouse-look Y.");
 REXCVAR_DEFINE_BOOL(gow2_mouse_aim_assist, false, "input",
                     "Keep the game's aim friction/adhesion for the native mouse too.");
+REXCVAR_DEFINE_STRING(gow2_mouse_feel, "off", "input",
+                      "Mouse weight for the native mouse look: off, light, original, heavy or custom (the gow2_mouse_smoothing_ms, "
+                      "_curve, _curve_ref, _max_speed and _y_scale settings). Original and heavy give the lag and the slow-start "
+                      "response of a stick turning the camera; see docs/MOUSE_FEEL.md.")
+    .allowed({"off", "light", "original", "heavy", "custom"});
+REXCVAR_DEFINE_DOUBLE(gow2_mouse_smoothing_ms, 0.0, "input",
+                      "Custom mouse feel: time constant in milliseconds of the lag the view follows the hand with (0 = none).")
+    .range(0, 300);
+REXCVAR_DEFINE_DOUBLE(gow2_mouse_curve, 1.0, "input",
+                      "Custom mouse feel: response exponent. Above 1 slow movements are damped and fast ones amplified; 1 is linear.")
+    .range(0.5, 2.5);
+REXCVAR_DEFINE_DOUBLE(gow2_mouse_curve_ref, 1500.0, "input",
+                      "Custom mouse feel: mouse speed in counts per second where the curve's gain is 1.")
+    .range(100, 10000);
+REXCVAR_DEFINE_DOUBLE(gow2_mouse_max_speed, 0.0, "input",
+                      "Custom mouse feel: the most counts per second the view may turn by (0 = no limit), so a flick cannot whip it round.")
+    .range(0, 100000);
+REXCVAR_DEFINE_DOUBLE(gow2_mouse_y_scale, 1.0, "input", "Custom mouse feel: vertical movement as a share of horizontal.")
+    .range(0.3, 2);
 REXCVAR_DEFINE_BOOL(gow2_mouse_aim_log, false, "input",
                     "Log native mouse-look stats once per second while the mouse is used.");
 
@@ -260,10 +280,38 @@ void MaybeLogMouseAim(AxisSent sent) {
   window_start = now;
 }
 
+mousefeel::Params FeelParams() {
+  mousefeel::Params p;
+  if (mousefeel::Preset(REXCVAR_GET(gow2_mouse_feel), p)) return p;
+  p.smoothing_ms = REXCVAR_GET(gow2_mouse_smoothing_ms);
+  p.curve = REXCVAR_GET(gow2_mouse_curve);
+  p.curve_ref = REXCVAR_GET(gow2_mouse_curve_ref);
+  p.max_speed = REXCVAR_GET(gow2_mouse_max_speed);
+  p.y_scale = REXCVAR_GET(gow2_mouse_y_scale);
+  return p;
+}
+
+// The counts after the mouse feel: the curve, the lag and the speed cap run here, once per input step, on real time.
+MouseCounts ShapeMouse(MouseCounts counts) {
+  static mousefeel::State state;
+  static int64_t last_tick = 0;
+  const int64_t now = SteadyTicksNow();
+  const double dt = last_tick == 0 ? 0.016 : std::chrono::duration<double>(std::chrono::steady_clock::duration(now - last_tick)).count();
+  last_tick = now;
+  const mousefeel::Params params = FeelParams();
+  // Menus and the pause screen own the mouse: what is still in the reservoir must not drift into them.
+  if (mousefeel::Neutral(params) || HostUiOpen() || !rex::input::mnk::IsMouseLookActive()) {
+    state = {};
+    return counts;
+  }
+  const mousefeel::Out out = mousefeel::Step(params, state, counts.dx, counts.dy, dt);
+  return {out.dx, out.dy};
+}
+
 void ProcessInputHook(PPCContext& ctx, uint8_t* base) {
   const double delta_time = ctx.f1.f64;
   const uint32_t viewport = ctx.r3.u32;
-  const MouseCounts counts = DrainMouseBank();
+  const MouseCounts counts = ShapeMouse(DrainMouseBank());
   AxisSent sent;
   if (!HostUiOpen() && (counts.dx != 0 || counts.dy != 0) && viewport != 0)
     sent = InjectMouseLook(ctx, base, viewport, counts, delta_time);
@@ -327,7 +375,17 @@ bool NativeMouseAimWanted() {
 }
 
 void PrepareNativeMouseAim() {
-  if (!NativeMouseAimWanted()) return;
+  if (!NativeMouseAimWanted()) {
+    bool registered = false;
+    for (const rex::cvar::FlagEntry& entry : rex::cvar::GetRegistry())
+      if (entry.name == "mnk_mouse_stick") registered = true;
+    REXLOG_INFO("MOUSEAIM native mouse look not wanted: gow2_mouse_aim={} mnk_mode={} (source {}) mnk_mouse={} (source {}) "
+                "mnk_mouse_stick registered={} gow2_fps_cap source {}",
+                REXCVAR_GET(gow2_mouse_aim), rex::cvar::Query<bool>("mnk_mode"), int(rex::cvar::GetFlagSource("mnk_mode")),
+                rex::cvar::Query<bool>("mnk_mouse"), int(rex::cvar::GetFlagSource("mnk_mouse")), registered,
+                int(rex::cvar::GetFlagSource("gow2_fps_cap")));
+    return;
+  }
   rex::cvar::SetFlagByName("mnk_mouse_stick", "false");
 }
 

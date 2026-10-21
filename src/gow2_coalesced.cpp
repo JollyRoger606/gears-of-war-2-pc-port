@@ -5,6 +5,7 @@
 #include "gow2_coalesced_text.h"
 #include "gow2_graphics_quality.h"
 #include "gow2_native_bindings.h"
+#include "gow2_key_names.h"
 
 #include "gow2_mouse_aim.h"
 
@@ -406,7 +407,13 @@ void AddNativeKeys(std::vector<Edit>* e, const CoalescedOptions& o) {
   for (const char* section : {"Editor.EditorViewportInput", "UnrealEd.ObjectEditorViewportInput",
                               "Engine.DebugCameraInput"})
     e->push_back({Edit::kRemove, kFile, section, "Bindings", "", "", "", false, false});
-  for (const std::string& key : NativeBindingKeys(o.native_bindings))
+  // Every key a keybind can name loses the game's own binding, not only the keys bound now: the options change the
+  // bindings while the game runs, and a key that is unbound by then (Space after A moved to Shift) must do nothing instead
+  // of falling back to the retail binding (SpaceBar = GBA_MoveAction, LeftShift = Walking). The console key stays.
+  std::vector<std::string> keys = NativeBindingKeys(o.native_bindings);
+  for (const std::string& key : keynames::AllBindableEngineNames())
+    if (key != "Tilde" && std::find(keys.begin(), keys.end(), key) == keys.end()) keys.push_back(key);
+  for (const std::string& key : keys)
     e->push_back({Edit::kRemove, kFile, "Engine.PlayerInput", "Bindings",
                   "(Name=\"" + key + "\",", "", "", false, false});
   for (const NativeBinding& b : o.native_bindings)

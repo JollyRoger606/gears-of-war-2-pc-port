@@ -87,6 +87,14 @@ mnk_mode = true
 # gow2_native_keys = true
 mnk_mouse = true
 mnk_sensitivity = 1.0
+# Mouse weight for the native mouse look: off, light, original, heavy or custom (docs/MOUSE_FEEL.md). Also in PC Options > Controls.
+# gow2_mouse_feel = "off"
+# With "custom": lag in ms, response exponent, its reference speed (counts/s), speed cap (counts/s, 0 = none), vertical share.
+# gow2_mouse_smoothing_ms = 0
+# gow2_mouse_curve = 1.0
+# gow2_mouse_curve_ref = 1500
+# gow2_mouse_max_speed = 0
+# gow2_mouse_y_scale = 1.0
 
 # Menu button prompts: "auto" shows keyboard labels unless a controller is connected at
 # launch, "keyboard" always shows them, "controller" keeps the Xbox button art.

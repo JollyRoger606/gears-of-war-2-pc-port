@@ -541,6 +541,38 @@ void AddControls(std::vector<Setting>& out) {
       .decimals = 2,
       .unit = "x"});
   out.push_back(Setting{
+      .id = "gow2_native_menus",
+      .tab = Tab::kControls,
+      .kind = Kind::kToggle,
+      .apply = Apply::kRestart,
+      .platforms = kWindows,
+      .label_en = "Keyboard in menus",
+      .label_es = "Teclado en los menús",
+      .help_en = "The menus take the keyboard as keys (arrows, Enter, mouse buttons; Escape is Back) instead of through an "
+                 "emulated controller. Off: the emulated controller drives the menus.",
+      .help_es = "Los menús reciben el teclado como teclas (flechas, Enter, botones del mouse; Escape es Atrás) en vez de "
+                 "un mando emulado. Apagado: un mando emulado maneja los menús."});
+  out.push_back(Setting{
+      .id = "gow2_mouse_feel",
+      .tab = Tab::kControls,
+      .kind = Kind::kChoice,
+      .apply = Apply::kNow,
+      .platforms = kAllPlatforms,
+      .need = Need::kNativeMouse,
+      .label_en = "Mouse feel",
+      .label_es = "Sensación del mouse",
+      .help_en = "Weight of the mouse look. Light adds a little lag; Original and Heavy also damp slow movements and "
+                 "amplify fast ones, like a stick turning the camera. Custom uses the gow2_mouse_* settings of gow2.toml.",
+      .help_es = "Peso del mouse. Ligero añade un poco de retraso; Original y Pesado además suavizan los movimientos "
+                 "lentos y amplifican los rápidos, como un stick que gira la cámara. Personalizado usa los gow2_mouse_* de gow2.toml.",
+      .choices = {
+          C("off", "Off (raw)", "Apagado (directo)"),
+          C("light", "Light", "Ligero"),
+          C("original", "Original", "Original"),
+          C("heavy", "Heavy", "Pesado"),
+          C("custom", "Custom (gow2.toml)", "Personalizado (gow2.toml)"),
+      }});
+  out.push_back(Setting{
       .id = "mnk_sensitivity",
       .tab = Tab::kControls,
       .kind = Kind::kNumber,

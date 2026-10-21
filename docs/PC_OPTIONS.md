@@ -167,6 +167,8 @@ inventory, every preset value, scope of verification, and the bundle size rule.
 | Mouse sensitivity | `gow2_mouse_scale` or `mnk_sensitivity` | 0.05x ... 10x | now | both |
 | Invert mouse Y | `gow2_mouse_invert_y` | on, off | now | both |
 | Aim assist with the mouse | `gow2_mouse_aim_assist` | on, off | now | both |
+| Mouse feel | `gow2_mouse_feel` | off, light, original, heavy, custom | now | both |
+| Keyboard in menus | `gow2_native_menus` | on, off | restart | Windows |
 | Button prompts | `gow2_prompts` | automatic, keyboard, controller | restart | both |
 | Controller look dead zone | `pad_right_stick_deadzone` | 0 ... 0.9 | now | both |
 | Key bindings | opens the page below | | now | both |

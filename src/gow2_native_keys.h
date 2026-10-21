@@ -4,8 +4,9 @@
 // Options menu), key and mouse-button events go to the engine as the keys they are
 // (UGameViewportClient::InputKey with "SpaceBar", "W", "LeftMouseButton"...), where the bindings
 // that src/gow2_native_bindings.cpp adds to the game's Xe-GearInput.ini turn them into the game's
-// commands. Menus, the pause menu and cutscenes keep the runtime's pad emulation (SDK patch 0022
-// switches it off only while the native path is on), because the game's menus read pad keys.
+// commands. With gow2_native_menus (default) the menus and the pause menu use the native path too, with no emulated pad
+// (SDK patch 0022 switches it off): keys the menu widgets know go as themselves, Escape as Back, and the others as the pad
+// button their keybind_* setting stands for, because the game's menu scripts read pad button names (see MenuRoutes).
 #pragma once
 
 #include <vector>
