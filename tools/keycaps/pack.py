@@ -43,6 +43,13 @@ LINE_HEIGHT = 26          # every cell of the retail font is 26 tall
 FORBIDDEN = {ord(c) for c in "<>&\\"} | {160, 173}  # markup characters, no-break space, soft hyphen
 
 
+# Icons of the retail font that no string or script scan finds (the UI scenes draw them from packages that are
+# compressed), so their cells are not handed to a keycap: the new-item marker [!] of the War Journal (45), the check
+# mark (103), the rank chevrons and wings of the multiplayer screens (68-75) and the thin placeholder (91) the Horde lobby
+# draws in its empty player slots.
+KEEP_ICONS = {45, 91, 103} | set(range(68, 76))
+
+
 def load_info() -> dict:
     with open(os.path.join(HERE, "font_info.json"), encoding="utf-8") as f:
         return json.load(f)
@@ -51,6 +58,7 @@ def load_info() -> dict:
 def protected_chars(info: dict) -> set[int]:
     prot = {int(c) for c in info["used_in_bundles"]} | {int(c) for c in info["used_in_scripts"]}
     prot |= set(info["art"]["1"])  # page 1 holds the progress spinner; it has no strings to scan
+    prot |= KEEP_ICONS
     return prot
 
 
@@ -104,6 +112,28 @@ def _try_layout(info, prot, order, catalog, cell_h, chars):
     return placed
 
 
+def blank_cells(info: dict, prot: set[int], placed: list, patched: set[int]) -> list:
+    """The characters that keep their retail cell without being protected or getting a keycap (space, tab, the no-break space
+    and a few placeholders) are still drawn by the game, inside the button font's runs, and their retail cell is
+    free space the keycaps are packed into: they would show a sliver of a key. They are pointed at a blank part of
+    the pages instead, of their own size, so they take their width and draw nothing."""
+    occ = Occupancy(info, prot)
+    for pl in placed:
+        occ.take(pl["page"], pl["u"], pl["v"], pl["w"], pl["h"])
+    out = []
+    for c, (u, v, us, vs, tex, vo) in enumerate(info["cells"]):
+        if not (us and vs) or c in prot or c in patched or c == 38:  # 38 (&) starts markup entities: never in a string
+            continue
+        spot = occ.find(us, vs)
+        if spot is None:
+            raise SystemExit(f"no blank room for character {c}")
+        page, bu, bv = spot
+        occ.take(page, bu, bv, us, vs)
+        out.append({"id": f"_blank{c}", "char": c, "page": page, "u": bu, "v": bv, "w": us, "h": vs, "vo": vo,
+                    "art_w": 0, "art_h": 0})
+    return out
+
+
 def layout(info: dict, entries: list, cell_h: int, attempts: int = 400):
     import random
 
@@ -125,6 +155,7 @@ def layout(info: dict, entries: list, cell_h: int, attempts: int = 400):
     for i, order in enumerate(orders):
         placed = _try_layout(info, prot, order, catalog, cell_h, chars)
         if placed:
+            placed += blank_cells(info, prot, placed, set(chars.values()))
             placed.sort(key=lambda p: p["char"])
             used_area = sum(p["w"] * p["h"] for p in placed)
             print(f"{len(placed)} glyphs, cell height {cell_h}: {used_area} of {2 * PAGE * PAGE} px, "
@@ -187,6 +218,8 @@ def build_pages(info: dict, placed: list, prot: set[int], dump: str, scale: int,
             big = _premul_resize(cell, ((u2 - u) * scale, (v2 - v) * scale))
             pages[p].paste(big, (u * scale, v * scale))
     for pl in placed:
+        if pl["id"].startswith("_blank"):
+            continue
         key = catalog[pl["id"]]
         art = raster(key, catalog, pl["art_w"] * scale, pl["art_h"] * scale)
         pages[pl["page"]].alpha_composite(art, (pl["u"] * scale + scale // 2, pl["v"] * scale + scale // 2))
@@ -244,7 +277,8 @@ def write_include(info: dict, placed: list, path: str, cell_h: int) -> None:
         "constexpr KeyChar kKeyChars[] = {",
     ]
     for p in sorted(placed, key=lambda p: p["id"]):
-        lines.append(f"    {{\"{p['id']}\", u'\\x{p['char']:04x}'}},")
+        if not p["id"].startswith("_blank"):
+            lines.append(f"    {{\"{p['id']}\", u'\\x{p['char']:04x}'}},")
     import atlas as atlas_tool
 
     ai = atlas_tool.load_info()

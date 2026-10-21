@@ -3,6 +3,7 @@
 #include "gow2_prompt_swap.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -59,6 +60,10 @@ struct State {
   std::string applied_signature;
   int pending = -1;  // a reading seen once, not yet confirmed
   int atlas_slot = -1;  // the variant folder the tutorial pictograms were last composed into
+  // The font's character table (found by PatchFontCells) and the retail cell records of the pad glyphs that are repointed
+  // while keycaps show (six words each). Game thread and worker, one after the other.
+  uint32_t font_table = 0, font_stride = 0;
+  std::map<char16_t, std::array<uint32_t, 6>> glyph_originals;
 };
 
 State& S() {
@@ -182,6 +187,8 @@ bool PatchFontCells(uint8_t* base) {
     return false;
   }
   const auto& t = tables[0];
+  S().font_table = t.table;
+  S().font_stride = t.stride;
   for (const keycap::Cell& c : keycap::kCells) StoreCell(base, t.table + uint32_t(c.ch) * t.stride, c);
   REXLOG_INFO("PROMPTS keycaps: {} cells patched into the font table at 0x{:08X}",
               sizeof(keycap::kCells) / sizeof(keycap::kCells[0]), t.table);
@@ -236,6 +243,52 @@ char16_t MarkupGlyph(const std::u16string& markup) {
   const size_t close = markup.rfind(u'<');
   if (tag == std::u16string::npos || close == std::u16string::npos || close != tag + 2) return 0;
   return markup[tag + 1];
+}
+
+// The characters between the font tags of a [ControllerFont] value ("<Fonts:...>\\><Fonts:/>" -> "\\>").
+std::u16string GlyphsOf(const std::u16string& markup) {
+  const std::u16string open = keycap::Markup(u"");
+  const size_t tag = open.find(u'>') + 1;
+  const size_t close = open.size() - tag;
+  if (markup.size() <= tag + close || markup.compare(0, tag, open, 0, tag) != 0) return {};
+  return markup.substr(tag, markup.size() - tag - close);
+}
+
+// A pad glyph can be spelled out in places the strings of the bundle do not reach (the script of the lobby draws the X of
+// "X DIFFICULTY" itself). While keycaps show, the cell of each such glyph is pointed at the cap of the button it stands for
+// (the last character of a glyph; the filler characters before it get an empty cell, so the cap stands alone); with a
+// controller the retail cells come back.
+void ApplyGlyphCells(uint8_t* base, bool keycaps, const std::map<std::string, keycap::Prompt>& caps) {
+  State& s = S();
+  if (!s.font_table || s.font_stride < 24) return;
+  const auto record = [&](char16_t ch) { return s.font_table + uint32_t(ch) * s.font_stride; };
+  for (const Slot& slot : s.slots) {
+    const std::u16string glyphs = GlyphsOf(slot.original);
+    if (glyphs.empty()) continue;
+    for (size_t i = 0; i < glyphs.size(); ++i) {
+      const char16_t ch = glyphs[i];
+      if (ch >= 256 || CellFor(ch)) continue;  // a glyph that already holds a keycap is not touched
+      auto original = s.glyph_originals.find(ch);
+      if (original == s.glyph_originals.end()) {
+        std::array<uint32_t, 6> words{};
+        for (int w = 0; w < 6; ++w) words[size_t(w)] = guest::LoadU32(base, record(ch) + uint32_t(w * 4));
+        original = s.glyph_originals.emplace(ch, words).first;
+      }
+      const keycap::Cell* cap = nullptr;
+      if (keycaps && i + 1 == glyphs.size()) {
+        const auto it = caps.find(slot.key);
+        const char16_t g = it != caps.end() ? MarkupGlyph(it->second.brief) : 0;
+        cap = g ? CellFor(g) : nullptr;
+      }
+      if (keycaps && cap) {
+        StoreCell(base, record(ch), *cap);
+      } else if (keycaps && i + 1 < glyphs.size()) {
+        StoreCell(base, record(ch), keycap::Cell{ch, 0, 0, 0, 0, 0, 0});
+      } else {
+        for (int w = 0; w < 6; ++w) guest::StoreU32(base, record(ch) + uint32_t(w * 4), original->second[size_t(w)]);
+      }
+    }
+  }
 }
 
 struct PageImages {
@@ -429,6 +482,7 @@ void PromptSwapTick(const PPCContext& ctx, uint8_t* base) {
     Write(base, slot, keyboard ? KeyboardText(slot, caps, text) : slot.original);
     ++written;
   }
+  ApplyGlyphCells(base, keyboard && s.keycaps, caps);
   s.applied = keyboard;
   s.applied_signature = signature;
   if (keyboard && s.keycaps && VariantPresent()) {
@@ -447,6 +501,8 @@ void PromptSwapTick(const PPCContext& ctx, uint8_t* base) {
 [[maybe_unused]] const bool kPromptSwapRegistered = (AddEngineTickListener(&PromptSwapTick), true);
 
 }  // namespace
+
+bool KeycapPackFilesReady() { return KeycapFilesPresent(); }
 
 void PrepareKeycapPack() {
   if (!PromptsFollowController() || (!KeycapFilesPresent() && !VariantPresent())) return;

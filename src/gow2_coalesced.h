@@ -35,6 +35,9 @@ struct CoalescedOptions {
   // Key = a name in [ControllerFont] of GearGameUI ("Controller_A"), value = the label shown
   // ("[Space]"). Empty means "leave the pad glyphs alone".
   std::vector<std::pair<std::string, std::string>> prompt_labels;
+  // Key = a name in [ControllerFont] ("Controller_Start"), value = the keycap markup that replaces that button's glyph
+  // wherever other strings of the game spell it out ("Press START (<glyph>)"). Empty leaves those strings alone.
+  std::vector<std::pair<std::string, std::string>> glyph_keycaps;
   // Key = a name in [SystemSettings] of Xe-GearEngine.ini ("AmbientOcclusion"), value = its new
   // value ("False"). Empty means "leave the game's settings alone".
   std::vector<std::pair<std::string, std::string>> system_settings;

@@ -13,5 +13,7 @@ namespace rex::glue {
 void InstallPromptSwap(const std::filesystem::path& game_root);
 // Turns the texture pack on when the keycap pages are installed. Call before the runtime starts.
 void PrepareKeycapPack();
+// The keycap pages of the pack are installed for this build's layout (needs no running game).
+bool KeycapPackFilesReady();
 
 }  // namespace rex::glue

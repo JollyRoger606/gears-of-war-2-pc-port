@@ -6,6 +6,8 @@
 #include "gow2_graphics_quality.h"
 #include "gow2_native_bindings.h"
 #include "gow2_key_names.h"
+#include "gow2_keycaps.h"
+#include "gow2_prompt_swap.h"
 
 #include "gow2_mouse_aim.h"
 
@@ -357,7 +359,9 @@ bool ReadAll(const std::filesystem::path& p, std::vector<uint8_t>* out) {
 }
 
 struct Edit {
-  enum Kind { kSet, kReplaceSub, kAppend, kRemove } kind;
+  // kGlyphRuns: every string outside [ControllerFont] that spells out a button's glyph run gets the keycap; value =
+  // "key<U+0002>markup" items joined by U+0001, the glyph runs themselves are read from the bundle's [ControllerFont].
+  enum Kind { kSet, kReplaceSub, kAppend, kRemove, kGlyphRuns } kind;
   std::string file;     // file name suffix inside the bundle
   std::string section;  // section name
   std::string key;      // kSet and kAppend: the key; kReplaceSub: a key prefix; kRemove: the key
@@ -435,6 +439,16 @@ void AddPrompts(std::vector<Edit>* e, const CoalescedOptions& o) {
     e->push_back({Edit::kSet, kUI, "ControllerFont", kv.first, kv.second});
 }
 
+// Optional: a replacement is never longer than the glyph run it stands for, but a bundle that still does not fit drops it.
+void AddGlyphKeycaps(std::vector<Edit>* e, const CoalescedOptions& o) {
+  std::string items;
+  for (const auto& kv : o.glyph_keycaps) {
+    if (!items.empty()) items += '\x01';
+    items += kv.first + '\x02' + kv.second;
+  }
+  e->push_back({Edit::kGlyphRuns, "", "", "", items, "", "", true, false});
+}
+
 void AddSystemSettings(std::vector<Edit>* e, const CoalescedOptions& o) {
   for (const auto& kv : o.system_settings)
     e->push_back({Edit::kSet, "Xe-GearEngine.ini", "SystemSettings", kv.first, kv.second, "", "", false, false, true});
@@ -448,6 +462,60 @@ uint64_t Fnv(const std::string& s, uint64_t h = 1469598103934665603ull) {
   return h;
 }
 
+// The glyph runs the bundle's [ControllerFont] defines ("<Fonts:...>\\><Fonts:/>" for Start) are replaced, in every other section,
+// by the keycap markup of the same button. One pass over each value, so a replacement is never read again.
+int ApplyGlyphRuns(std::vector<IniFile>* files, const std::string& items) {
+  std::vector<std::pair<std::u16string, std::u16string>> runs;  // original run, keycap markup
+  size_t start = 0;
+  while (start < items.size()) {
+    const size_t end = std::min(items.find('\x01', start), items.size());
+    const std::string item = items.substr(start, end - start);
+    const size_t sep = item.find('\x02');
+    start = end + 1;
+    if (sep == std::string::npos) continue;
+    const std::string key = item.substr(0, sep);
+    for (const IniFile& f : *files)
+      for (const Section& s : f.sections) {
+        if (!EqFold(s.name, "ControllerFont")) continue;
+        for (const Entry& en : s.entries)
+          if (EqFold(en.key, key) && !en.value.empty()) runs.emplace_back(en.value, W(item.substr(sep + 1)));
+      }
+  }
+  if (runs.empty()) return 0;
+  int changed = 0;
+  for (IniFile& f : *files) {
+    for (Section& s : f.sections) {
+      if (EqFold(s.name, "ControllerFont")) continue;
+      for (Entry& en : s.entries) {
+        if (en.value.find(u"<Fonts:") == std::u16string::npos) continue;
+        std::u16string out;
+        bool hit = false;
+        for (size_t i = 0; i < en.value.size();) {
+          const std::pair<std::u16string, std::u16string>* best = nullptr;
+          for (const auto& r : runs)
+            if (en.value.compare(i, r.first.size(), r.first) == 0 && (!best || r.first.size() > best->first.size())) best = &r;
+          if (best && best->second.size() <= best->first.size()) {
+            // A keycap is wider than the glyph it replaces: inside brackets it gets a space on each side, or the bracket
+            // is drawn under it.
+            if (!out.empty() && out.back() == u'(') out.push_back(u' ');
+            out += best->second;
+            i += best->first.size();
+            if (i < en.value.size() && en.value[i] == u')') out.append(u"   ");
+            hit = true;
+          } else {
+            out.push_back(en.value[i++]);
+          }
+        }
+        if (hit) {
+          en.value = std::move(out);
+          ++changed;
+        }
+      }
+    }
+  }
+  return changed;
+}
+
 int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std::u16string& locale,
           bool include_optional = true, bool include_pc_options_entry = true,
           bool include_system_settings = true) {
@@ -457,6 +525,10 @@ int Apply(std::vector<IniFile>* files, const std::vector<Edit>& edits, const std
     if (ed.pc_options_entry && !include_pc_options_entry) continue;
     if (ed.system_settings && !include_system_settings) continue;
     if (!ed.locale.empty() && !EqFold(locale, ed.locale)) continue;
+    if (ed.kind == Edit::kGlyphRuns) {
+      changed += ApplyGlyphRuns(files, ed.value);
+      continue;
+    }
     for (IniFile& f : *files) {
       if (!FileMatches(f.name, ed.file, locale)) continue;
       for (Section& s : f.sections) {
@@ -554,6 +626,10 @@ CoalescedResult PrepareCoalescedOverrides(const std::filesystem::path& game_root
   if (!options.prompt_labels.empty()) {
     AddPrompts(&edits, options);
     groups += "key-prompts ";
+  }
+  if (!options.glyph_keycaps.empty()) {
+    AddGlyphKeycaps(&edits, options);
+    groups += "glyph-keycaps ";
   }
   if (options.pc_options_entry) {
     AddPcOptionsEntry(&edits);
@@ -799,8 +875,34 @@ CoalescedOptions CoalescedOptionsFromCvars() {
   o.system_settings = graphics_quality::Compose(android, [](std::string_view id) {
     return rex::cvar::Query<std::string>(id);
   }, REXCVAR_GET(gow2_system_settings));
-  // The live swap (gow2_prompt_swap.cpp) rewrites the strings in memory: leave the bundles alone.
-  if (PromptsFollowController()) return o;
+  // The live swap (gow2_prompt_swap.cpp) rewrites the [ControllerFont] strings in memory and leaves those alone. Strings that
+  // spell a glyph out ("Press START (<glyph>)") are read when their screen opens, so with no controller at the start they
+  // are written with the keycaps here.
+  if (PromptsFollowController()) {
+    const std::string live_mode = REXCVAR_GET(gow2_prompts);
+    if ((live_mode == "keyboard" || !PhysicalGamepadConnected()) && KeycapPackFilesReady()) {
+      const auto get = [](const char* name) { return rex::cvar::Query<std::string>(name); };
+      for (const std::string& key : keycap::ControllerKeys()) {
+        const keycap::Prompt p = keycap::PromptFor(key, get);
+        if (p.brief.empty()) continue;
+        std::string utf8;  // the markup is BMP only
+        for (char16_t c : p.brief) {
+          if (c < 0x80) {
+            utf8.push_back(char(c));
+          } else if (c < 0x800) {
+            utf8.push_back(char(0xC0 | (c >> 6)));
+            utf8.push_back(char(0x80 | (c & 0x3F)));
+          } else {
+            utf8.push_back(char(0xE0 | (c >> 12)));
+            utf8.push_back(char(0x80 | ((c >> 6) & 0x3F)));
+            utf8.push_back(char(0x80 | (c & 0x3F)));
+          }
+        }
+        o.glyph_keycaps.emplace_back(key, std::move(utf8));
+      }
+    }
+    return o;
+  }
   const std::string mode = REXCVAR_GET(gow2_prompts);
   const bool keyboard = mode == "keyboard" || (mode != "controller" && AutoPromptsUseKeyboard());
   if (!keyboard) return o;
